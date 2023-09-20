@@ -1,5 +1,9 @@
+from .agent_args import AgentArgs
 from .agent import Agent
+
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import gymnasium as gym
+import torch
 
 # TODO: randomly change prompt and information that is provided as a form of domain randomization. You can have 
 # gpt-4 do this to avoid needing manual effort to come up with the prompts
@@ -14,13 +18,16 @@ class FrozenLake:
         self.timestamp = 0
         self.done = False
 
+        self.prompt_prefix = "<|im_start|>"
+        self.prompt_suffix = "<|im_end|>"
         self.env_description = ''.join([
-            'You are an intelligent human playing a video game where you must avoid walking into any holes while',
-            ' traveling over the frozen lake to find the goal. You can safely move onto floor tiles but cannot move through walls. You ',
-            ' are able to see both the goal and any holes from one tile away. The faster you reach the goal the better.'
+            'I am OrcaPhi. The following is my internal dialogue as an intelligent AI agent.',
+            'I am playing a video game where I must avoid walking into any holes while',
+            ' traveling over a frozen lake to find the goal tile. I can safely move onto floor tiles but cannot move through walls. I ',
+            ' am able to see both the goal and any holes from one tile away. The faster I reach the goal the better.'
         ])
         if self.is_slippery:
-            self.env_description += ' You may move perpendicular to the intended direction sometimes due to the slippery nature of the frozen lake.'
+            self.env_description += ' Due to the slippery nature of the frozen lake, I may accidentally move perpendicular to the direction I intend to move sometimes '
 
         self.action_space = {
             0: 'West',
@@ -29,26 +36,47 @@ class FrozenLake:
             3: 'North'
         }
         
-        self.agent = Agent(verbose=True)
+        model_path = "Open-Orca/oo-phi-1_5"
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        llm = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16
+        ).to(device)
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16
+        )
 
+        agent_args = AgentArgs.builder() \
+            .with_llm(llm) \
+            .with_tokenizer(tokenizer) \
+            .build()
+        self.agent = Agent(agent_args)
+
+    # TODO: decouple system prompt, user prompt, assistant prompt. create a helper file shared across envs
     def thought_prompt_factory(self, observation_stream, thought_stream):
         return '\n'.join([
-            f'### Human:',
+            self.prompt_prefix + 'system',
             self.env_description,
-            f'Your observations: {observation_stream}',
-            f'Past thoughts: {thought_stream}',
-            f'Action space: {self.action_space}',
-            f'Briefly choose which action you will take. You cannot do nothing.',
-            '\n### Assistant:\n'
+            f'My observations: {observation_stream}',
+            f'My past thoughts: {thought_stream}',
+            f'Possible Actions: {self.action_space}' + self.prompt_suffix,
+            self.prompt_prefix + 'user',
+            f'Choose which action you will take.' + self.prompt_suffix,
+            self.prompt_prefix + 'assistant\n'
         ])
 
     def action_prompt_factory(self, thought_stream):
         return '\n'.join([
-            f'### Human:',
-            f'Your plans: {thought_stream}',
-            f'Action space: {self.action_space}',
-            f'What action are you going to take?',
-            '\n### Assistant:\n'
+            self.prompt_prefix + 'system',
+            self.env_description,
+            f'My plans: {thought_stream}',
+            f'Possible Actions: {self.action_space}' + self.prompt_suffix,
+            self.prompt_prefix + 'user',
+            f'What action are you going to take?' + self.prompt_suffix,
+            self.prompt_prefix + 'assistant',
             'I will take action "'
         ])
 

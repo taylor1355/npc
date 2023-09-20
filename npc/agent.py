@@ -1,14 +1,16 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
 class Agent:
-    def __init__(self, verbose=False):
+    def __init__(self, agent_args):
+        self.llm = agent_args.llm
+        self.tokenizer = agent_args.tokenizer
+        self.verbose = agent_args.verbose
+
+        self.device = self.llm.device
         
-        model_path = "TheBloke/Wizard-Vicuna-13B-Uncensored-GPTQ"
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.llm = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float16, device_map="auto").to(self.device)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        
+        # TODO: create pytorch modules for actor and critic heads. They should both be MLPs which take the <cls> token embedding or similar as input
+
+
         # TODO: The agent should have a separate instance of a Memory struct for each environment it is currently "playing" (like a video game)
         # This can serve 2 purposes. 1) Easily training the weights of the same agent on multiple very long time horizon environmnents,
         # 2) Allowing "prompt ensembling" in which the same environment generates many slight variations of each prompt or even more extreme
@@ -18,8 +20,6 @@ class Agent:
         self.thought_stream = ''
         self.observation_stream = ''
         
-        self.verbose = verbose
-    
     # TODO: the information passing between the environment and agent is too messy. Maybe package all this stuff into
     # an EnvState struct or something then just unpack that object. Or directly pass the env to the agent
     def update(self, state, reward, timestamp, thought_prompt_factory, state_to_str):
