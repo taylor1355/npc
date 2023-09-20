@@ -62,6 +62,7 @@ class Agent:
             print(prompt)
         input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(self.device)
 
+        # TODO: need to create streaming wrapper around llm, so that generation can stop on the <|im_end|> string
         output = self.llm.generate(inputs=input_ids, temperature=0.75, repetition_penalty=1.25, do_sample=True, max_new_tokens=50)
         thought = self.tokenizer.decode(output[0][input_ids.shape[-1]:])
         self.thought_stream +=  f"{thought} <t={timestamp}> "

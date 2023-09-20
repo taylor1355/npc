@@ -1,5 +1,6 @@
 from .agent_args import AgentArgs
 from .agent import Agent
+from .prompt_util import create_prompt
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import gymnasium as gym
@@ -18,8 +19,6 @@ class FrozenLake:
         self.timestamp = 0
         self.done = False
 
-        self.prompt_prefix = "<|im_start|>"
-        self.prompt_suffix = "<|im_end|>"
         self.env_description = ''.join([
             'I am OrcaPhi. The following is my internal dialogue as an intelligent AI agent.',
             'I am playing a video game where I must avoid walking into any holes while',
@@ -55,29 +54,29 @@ class FrozenLake:
             .build()
         self.agent = Agent(agent_args)
 
-    # TODO: decouple system prompt, user prompt, assistant prompt. create a helper file shared across envs
     def thought_prompt_factory(self, observation_stream, thought_stream):
-        return '\n'.join([
-            self.prompt_prefix + 'system',
+        system_prompt = create_prompt('system', '\n'.join([
             self.env_description,
             f'My observations: {observation_stream}',
             f'My past thoughts: {thought_stream}',
-            f'Possible Actions: {self.action_space}' + self.prompt_suffix,
-            self.prompt_prefix + 'user',
-            f'Choose which action you will take.' + self.prompt_suffix,
-            self.prompt_prefix + 'assistant\n'
+            f'Possible Actions: {self.action_space}'
+        ]))
+        return '\n'.join([
+            system_prompt,
+            create_prompt('user', 'Choose which action you will take.'),
+            create_prompt('assistant', '', terminate=False)
         ])
 
     def action_prompt_factory(self, thought_stream):
-        return '\n'.join([
-            self.prompt_prefix + 'system',
+        system_prompt = create_prompt('system', '\n'.join([
             self.env_description,
             f'My plans: {thought_stream}',
-            f'Possible Actions: {self.action_space}' + self.prompt_suffix,
-            self.prompt_prefix + 'user',
-            f'What action are you going to take?' + self.prompt_suffix,
-            self.prompt_prefix + 'assistant',
-            'I will take action "'
+            f'Possible Actions: {self.action_space}'
+        ]))
+        return '\n'.join([
+            system_prompt,
+            create_prompt('user', 'What action are you going to take?'),
+            create_prompt('assistant', 'I will take action "', terminate=False)
         ])
 
     def describe_tile(self, row, col):
