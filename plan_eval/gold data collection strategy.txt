@@ -1,0 +1,10 @@
+https://arxiv.org/pdf/2310.13671.pdf
+
+Template to fill out to generate a prompt:
+- Environment Description:
+- Possible Actions:
+- Number of thoughts
+
+Design a prompt which will make a coherent and intelligent plan given the template above.
+Design an adversarial prompt which thinks of different ways to make bad plans
+Label the plans (classes are {good, flawed, bad}) using an LLM, then check over the responses manually
