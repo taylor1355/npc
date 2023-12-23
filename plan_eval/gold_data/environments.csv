@@ -1,0 +1,136 @@
+﻿environment_outline,environment_id
+"Environment Description: Grid World
+Positive reward: Reaching the goal state (+10)
+Negative reward: Moving into an obstacle state (-1)
+Agent's observations: Current position in the grid, neighboring tiles
+Possible Actions: North, South, East, West",0
+"Environment Description: Wildlife Sanctuary
+Positive reward: Antelope eating a mushroom (+5)
+Negative reward: Antelope eating a cauliflower (-5)
+Agent's observations: Current state (hunger level, energy level, nearby food sources)
+Possible Actions: Move to a new location, eat a food source, rest",1
+"Environment Description: Inventory Management System
+Positive reward: Successfully fulfilling an order (+10)
+Negative reward: Stockout or excess inventory (-5)
+Agent's observations: Current inventory levels, incoming orders, lead times
+Possible Actions: Order more stock, adjust reorder point, adjust order quantityEnvironment Description: Inventory Management System
+Positive reward: Successfully fulfilling an order (+10)
+Negative reward: Stockout or excess inventory (-5)
+Agent's observations: Current inventory levels, incoming orders, lead times
+Possible Actions: Order more stock, adjust reorder point, adjust order quantity",2
+"Patient Treatment
+Environment Description
+The agent decides treatment for a patient over multiple time steps
+The agent gets -1 reward for worsening patient health, +10 reward for curing illness, +1 reward for improving health
+The agent observes patient vitals, symptoms, test results
+Possible Actions: Prescribe medication A, B, or C, Run test X or Y, Discharge patient",3
+"Environment Description
+The agent plans motion for a robot in 2D space with obstacles
+The agent gets -1 reward for colliding with obstacles and +10 reward for reaching the goal position
+The agent observes distance to obstacles in all directions
+Possible Actions: Move forward, backward, left, right, or stay still",4
+"Environment: Taxi-v3
+Environment Description: A 5x5 grid where the agent is a taxi. There are four designated locations, and the taxi must pick up a passenger at one location and drop them off at another.
+Rewards: The agent receives -1 for each step, and an additional -10 for illegal pick-up and drop-off actions. Successfully dropping off the passenger gives +20 reward.
+Observations: The agent's current position, the passenger's location, and the destination location.
+Possible Actions: The agent can move in four directions (north, south, east, west), pick up a passenger, or drop off a passenger.",5
+"Environment: CartPole
+Environment Description: A pole is attached by an un-actuated joint to a cart, which moves along a frictionless track. The system is controlled by applying a force of +1 or -1 to the cart.
+Rewards: The agent gets a reward of +1 for every timestep the pole remains upright.
+Observations: The agent's observation is a 4D vector with the cart's position and velocity and the pole's angle and angular velocity.
+Possible Actions: The agent can push the cart to the left or right.",6
+"Environment: Mountain Car
+Environment Description: A car is on a one-dimensional track, positioned between two ""mountains"". The goal is to drive up the mountain on the right; however, the car's engine is not strong enough to scale the mountain in a single pass.
+Rewards: The agent gets -1 for each timestep until it reaches the goal.
+Observations: The agent's observation is a 2D vector with the car's position and velocity.
+Possible Actions: The agent can accelerate to the left, coast, or accelerate to the right.Environment: Mountain Car
+Environment Description: A car is on a one-dimensional track, positioned between two ""mountains"". The goal is to drive up the mountain on the right; however, the car's engine is not strong enough to scale the mountain in a single pass.
+Rewards: The agent gets -1 for each timestep until it reaches the goal.
+Observations: The agent's observation is a 2D vector with the car's position and velocity.
+Possible Actions: The agent can accelerate to the left, coast, or accelerate to the right.",7
+"Environment: Blackjack
+Environment Description: A simplified version of the game of blackjack, where the goal is to obtain cards that sum to as near as possible to 21 without going over.
+Rewards: The agent gets +1 for winning the game, 0 for a draw, and -1 for losing.
+Observations: The agent's current sum, the dealer's one showing card, and whether or not the agent has a usable ace.
+Possible Actions: The agent can ""hit"" (ask for another card) or ""stick"" (stop receiving cards).Environment: Blackjack
+Environment Description: A simplified version of the game of blackjack, where the goal is to obtain cards that sum to as near as possible to 21 without going over.
+Rewards: The agent gets +1 for winning the game, 0 for a draw, and -1 for losing.
+Observations: The agent's current sum, the dealer's one showing card, and whether or not the agent has a usable ace.
+Possible Actions: The agent can ""hit"" (ask for another card) or ""stick"" (stop receiving cards).",8
+"Environment: Warehouse Management
+Environment Description: A warehouse with multiple shelves and a robot for moving items. The robot must pick items from specific shelves and deliver them to a shipping area.
+Rewards: The agent gets a positive reward for each item correctly delivered, and a negative reward for each incorrect delivery or collision with obstacles.
+Observations: The agent's current position, the positions of items and obstacles, and the delivery requests.
+Possible Actions: The agent can move in four directions, pick up an item, or drop off an item.Environment: Warehouse Management
+Environment Description: A warehouse with multiple shelves and a robot for moving items. The robot must pick items from specific shelves and deliver them to a shipping area.
+Rewards: The agent gets a positive reward for each item correctly delivered, and a negative reward for each incorrect delivery or collision with obstacles.
+Observations: The agent's current position, the positions of items and obstacles, and the delivery requests.
+Possible Actions: The agent can move in four directions, pick up an item, or drop off an item.",9
+"Environment: Portfolio Management
+Environment Description: A stock market where the agent can buy and sell stocks.
+Rewards: The agent gets a reward equal to the profit or loss it makes from trading.
+Observations: The agent observes the current prices of all stocks and the amount of each stock it currently owns.
+Possible Actions: The agent can buy or sell any amount of any stock.Environment: Portfolio Management
+Environment Description: A stock market where the agent can buy and sell stocks.
+Rewards: The agent gets a reward equal to the profit or loss it makes from trading.
+Observations: The agent observes the current prices of all stocks and the amount of each stock it currently owns.
+Possible Actions: The agent can buy or sell any amount of any stock.",10
+"Environment: Personalized Recommendation
+Environment Description: A platform where users can watch movies. The agent recommends movies to users.
+Rewards: The agent gets a positive reward if a user watches a movie it recommended and a negative reward if a user ignores a recommendation.
+Observations: The agent observes the history of movies each user has watched and their ratings.
+Possible Actions: The agent can recommend any movie to any user.Environment: Personalized Recommendation
+Environment Description: A platform where users can watch movies. The agent recommends movies to users.
+Rewards: The agent gets a positive reward if a user watches a movie it recommended and a negative reward if a user ignores a recommendation.
+Observations: The agent observes the history of movies each user has watched and their ratings.
+Possible Actions: The agent can recommend any movie to any user.",11
+"Environment: Robotic Arm Control
+Environment Description: A robotic arm that can move in three dimensions and grasp objects.
+Rewards: The agent gets a positive reward for each object correctly grasped and placed, and a negative reward for each incorrect grasp or collision.
+Observations: The agent observes the positions of all objects and the current position and orientation of the robotic arm.
+Possible Actions: The agent can move the arm in any direction and open or close the gripper.",12
+"Environment: Smart Home Automation
+Environment Description: A smart home with various connected devices like lights, thermostats, and security systems.
+Rewards: The agent gets a positive reward for each successful action that improves comfort, energy efficiency, or security, and a negative reward for unsuccessful actions or actions that decrease comfort, efficiency, or security.
+Observations: The agent observes the current state of all devices, the time of day, and any specific user requests.
+Possible Actions: The agent can turn each device on or off, adjust the thermostat, activate or deactivate the security system, etc.Environment: Smart Home Automation
+Environment Description: A smart home with various connected devices like lights, thermostats, and security systems.
+Rewards: The agent gets a positive reward for each successful action that improves comfort, energy efficiency, or security, and a negative reward for unsuccessful actions or actions that decrease comfort, efficiency, or security.
+Observations: The agent observes the current state of all devices, the time of day, and any specific user requests.
+Possible Actions: The agent can turn each device on or off, adjust the thermostat, activate or deactivate the security system, etc.",13
+"Environment: Chess
+Environment Description: A chessboard with 64 squares and 32 pieces. The agent controls one set of pieces and must checkmate the opponent's king.
+Rewards: The agent gets a large positive reward for checkmating the opponent's king, a large negative reward for getting checkmated, and smaller rewards or penalties for capturing or losing pieces.
+Observations: The agent observes the positions of all pieces on the board.
+Possible Actions: The agent can move any of its pieces according to the rules of chess.Environment: Chess
+Environment Description: A chessboard with 64 squares and 32 pieces. The agent controls one set of pieces and must checkmate the opponent's king.
+Rewards: The agent gets a large positive reward for checkmating the opponent's king, a large negative reward for getting checkmated, and smaller rewards or penalties for capturing or losing pieces.
+Observations: The agent observes the positions of all pieces on the board.
+Possible Actions: The agent can move any of its pieces according to the rules of chess.",14
+"Environment: Supply Chain Management
+Environment Description: A supply chain with multiple factories, warehouses, and stores. The agent must decide how much to produce, where to store, and where to ship products.
+Rewards: The agent gets a positive reward for each product sold, and a negative reward for each unsold product or unfulfilled demand.
+Observations: The agent observes the current inventory at each location, the current demand at each store, and the current production capacity at each factory.
+Possible Actions: The agent can produce, store, or ship any amount of product at any location.Environment: Supply Chain Management
+Environment Description: A supply chain with multiple factories, warehouses, and stores. The agent must decide how much to produce, where to store, and where to ship products.
+Rewards: The agent gets a positive reward for each product sold, and a negative reward for each unsold product or unfulfilled demand.
+Observations: The agent observes the current inventory at each location, the current demand at each store, and the current production capacity at each factory.
+Possible Actions: The agent can produce, store, or ship any amount of product at any location.",15
+"Environment: Poker
+Environment Description: A game of poker where the agent must bet, call, raise, or fold to maximize its winnings.
+Rewards: The agent gets a reward equal to the money it wins or loses in each hand.
+Observations: The agent observes its own cards, the community cards, the current pot size, and the actions of all other players.
+Possible Actions: The agent can bet, call, raise, or fold.Environment: Poker
+Environment Description: A game of poker where the agent must bet, call, raise, or fold to maximize its winnings.
+Rewards: The agent gets a reward equal to the money it wins or loses in each hand.
+Observations: The agent observes its own cards, the community cards, the current pot size, and the actions of all other players.
+Possible Actions: The agent can bet, call, raise, or fold.",16
+"Environment: Real-Time Strategy Game
+Environment Description: A game map with resources, bases, and units. The agent must gather resources, build a base, create units, and defeat the enemy.
+Rewards: The agent gets a positive reward for each enemy unit defeated and a negative reward for each of its own units defeated. Winning the game gives a large positive reward.
+Observations: The agent observes the positions and types of all units and resources, the current state of its base, and the actions of the enemy.
+Possible Actions: The agent can move units, gather resources, build structures, create units, and attack the enemy.Environment: Real-Time Strategy Game
+Environment Description: A game map with resources, bases, and units. The agent must gather resources, build a base, create units, and defeat the enemy.
+Rewards: The agent gets a positive reward for each enemy unit defeated and a negative reward for each of its own units defeated. Winning the game gives a large positive reward.
+Observations: The agent observes the positions and types of all units and resources, the current state of its base, and the actions of the enemy.
+Possible Actions: The agent can move units, gather resources, build structures, create units, and attack the enemy.",17

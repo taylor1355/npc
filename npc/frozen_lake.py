@@ -1,17 +1,12 @@
-from .agent_args import AgentArgs
-from .agent import Agent
+from .llm_args import LLMArgs
+from .llm_agent import LLMAgent
 from .prompt_util import create_prompt
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import gymnasium as gym
 import torch
 
-# TODO: randomly change prompt and information that is provided as a form of domain randomization. You can have 
-# gpt-4 do this to avoid needing manual effort to come up with the prompts
-# TODO: also let gpt-4 pick random grounding questions such as "Which directions should you avoid because of a hole or wall?"
-# TODO: create a pool of prompt setups then train for a certain number of simulations on each one. Then feed the statistics to
-# gpt-4 to have it combine the best parts of the good ones while avoiding the bad ones (plus a couple random ones). Penalize longer
-# agent responses, episode times, and prompt lengths with a small negative reward
+# TODO: this should be a subclass of BaseEnv or maybe the FrozenLakeEnv class
 class FrozenLake:
     def __init__(self, is_slippery=False):
         self.is_slippery = is_slippery
@@ -35,24 +30,6 @@ class FrozenLake:
             3: 'North'
         }
         
-        model_path = "Open-Orca/oo-phi-1_5"
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        llm = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16
-        ).to(device)
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16
-        )
-
-        agent_args = AgentArgs.builder() \
-            .with_llm(llm) \
-            .with_tokenizer(tokenizer) \
-            .build()
-        self.agent = Agent(agent_args)
 
     def thought_prompt_factory(self, observation_stream, thought_stream):
         system_prompt = create_prompt('system', '\n'.join([
@@ -104,25 +81,48 @@ class FrozenLake:
         ]
         return f"Row {row}, Col {col}, {', '.join(surroundings)}"
 
-    def run(self):
-        state, _ = self.env.reset()
+    def reset(self):
+        self.timestamp = 0
+        self.done = False
+        return self.env.reset()
+
+    def step(self, action):
+        return self.env.step(action)
+    
+    def test(self, agent=None):
+        if agent is None:
+            model_path = "princeton-nlp/Sheared-LLaMA-1.3B"#Open-Orca/oo-phi-1_5"
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            llm = AutoModelForCausalLM.from_pretrained(
+                model_path,
+            ).to(device)
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_path,
+            )
+            tokenizer.pad_token = tokenizer.eos_token
+
+            llm_args = LLMArgs.builder() \
+                .with_llm(llm) \
+                .with_tokenizer(tokenizer) \
+                .build()
+            agent = LLMAgent(llm_args, self.action_space)
+
+        state, _ = self.reset()
         reward = 0
 
         while not self.done:
             input("Press Enter to take a step...")
             print('\n\n' + '=' * 80)
 
-            self.agent.update(
+            internal_state = agent.update(
                 state, reward, self.timestamp,
                 self.thought_prompt_factory,
                 self.state_to_str
             )
-            action = self.agent.take_action(
-                self.timestamp,
-                self.action_prompt_factory,
-                self.action_space
-            )
-            state, reward, self.done, _, _ = self.env.step(action)
+            action, action_logprob, dist_entropy, state_values = self.agent.getAction(internal_state)
+            action = action.item()
+            print(action)
+            state, reward, self.done, _, _ = self.step(action)
             self.env.render()
 
             self.timestamp += 1
@@ -134,4 +134,4 @@ class FrozenLake:
 
 if __name__ == '__main__':
     env = FrozenLake()
-    env.run()
+    env.test()

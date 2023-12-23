@@ -1,7 +1,7 @@
 import json
 import copy
 
-class AgentArgs:
+class LLMArgs:
     def __init__(self, builder):
         self.field_names = []
         for field, _ in builder.specification.items():
@@ -20,9 +20,9 @@ class AgentArgs:
         return json.dumps(self.asdict(), indent=4)
         
     def builder():
-        return AgentArgsBuilder()
+        return LLMArgsBuilder()
         
-class AgentArgsBuilder:
+class LLMArgsBuilder:
     REQUIRED = '__REQUIRED__'
     
     def create_field_setter(self, field):
@@ -34,30 +34,25 @@ class AgentArgsBuilder:
     
     def __init__(self):       
         self.specification = {         
-            # Model architecture
-            '_llm': AgentArgsBuilder.REQUIRED,
-            '_tokenizer': AgentArgsBuilder.REQUIRED,
-
-            # Model saving/loading
-            # Optimizer config
-            # Training logistics
+            '_llm': LLMArgsBuilder.REQUIRED,
+            '_tokenizer': LLMArgsBuilder.REQUIRED,
             '_verbose': False,
         }
 
         for field, default in self.specification.items():
-            default_val = None if default == AgentArgsBuilder.REQUIRED else default
+            default_val = None if default == LLMArgsBuilder.REQUIRED else default
             setattr(self, field, default_val)
             setattr(self, f'with{field}', self.create_field_setter(field))
             
     def clone(self):
-        _clone = AgentArgsBuilder()
+        _clone = LLMArgsBuilder()
         for field in self.specification:
             setattr(_clone, field, copy.copy(getattr(self, field)))
         return _clone
           
     def build(self):
         for field, default in self.specification.items():
-            if default == AgentArgsBuilder.REQUIRED and getattr(self, field) is None:
+            if default == LLMArgsBuilder.REQUIRED and getattr(self, field) is None:
                 raise ValueError(f'{field[1:]} is a required argument')
             
-        return AgentArgs(self)
+        return LLMArgs(self)

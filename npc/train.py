@@ -1,11 +1,22 @@
-from agilerl.utils.utils import initialPopulation, makeVectEnvs
+from .prompt_util import create_prompt
+from .frozen_lake import FrozenLake
+from .base_agent import BaseAgent
+from .llm_agent import LLMAgent
+from .llm_args import LLMArgs
+from .ppo import PPO
+
+from agilerl.utils.utils import makeVectEnvs
 from agilerl.hpo.tournament import TournamentSelection
 from agilerl.training.train_on_policy import train
 from agilerl.hpo.mutation import Mutations
-import torch
 
-def create_mutation_obj(INIT_HP, MUTATION_PARAMS, NET_CONFIG, device):
-    mutations = Mutations(
+import numpy as np
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from tqdm import trange
+
+def create_mutation_obj(INIT_HP, MUTATION_PARAMS, device):
+    return Mutations(
         algo=INIT_HP['ALGO'],
         no_mutation=MUTATION_PARAMS['NO_MUT'],
         architecture=MUTATION_PARAMS['ARCH_MUT'],
@@ -21,28 +32,76 @@ def create_mutation_obj(INIT_HP, MUTATION_PARAMS, NET_CONFIG, device):
         max_learn_step=MUTATION_PARAMS['MAX_LEARN_STEP'],
         min_batch_size=MUTATION_PARAMS['MIN_BATCH_SIZE'],
         max_batch_size=MUTATION_PARAMS['MAX_BATCH_SIZE'],
-        arch=NET_CONFIG['arch'],
+        arch='mlp', # TODO: create a custom mutations class which does not take this argument
         rand_seed=MUTATION_PARAMS['RAND_SEED'],
         device=device
     )
 
+def train_agent_one_episode(agent, env, max_steps):
+    llm_agent = agent.agent
 
-# TODO (first to last):
-# - Replace PPO with custom simplified implementation
-# - Replace LunarLander with custom frozen_lake and choose input scheme s.t. observations are text (ie from thought stream)
+    state = env.reset()[0]  # Reset environment at start of episode
+    reward = 0
+    idx_step = 0
+    internal_state = llm_agent.update(state, reward, idx_step, env.thought_prompt_factory, env.state_to_str)
+    score = 0
+    
+    internal_states = []
+    actions = []
+    log_probs = []
+    rewards = []
+    dones = []
+    values = []
+    
+    # TODO: keep track of idx_step inside env instead of in the training loop
+    # TODO: pass env to agent.update() instead of idx_step, env.thought_prompt_factory and env.state_to_str}
+
+    for idx_step in range(max_steps):
+        # Get next action from agent
+        # TODO: internal state should include an attention mask
+        action, log_prob, _, value = agent.getAction(internal_state)
+        action = action.item()
+        state, reward, done, trunc, _ = env.step(
+            action
+        )  # Act in environment
+        next_internal_state = llm_agent.update(state, reward, idx_step, env.thought_prompt_factory, env.state_to_str)
+
+        internal_states.append(next_internal_state)
+        actions.append(action)
+        log_probs.append(log_prob)
+        rewards.append(reward)
+        dones.append(done)
+        values.append(value)
+    
+        internal_state = next_internal_state
+        score += reward
+
+        if done:
+            break
+    
+    agent.scores.append(score)
+    
+    experiences = (
+        internal_states,
+        actions,
+        log_probs,
+        rewards,
+        dones,
+        values,
+        next_internal_state,
+    )
+    # Learn according to agent's RL algorithm
+    agent.learn(experiences)
+    
+    agent.steps[-1] += idx_step + 1
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    NET_CONFIG = {
-        "arch": "mlp",  # Network architecture
-        "h_size": [32, 32],  # Actor hidden size
-    }
 
     INIT_HP = {
         "ALGO": 'PPO',                  #
         "BATCH_SIZE": 128,              #
         "LR": 1e-3,                     #
-        'EPISODES': 2000,               # Max no. episodes
         'TARGET_SCORE': 200.,           # Early training stop at avg score of last 100 episodes
         'GAMMA': 0.99,                  # Discount factor
         'GAE_LAMBDA': 0.95,             # Lambda for general advantage estimation
@@ -54,9 +113,8 @@ def main():
         'TARGET_KL': None,              # Target KL divergence threshold
         'UPDATE_EPOCHS': 4,             # Number of policy update epochs
         'LEARN_STEP': 1,                # Learning frequency
-        "POPULATION_SIZE": 4,           #
+        "POPULATION_SIZE": 3,           #
         'TOURN_SIZE': 2,                #
-        'EVO_EPOCHS': 20,               # Evolution frequency
         'POLICY_FREQ': 2,               # Policy network update frequency
         'DISCRETE_ACTIONS': True,       #
         'WANDB': True                   # Log with Weights and Biases
@@ -64,11 +122,11 @@ def main():
 
     MUTATION_PARAMS = {
         "NO_MUT": 0.4,                              # No mutation
-        "ARCH_MUT": 0.2,                            # Architecture mutation
-        "NEW_LAYER": 0.2,                           # New layer mutation
-        "PARAMS_MUT": 0.2,                           # Network parameters mutation
+        "ARCH_MUT": 0,                              # Architecture mutation
+        "NEW_LAYER": 0,                             # New layer mutation
+        "PARAMS_MUT": 0,                            # Network parameters mutation
         "ACT_MUT": 0,                               # Activation layer mutation
-        "RL_HP_MUT": 0.2,                           # Learning HP mutation
+        "RL_HP_MUT": 0.6,                           # Learning HP mutation
         # Learning HPs to choose from
         "RL_HP_SELECTION": ["lr", "batch_size", "learn_step"],
         "MUT_SD": 0.1,                              # Mutation strength
@@ -81,22 +139,52 @@ def main():
         "MAX_BATCH_SIZE": 1024
     }
 
-    env_name = "LunarLander-v2"
-    env = makeVectEnvs(env_name, num_envs=8)  # Create environment
-    state_dim = env.single_observation_space.shape  # Continuous observation space
-    one_hot = False  # Does not require one-hot encoding
-    action_dim = env.single_action_space.n  # Discrete action space
+    #env_name = "LunarLander-v2"
+    #env = makeVectEnvs(env_name, num_envs=8)
+    env = FrozenLake()
+    # state_dim = env.single_observation_space.shape  # Continuous observation space
+    # one_hot = False  # Does not require one-hot encoding
+    # action_dim = env.single_action_space.n  # Discrete action space
 
-    agent_pop = initialPopulation(
-        algo=INIT_HP['ALGO'],  # Algorithm
-        state_dim=state_dim,  # State dimension
-        action_dim=action_dim,  # Action dimension
-        one_hot=one_hot,  # One-hot encoding
-        net_config=NET_CONFIG,  # Network configuration
-        INIT_HP=INIT_HP,  # Initial hyperparameters
-        population_size=INIT_HP["POPULATION_SIZE"],  # Population size
-        device=device,
-    )
+    agent_pop = []
+    for i in range(INIT_HP["POPULATION_SIZE"]):
+        # flattened_state_dim = np.prod(state_dim)
+
+
+        model_path = "princeton-nlp/Sheared-LLaMA-1.3B"#Open-Orca/oo-phi-1_5"
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        llm = AutoModelForCausalLM.from_pretrained(
+            model_path,
+        ).to(device)
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+        )
+        tokenizer.pad_token = tokenizer.eos_token
+
+        #model_path = "Open-Orca/oo-phi-1_5"
+        #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        #llm = AutoModelForCausalLM.from_pretrained(
+        #    model_path,
+        #    trust_remote_code=True,
+        #    torch_dtype=torch.bfloat16
+        #).to(device)
+        #tokenizer = AutoTokenizer.from_pretrained(
+        #    model_path,
+        #    trust_remote_code=True,
+        #    torch_dtype=torch.bfloat16
+        #)
+
+        llm_args = LLMArgs.builder() \
+            .with_llm(llm) \
+            .with_tokenizer(tokenizer) \
+            .build()
+        agent = LLMAgent(llm_args, env.action_space)
+
+        agent_pop.append(
+            # TODO: figure out how to do higher batch size
+            PPO(agent=agent, index=i, batch_size=1)
+        )
+
     tournament = TournamentSelection(
         tournament_size=2,  # Tournament selection size
         elitism=True,  # Elitism in tournament selection
@@ -104,23 +192,41 @@ def main():
         evo_step=1,
     )  # Evaluate using last N fitness scores
 
-    mutations = create_mutation_obj(INIT_HP, MUTATION_PARAMS, NET_CONFIG, device)    
+    mutations = create_mutation_obj(INIT_HP, MUTATION_PARAMS, device)    
 
-    trained_pop, pop_fitnesses = train(
-        env=env,                                 # Gym-style environment
-        env_name=env_name,                       # Environment name
-        algo=INIT_HP['ALGO'],                    # Algorithm
-        pop=agent_pop,                           # Population of agents
-        INIT_HP=INIT_HP,                         #
-        MUT_P=MUTATION_PARAMS,                   #
-        n_episodes=INIT_HP['EPISODES'],          # Max number of training episodes
-        evo_epochs=INIT_HP['EVO_EPOCHS'],        # Evolution frequency
-        evo_loop=1,                              # Number of evaluation episodes per agent
-        target=INIT_HP['TARGET_SCORE'],          # Target score for early stopping
-        tournament=tournament,                   # Tournament selection object
-        mutation=mutations,                      # Mutations object
-        wb=INIT_HP['WANDB']                      # Weights and Biases tracking
-    )
+    max_episodes = 50  # Max training episodes
+    max_steps = 500  # Max steps per episode
+
+    evo_epochs = 1#5  # Evolution frequency
+    evo_loop = 1#3  # Number of evaluation episodes
+
+    for idx_epi in trange(max_episodes):
+        for agent in agent_pop:
+            train_agent_one_episode(agent, env, max_steps)
+    
+        # Evolve population if necessary
+        if (idx_epi + 1) % evo_epochs == 0:
+            # Evaluate population
+            fitnesses = [
+                agent.test(
+                    env,
+                    max_steps=max_steps,
+                    loop=evo_loop,
+                )
+                for agent in agent_pop
+            ]
+    
+            print(f"Episode {idx_epi + 1}/{max_episodes}")
+            print(f"Fitnesses: {[f'{fitness:.2f}' for fitness in fitnesses]}")
+            print(
+                f"100 fitness avgs: {[f'{np.mean(agent.fitness[-100:]):.2f}' for agent in agent_pop]}"
+            )
+    
+            # Tournament selection and population mutation
+            elite, agent_pop = tournament.select(agent_pop)
+            agent_pop = mutations.mutation(agent_pop)
+    
+    env.close()
     
 if __name__ == '__main__':
     main()
