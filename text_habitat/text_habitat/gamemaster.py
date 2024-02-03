@@ -3,13 +3,14 @@ from .openai_api import get_llm_completion
 from .utils import extract_tags
 
 class Gamemaster:
+    system_prompt_prefix = "You are the gamemaster of a simulation environment with multiple rooms, each potentially populated by one or more NPC agents. Think of the simulation as a sophisticated version of the Sims. Agents can take open-ended actions in their respective rooms within reason (based on their capabilities, the state of the room they are in, and the laws of physics)."
     def __init__(self):
         self.name = "Gamemaster"
-        self.current_action = None  
+        self.current_action = None
 
     def write_action_description(self, agent_intent, simulator):
         prompt_format = "\n".join([
-        "The agent is attempting to take an action. Their intent is written in <action_intent></action_intent> tags. As gamemaster, please describe how the execution of the action ended up going when the agent initiated it and what effects (intended or unintended) it had. Consider both the states of the agent and the room in your description. Here are some guidelines you need to follow:"
+        "An agent is attempting to take an action. Their intent is written in <action_intent></action_intent> tags. As gamemaster, please describe how the execution of the action ended up going when the agent initiated it and what effects (intended or unintended) it had. Consider both the states of the agent and the room where they are in your description. Here are some guidelines you need to follow:"
         "- The action should be plausible as a single action in the Sims (with all imaginable expansion packs and additional content enabled). If the user tries to do a long multi-step action then you should break it up into multiple actions and just describe the execution of the first one.",
         "- Be sure to keep in mind the locations of different entities in the room. For example, if the agent wants to use an object, then the object needs to be available to use and the agent may need to move to the object.",
         "- The description should be detailed, but not overly granular or flowery.",
@@ -36,16 +37,16 @@ class Gamemaster:
         ])
         prompt = prompt_format.format(
             agent_intent=agent_intent,
-            room_state=simulator.room.state_str(),
-            agent_state=simulator.agent.state_str()
+            room_state=simulator.get_agent_room(simulator.agent).state_str(),
+            agent_state=simulator.agent.state_str(),
         )
-        system_prompt = "You are the gamemaster of a simulation of a room with an agent. Think of the simulation as a sophisticated version of the Sims. The agent can take open-ended actions in the room within reason (based on its capabilities, the state of the room, and the laws of physics)."
+        system_prompt = Gamemaster.system_prompt_prefix
         llm_output = get_llm_completion(prompt, system_prompt)
         return llm_output
 
     def determine_action_effects(self, action_description, simulator):
         prompt_format = "\n".join([
-            "The agent has just taken an action. A detailed description of how this action unfolded can be found in <action_effects></action_effects> tags. I would like you to describe how the room state and/or agent state has changed as a consequence of the action. To do this, please follow this procedure:",
+            "An agent has just taken an action in one of the simulation's rooms. A detailed description of how this action unfolded can be found in <action_effects></action_effects> tags. I would like you to describe how the room state and/or agent state has changed as a consequence of the action. To do this, please follow this procedure:",
             "1. Create a numbered JSON list of all the ways in which the action affects the state of the room and/or the agent. Put this analysis inside <effect_list></effect_list> tags. Here are some guidelines:",
             "    - Each element of the list should be a JSON object with three fields: 'effect_name', 'description', and 'deliberation'. In the 'deliberation' field, you should briefly play devil's advocate for why the effect might be inconsistent with the simulation state, then decide whether to implement it.",
             "    - Each effect should be an atomic (i.e., not able to be broken up into smaller effects) state change.",
@@ -74,20 +75,13 @@ class Gamemaster:
         ])
         prompt = prompt_format.format(
             action_description=action_description, 
-            room_state=simulator.room.state_str(),
+            room_state=simulator.get_agent_room(simulator.agent).state_str(),
             agent_state=simulator.agent.state_str()
         )
-        system_prompt = "You are the gamemaster of a simulation of a room with an agent. Think of the simulation as a sophisticated version of the Sims. The agent can take open-ended actions in the room within reason (based on its capabilities, the state of the room, and the laws of physics)."
+        system_prompt = Gamemaster.system_prompt_prefix
         llm_output = get_llm_completion(prompt, system_prompt)
 
-        tags = extract_tags(llm_output) 
-        if "final_effects" not in tags:
-            print("Warning: LLM output does not contain a final_effects tag.")
-            tags["final_effects"] = ""
-
-        if "time_taken" not in tags:
-            print("Warning: LLM output does not contain a time_taken tag.")
-            time_taken = 1
+        tags = extract_tags(llm_output, defaults={"final_effects": "", "time_taken": 1}) 
         try:
             time_taken = int(tags["time_taken"])
         except:
@@ -104,8 +98,9 @@ class Gamemaster:
     
     def write_state_updating_code(self, action_effects, simulator):
         prompt_format = "\n".join([
-            "The agent has just taken an action. The detailed effects of this action have been described to you in <action_effects></action_effects> tags. I need you to translate these qualitative effects into updates to the state of the simulation. To do this, please implement each effect using a line of Python code which will manipulate the state dictionaries corresponding to the room and/or the agent. The Python dictionaries will be called room_state_dict and agent_state_dict, respectively. Put these lines of code inside <state_updating_code></state_updating_code> tags.",
+            "An agent has just taken an action. The detailed effects of this action have been described to you in <action_effects></action_effects> tags. I need you to translate these qualitative effects into updates to the state of the simulation. To do this, please implement each effect using a line of Python code which will manipulate the state dictionaries corresponding to the room and/or the agent. The Python dictionaries will be called room_state_dict and agent_state_dict, respectively. Put these lines of code inside <state_updating_code></state_updating_code> tags.",
             "- Each line of code will be independently executed, so do not use multiline statements.",
+            "- If you want the agent to move to a different room, then you should change the 'room' field of the agent_state_dict to the approriate room id. You should also change the 'location' field of the agent_state_dict to the approriate location in the new room.",
             "",
             "The current state of the room (as a Python dictionary) is inside <room_state_dict></room_state_dict> tags:",
             "<room_state_dict>",
@@ -124,17 +119,14 @@ class Gamemaster:
         ])
         prompt = prompt_format.format(
             action_effects=action_effects,
-            room_state_dict=simulator.room.state_str(),
+            room_state_dict=simulator.get_agent_room(simulator.agent).state_str(),
             agent_state_dict=simulator.agent.state_str()
         )
-        system_prompt = "You are the gamemaster of a simulation of a room with an agent. Think of the simulation as a sophisticated version of the Sims. The agent can take open-ended actions in the room within reason (based on its capabilities, the state of the room, and the laws of physics)."
+        system_prompt = Gamemaster.system_prompt_prefix
         llm_output = get_llm_completion(prompt, system_prompt)
 
-        tags = extract_tags(llm_output) 
-        if "state_updating_code" not in tags:
-            print("Warning: LLM output does not contain a state_updating_code tag.")
-        
-        return tags.get("state_updating_code", "")
+        tags = extract_tags(llm_output, defaults={"state_updating_code": ""}) 
+        return tags["state_updating_code"]
 
     # TODO: instead of instructing LLM to compress the state, ask it to break a field up into multiple fields if needed
     def generate_state_correction_action(self, simulator):
@@ -169,34 +161,25 @@ class Gamemaster:
         ])
 
         prompt = prompt_format.format(
-            room_state_dict=simulator.room.state_str(),
+            room_state_dict=simulator.get_agent_room(simulator.agent).state_str(),
             agent_state_dict=simulator.agent.state_str()
         )
-        system_prompt = "You are the gamemaster of a simulation of a room with NPC agents. Think of the simulation as a sophisticated version of the Sims. Your current job involves maintain the integrity of the simulation state by correcting any errors that arise over time. You are given two Python dictionaries: 'room_state_dict' and 'agent_state_dict', which represent the state of the current room and agent."
+        system_prompt = f"{Gamemaster.system_prompt_prefix} Your current job is to maintain the integrity of the simulation state by correcting any errors that arise over time. You are given two Python dictionaries: 'room_state_dict' and 'agent_state_dict', which represent the state of the current room and an agent."
         llm_output = get_llm_completion(prompt, system_prompt)
 
-        tags = extract_tags(llm_output)
-        if "state_updating_code" not in tags:
-            print("Warning: LLM output does not contain a state_updating_code tag.")
+        tags = extract_tags(llm_output, defaults={"state_updating_code": ""})
 
         return Action(
             start_time=simulator.timestep, 
             end_time=simulator.timestep,
             state_updating_code=tags.get("state_updating_code", ""),
-            acting_agent=self, 
+            acting_agent=simulator.agent, 
             metadata={
                 "issues": tags.get("issues", None),
-            }
+            },
         )
 
     def generate_user_action(self, agent_intent, simulator):
-        # Determining action success: 
-        # 1. Judge whether it is plausible that one or more aspects of the agent's intent could fail to be achieved
-        # 2. Imagine alternative outcomes for each of these aspects and assign a likelihood to each
-        # 3. Sample from the possible outcomes then pass to the description prompt with the outcomes given as constraints
-        # Prompt llm to describe in detail what the action would look like and whether it is successful (can eventually use dice rolls like dnd skill checks)
-
-        # TODO: sometimes the description misses details like the agent needing to move somewhere else to use the computer
         action_description = self.write_action_description(agent_intent, simulator)
 
         # Prompt llm to describe each effect the action has on the agent or room state
@@ -206,10 +189,10 @@ class Gamemaster:
         state_updating_code = self.write_state_updating_code(action_effects, simulator)
 
         return Action(
-            start_time=simulator.timestep, 
+            start_time=simulator.timestep,
             end_time=simulator.timestep + time_taken,
             state_updating_code=state_updating_code,
-            acting_agent=simulator.agent, 
+            acting_agent=simulator.agent,
             metadata={
                 "agent_intent": agent_intent,
                 "description": action_description,

@@ -3,21 +3,33 @@ import re
 
 PPRINT_WIDTH = 120
 
+verbose = True
+
 # Idea: preprocess the code when creating the action using another LLM to write unit tests and fix any errors
-def execute_state_updating_code(state_updating_code, simulator):
-    room_state_dict = copy.deepcopy(simulator.room.to_dict())
-    agent_state_dict = copy.deepcopy(simulator.agent.to_dict())
+def execute_state_updating_code(state_updating_code, room, agent):
+    room_state_dict = copy.deepcopy(room.to_dict())
+    agent_state_dict = copy.deepcopy(agent.state_dict)
 
     for line in state_updating_code.split("\n"):
         try:
             exec(line)
         except Exception as e:
-            print(f"Warning: state_updating_code (line '{line}') failed to execute.")
-            print(e)
+            if verbose:
+                print(f"Warning: state_updating_code (line '{line}') failed to execute.")
+                print(e)
         
     return room_state_dict, agent_state_dict
 
-def extract_tags(text):
+def extract_tags(text, defaults=None):
     tag_regex = r'<([^>/]+)>(.*?)</\1>'
     tags = re.findall(tag_regex, text, re.DOTALL)
-    return {tag[0]: tag[1].strip() for tag in tags}
+    tags = {tag[0]: tag[1].strip() for tag in tags}
+
+    if defaults is not None:
+        for tag_name, default_value in defaults.items():
+            if not tag_name in tags:
+                tags[tag_name] = default_value
+                if verbose:
+                    print(f"Warning: tag '{tag_name}' not found in LLM output. Using default value '{default_value}'.")
+
+    return tags

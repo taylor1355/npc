@@ -3,19 +3,21 @@ import pprint
 from .openai_api import get_llm_completion
 from .utils import PPRINT_WIDTH
 
+# TODO: make a subclass of Entity
 class Agent:
-    def __init__(self, name):
+    REQUIRED_KEYS = ["name", "description", "status", "location", "room"]
+    IMMUTABLE_KEYS = ["name"]
+
+    def __init__(self, name, state_dict):
         self.name = name
-        self.state = "standing up wondering what to do"
-        self.emotions = "slightly agitated"
-        self.location = "center of the room"
+        self.state_dict = state_dict
         self.current_action = None
 
-    def create_room_description(self, room):
-        return room.state_str()
+        for key in self.REQUIRED_KEYS:
+            if key not in self.state_dict:
+                raise ValueError(f"Key '{key}' is required in state_dict for Agent, but it is not present.")
 
-    def decide_action(self, room):
-        room_description = self.create_room_description(room)
+    def decide_action(self, room_description):
         action_str = "Walk into the room." if self.current_action is None else self.current_action.memory_str()
         prompt = "\n".join([
             "You find yourself in a room in your house inside <room></room> tags. Your state is described below in the <you></you> tags.",
@@ -44,27 +46,10 @@ class Agent:
         system_prompt = f"You are '{self.name}', an intelligent being in this virtual world."
         return get_llm_completion(prompt, system_prompt)
 
-    def update_dict(self, agent_dict_changes):
-        if "name" in agent_dict_changes:
-            self.name = agent_dict_changes["name"]
-
-        if "state" in agent_dict_changes:
-            self.state = agent_dict_changes["state"]
-
-        if "emotions" in agent_dict_changes:
-            self.emotions = agent_dict_changes["emotions"]
-
-        if "location" in agent_dict_changes:
-            self.location = agent_dict_changes["location"]
+    def update(self, state_dict_changes):
+        for key, value in state_dict_changes.items():
+            if key in self.state_dict and key not in self.IMMUTABLE_KEYS:
+                self.state_dict[key] = value
  
-    def to_dict(self):
-        agent_dict = {
-            "name": self.name,
-            "state": self.state,
-            "emotions": self.emotions,
-            "location": self.location,
-        }
-        return agent_dict
-
     def state_str(self):
-        return pprint.pformat(self.to_dict(), sort_dicts=False, width=PPRINT_WIDTH)
+        return pprint.pformat(self.state_dict, sort_dicts=False, width=PPRINT_WIDTH)
