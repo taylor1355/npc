@@ -1,7 +1,6 @@
 import pprint
 
 from .entity import Entity
-from .utils import PPRINT_WIDTH
 
 # TODO: Room state should be represented as a knowledge graph. Each entity is a node, and each edge is a relationship between two entities.
 # Entities can have attributes, and relationships can have attributes.
@@ -37,6 +36,3 @@ class Room:
             "entities": {id: entity.state_dict for id, entity in self.entities.items()}
         }
         return room_dict
-
-    def state_str(self):
-        return pprint.pformat(self.to_dict(), sort_dicts=False, width=PPRINT_WIDTH)

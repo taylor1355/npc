@@ -1,7 +1,5 @@
-import pprint
-
 from .openai_api import get_llm_completion
-from .utils import PPRINT_WIDTH
+from .utils import state_dict_str
 
 # TODO: make a subclass of Entity
 class Agent:
@@ -11,14 +9,13 @@ class Agent:
     def __init__(self, name, state_dict):
         self.name = name
         self.state_dict = state_dict
-        self.current_action = None
 
         for key in self.REQUIRED_KEYS:
             if key not in self.state_dict:
                 raise ValueError(f"Key '{key}' is required in state_dict for Agent, but it is not present.")
 
     def decide_action(self, room_description):
-        action_str = "Walk into the room." if self.current_action is None else self.current_action.memory_str()
+        action_str = "Walk into the room." # TODO: add action history to be able to fill this out and give a summary of past actions
         prompt = "\n".join([
             "You find yourself in a room in your house inside <room></room> tags. Your state is described below in the <you></you> tags.",
             "",
@@ -35,7 +32,7 @@ class Agent:
             "",
             "Your state is described below in the <you></you> tags:",
             "<you>",
-           f"{self.state_str()}",
+           f"{state_dict_str(self.state_dict)}",
             "</you>",
             "",
             "The last thing you did, as documented by an external observer is described below in <action></action> tags:",
@@ -50,6 +47,3 @@ class Agent:
         for key, value in state_dict_changes.items():
             if key in self.state_dict and key not in self.IMMUTABLE_KEYS:
                 self.state_dict[key] = value
- 
-    def state_str(self):
-        return pprint.pformat(self.state_dict, sort_dicts=False, width=PPRINT_WIDTH)

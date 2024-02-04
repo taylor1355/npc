@@ -1,9 +1,9 @@
 import copy
+import pprint
 import re
 
 PPRINT_WIDTH = 120
-
-verbose = True
+VERBOSE = True
 
 # Idea: preprocess the code when creating the action using another LLM to write unit tests and fix any errors
 def execute_state_updating_code(state_updating_code, room, agent):
@@ -14,11 +14,12 @@ def execute_state_updating_code(state_updating_code, room, agent):
         try:
             exec(line)
         except Exception as e:
-            if verbose:
+            if VERBOSE:
                 print(f"Warning: state_updating_code (line '{line}') failed to execute.")
                 print(e)
         
     return room_state_dict, agent_state_dict
+
 
 def extract_tags(text, defaults=None):
     tag_regex = r'<([^>/]+)>(.*?)</\1>'
@@ -29,7 +30,11 @@ def extract_tags(text, defaults=None):
         for tag_name, default_value in defaults.items():
             if not tag_name in tags:
                 tags[tag_name] = default_value
-                if verbose:
+                if VERBOSE:
                     print(f"Warning: tag '{tag_name}' not found in LLM output. Using default value '{default_value}'.")
 
     return tags
+
+
+def state_dict_str(state_dict):
+    return pprint.pformat(state_dict, sort_dicts=False, width=PPRINT_WIDTH)
