@@ -7,12 +7,14 @@ class Action:
         self.start_time = start_time
         self.end_time = end_time
         self.state_updating_code = state_updating_code
-        self.acting_agent = acting_agent
-        self.room = acting_agent.state_dict["room"]
+        self.acting_agent_name = acting_agent.name
+        self.room_id = acting_agent.room_id()
         self.metadata = metadata
     
     def execute(self, simulator):
-        return execute_state_updating_code(self.state_updating_code, simulator.get_action_room(self), self.acting_agent) 
+        room = simulator.rooms[self.room_id]
+        agent = simulator.agent
+        return execute_state_updating_code(self.state_updating_code, room.state, agent.state) 
     
     def is_done(self, timestep):
         return timestep >= self.end_time
@@ -28,7 +30,7 @@ class Action:
             f"Action:",
             f"Time period: t={self.start_time} to t={self.end_time} minutes",
             f"State-updating code: {self.state_updating_code}",
-            f"Acting agent: {self.acting_agent.name}",
-            f"Room: {self.room}",
+            f"Acting agent: {self.acting_agent_name}",
+            f"Room: {self.room_id}",
             f"Metadata: {pprint.pformat(self.metadata, sort_dicts=False, width=PPRINT_WIDTH)}",
         ])

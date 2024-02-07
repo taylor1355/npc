@@ -1,12 +1,13 @@
+from .state import State
+
 class Entity:
-    REQUIRED_KEYS = ["name", "description", "status", "location"]
-    IMMUATABLE_KEYS = ["name"]
+    ID_KEY = "id"
+    REQUIRED_KEYS = [ID_KEY, "description", "status", "location"]
+    IMMUATABLE_KEYS = [ID_KEY]
 
-    def __init__(self, id, state_dict):
-        self.id = id
-        self.state_dict = state_dict
+    def __init__(self, state_dict):
+        self.id = state_dict[Entity.ID_KEY]
+        self.state = State(state_dict, self.REQUIRED_KEYS, self.IMMUATABLE_KEYS)
 
-    def update(self, state_dict_changes):
-        for key, value in state_dict_changes.items():
-            if key in self.state_dict and key not in self.IMMUATABLE_KEYS:
-                self.state_dict[key] = value
+    def update(self, new_state_dict):
+        self.state.update(new_state_dict)

@@ -1,13 +1,13 @@
 from .action import Action
 from .openai_api import get_llm_completion
-from .utils import extract_tags, state_dict_str
+from .utils import extract_tags
 
 class Gamemaster:
     system_prompt_prefix = "You are the gamemaster of a simulation environment with multiple rooms, each potentially populated by one or more NPC agents. Think of the simulation as a sophisticated version of the Sims. Agents can take open-ended actions in their respective rooms within reason (based on their capabilities, the state of the room they are in, and the laws of physics)."
     def __init__(self):
         self.current_action = None
 
-    def write_action_description(self, agent_intent, room_state_dict, agent_state_dict):
+    def write_action_description(self, agent_intent, room_state, agent_state):
         prompt_format = "\n".join([
         "An agent is attempting to take an action. Their intent is written in <action_intent></action_intent> tags. As gamemaster, please describe how the execution of the action ended up going when the agent initiated it and what effects (intended or unintended) it had. Consider both the states of the agent and the room where they are in your description. Here are some guidelines you need to follow:"
         "- The action should be plausible as a single action in the Sims (with all imaginable expansion packs and additional content enabled). If the user tries to do a long multi-step action then you should break it up into multiple actions and just describe the execution of the first one.",
@@ -36,14 +36,14 @@ class Gamemaster:
         ])
         prompt = prompt_format.format(
             agent_intent=agent_intent,
-            room_state=state_dict_str(room_state_dict),
-            agent_state=state_dict_str(agent_state_dict),
+            room_state=room_state,
+            agent_state=agent_state,
         )
         system_prompt = Gamemaster.system_prompt_prefix
         llm_output = get_llm_completion(prompt, system_prompt)
         return llm_output
 
-    def determine_action_effects(self, action_description, room_state_dict, agent_state_dict):
+    def determine_action_effects(self, action_description, room_state, agent_state):
         prompt_format = "\n".join([
             "An agent has just taken an action in one of the simulation's rooms. A detailed description of how this action unfolded can be found in <action_effects></action_effects> tags. I would like you to describe how the room state and/or agent state has changed as a consequence of the action. To do this, please follow this procedure:",
             "1. Create a numbered JSON list of all the ways in which the action affects the state of the room and/or the agent. Put this analysis inside <effect_list></effect_list> tags. Here are some guidelines:",
@@ -74,8 +74,8 @@ class Gamemaster:
         ])
         prompt = prompt_format.format(
             action_description=action_description, 
-            room_state=state_dict_str(room_state_dict),
-            agent_state=state_dict_str(agent_state_dict),
+            room_state=room_state,
+            agent_state=agent_state,
         )
         system_prompt = Gamemaster.system_prompt_prefix
         llm_output = get_llm_completion(prompt, system_prompt)
@@ -95,7 +95,7 @@ class Gamemaster:
         }
         return tags["final_effects"], time_taken, metadata
     
-    def write_state_updating_code(self, action_effects, room_state_dict, agent_state_dict):
+    def write_state_updating_code(self, action_effects, room_state, agent_state):
         prompt_format = "\n".join([
             "An agent has just taken an action. The detailed effects of this action have been described to you in <action_effects></action_effects> tags. I need you to translate these qualitative effects into updates to the state of the simulation. To do this, please implement each effect using a line of Python code which will manipulate the state dictionaries corresponding to the room and/or the agent. The Python dictionaries will be called room_state_dict and agent_state_dict, respectively. Put these lines of code inside <state_updating_code></state_updating_code> tags.",
             "- Each line of code will be independently executed, so do not use multiline statements.",
@@ -118,8 +118,8 @@ class Gamemaster:
         ])
         prompt = prompt_format.format(
             action_effects=action_effects,
-            room_state_dict=state_dict_str(room_state_dict),
-            agent_state_dict=state_dict_str(agent_state_dict),
+            room_state_dict=room_state,
+            agent_state_dict=agent_state,
         )
         system_prompt = Gamemaster.system_prompt_prefix
         llm_output = get_llm_completion(prompt, system_prompt)
@@ -128,7 +128,7 @@ class Gamemaster:
         return tags["state_updating_code"]
 
     # TODO: instead of directly writing code, write a proposal. A higher capacity LLM should read the proposal and write the appropriate code if it is approved.
-    def generate_state_correction_code(self, room_state_dict, agent_state_dict):
+    def generate_state_correction_code(self, room_state, agent_state):
         prompt_format = "\n".join([
             "Your job is to correct any major issues in the simulation state Python dictionaries: 'room_state_dict' and 'agent_state_dict'. These dictionaries might contain inconsistencies, repetitive elements, formatting, or grammatical errors. The task is in two parts:",
             "1. In <issues></issues> tags, write a JSON list of potential issues with the simulation state. Each element of the list should be a JSON object with three fields: 'issue', 'deliberation', and 'severity'. See details below:",
@@ -160,8 +160,8 @@ class Gamemaster:
         ])
 
         prompt = prompt_format.format(
-            room_state_dict=state_dict_str(room_state_dict),
-            agent_state_dict=state_dict_str(agent_state_dict),
+            room_state_dict=room_state,
+            agent_state_dict=agent_state,
         )
         system_prompt = f"{Gamemaster.system_prompt_prefix} Your current job is to maintain the integrity of the simulation state by correcting any errors that arise over time. You are given two Python dictionaries: 'room_state_dict' and 'agent_state_dict', which represent the state of the current room and an agent."
         llm_output = get_llm_completion(prompt, system_prompt)

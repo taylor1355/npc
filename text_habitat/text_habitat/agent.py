@@ -1,18 +1,17 @@
 from .openai_api import get_llm_completion
-from .utils import state_dict_str
+from .state import State
 
-# TODO: make a subclass of Entity
 class Agent:
-    REQUIRED_KEYS = ["name", "description", "status", "location", "room"]
-    IMMUTABLE_KEYS = ["name"]
+    ID_KEY = "name"
+    REQUIRED_KEYS = [ID_KEY, "description", "status", "location", "room"]
+    IMMUTABLE_KEYS = [ID_KEY]
 
-    def __init__(self, name, state_dict):
-        self.name = name
-        self.state_dict = state_dict
+    def __init__(self, state_dict):
+        self.name = state_dict[Agent.ID_KEY]
+        self.state = State(state_dict, self.REQUIRED_KEYS, self.IMMUTABLE_KEYS)
 
-        for key in self.REQUIRED_KEYS:
-            if key not in self.state_dict:
-                raise ValueError(f"Key '{key}' is required in state_dict for Agent, but it is not present.")
+    def room_id(self):
+        return self.state["room"]
 
     def decide_action(self, room_description):
         action_str = "Walk into the room." # TODO: add action history to be able to fill this out and give a summary of past actions
@@ -32,7 +31,7 @@ class Agent:
             "",
             "Your state is described below in the <you></you> tags:",
             "<you>",
-           f"{state_dict_str(self.state_dict)}",
+           f"{self.state}",
             "</you>",
             "",
             "The last thing you did, as documented by an external observer is described below in <action></action> tags:",
@@ -43,7 +42,5 @@ class Agent:
         system_prompt = f"You are '{self.name}', an intelligent being in this virtual world."
         return get_llm_completion(prompt, system_prompt)
 
-    def update(self, state_dict_changes):
-        for key, value in state_dict_changes.items():
-            if key in self.state_dict and key not in self.IMMUTABLE_KEYS:
-                self.state_dict[key] = value
+    def update(self, new_state_dict):
+        self.state.update(new_state_dict)
