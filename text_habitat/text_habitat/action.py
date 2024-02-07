@@ -12,8 +12,8 @@ class Action:
         self.metadata = metadata
     
     def execute(self, simulator):
+        agent = simulator.agents[self.acting_agent_name]
         room = simulator.rooms[self.room_id]
-        agent = simulator.agent
         return execute_state_updating_code(self.state_updating_code, room.state, agent.state) 
     
     def is_done(self, timestep):

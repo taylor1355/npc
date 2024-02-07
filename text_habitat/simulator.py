@@ -9,16 +9,23 @@ from text_habitat.openai_api import authenticate_openai
 from text_habitat.room import Room
 from text_habitat.utils import execute_state_updating_code
 
+# TODO: make Agent, Room, and Entity classes subclasses of StatefulObject. StatefulObject should have:
+# - ID_KEY, REQUIRED_KEYS, IMMUTABLE_KEYS class attributes
+# - __init__ method that initializes a State object
+# - update method that updates the State object
+# - load_objects method that loads an {id: object} dict from a list of state dictionaries
+# - id method that returns the object's ID (this should replace having an id/name attribute). In code, even the agent's name should be referred to as id for consistency.
+# - __str__ method that returns a string representation of the object
 class Simulator:
     def __init__(self, agent_dict, room_dicts):
-        # TODO: allow multiple agents
-        self.agent = Agent(agent_dict)
+        self.agents = Agent.load_agents(agent_dict)
         self.rooms = Room.load_rooms(room_dicts)
         self.gamemaster = Gamemaster()
 
         self.timestep = 0
         self.events = EventQueue([
-            ChooseActionEvent(self.timestep, self.agent.name)
+            ChooseActionEvent(self.timestep, agent.name)
+            for agent in self.agents.values()
         ])
 
     # TODO: store event history
@@ -28,25 +35,28 @@ class Simulator:
             event = self.events.pop()
             self.timestep = event.timestep
 
+            # TODO: move event handlers to the event classes
             new_events = []
             if isinstance(event, ChooseActionEvent):
-                room = self.rooms[self.agent.room_id()]
+                agent = self.agents[event.agent_id]
+                room = self.rooms[agent.room_id()]
+
                 room_description = str(room.state)
-                action_intent = self.agent.decide_action(room_description)
+                action_intent = agent.decide_action(room_description)
 
                 new_events.append(
-                    ConstructActionEvent(self.timestep, self.agent.name, action_intent)
+                    ConstructActionEvent(self.timestep, agent.name, action_intent)
                 )
             elif isinstance(event, ConstructActionEvent):
-                room = self.rooms[self.agent.room_id()]
-                room_state = room.state
-                agent_state = self.agent.state
-                state_updating_code, time_taken, metadata = self.gamemaster.generate_user_action_code(event.action_intent, room_state, agent_state)
+                agent = self.agents[event.agent_id]
+                room = self.rooms[agent.room_id()]
+
+                state_updating_code, time_taken, metadata = self.gamemaster.generate_user_action_code(event.action_intent, room.state, agent.state)
                 action = Action(
                     start_time=self.timestep,
                     end_time=self.timestep + time_taken,
                     state_updating_code=state_updating_code,
-                    acting_agent=self.agent,
+                    acting_agent=agent,
                     metadata=metadata,
                 )
 
@@ -56,12 +66,13 @@ class Simulator:
                 print()
 
                 new_events.extend([
-                    AffectRoomEvent(self.timestep, room.id, action.state_updating_code, check_state=True),
-                    ChooseActionEvent(self.timestep + time_taken, self.agent.name)
+                    AffectRoomEvent(self.timestep, agent.name, room.id, action.state_updating_code, check_state=True),
+                    ChooseActionEvent(self.timestep + time_taken, agent.name)
                 ])
             elif isinstance(event, AffectRoomEvent):
+                agent = self.agents[event.agent_id]
                 room = self.rooms[event.room_id]
-                agent = self.agent
+
                 updated_room_state, updated_agent_state = execute_state_updating_code(event.state_modifying_code, room.state, agent.state)
                 room.update(updated_room_state)
                 agent.update(updated_agent_state)
@@ -72,18 +83,20 @@ class Simulator:
 
                 if event.check_state:
                     new_events.append(
-                        CheckRoomStateEvent(self.timestep, room.id)
+                        CheckRoomStateEvent(self.timestep, agent.name, room.id)
                     )
             elif isinstance(event, CheckRoomStateEvent):
-                room_state = self.rooms[event.room_id].state
-                agent_state = self.agent.state
-                state_correction_code, metadata = self.gamemaster.generate_state_correction_code(room_state, agent_state)
+                agent = self.agents[event.agent_id]
+                room = self.rooms[event.room_id]
+
+                state_correction_code, metadata = self.gamemaster.generate_state_correction_code(room.state, agent.state)
             
                 print(100 * "-")
+                print(state_correction_code)
                 pprint.pprint(metadata)
 
                 new_events.append(
-                    AffectRoomEvent(self.timestep, event.room_id, state_correction_code, check_state=False, metadata=metadata)
+                    AffectRoomEvent(self.timestep, agent.name, room.id, state_correction_code, check_state=False, metadata=metadata)
                 )
 
             if new_events:
@@ -93,6 +106,7 @@ class Simulator:
             print("Warning: Simulation ended because there are no more events.")
             self.timestep = end_timestep
         print(f"Simulation ended at timestep {self.timestep}.")
+
 
 if __name__ == "__main__":
     api_keys_path = "../api_keys.cfg"
@@ -178,11 +192,12 @@ if __name__ == "__main__":
         }
     }
 
-    simulator = Simulator(agent_dict, [living_room_dict, kitchen_room_dict])
+    simulator = Simulator([agent_dict], [living_room_dict, kitchen_room_dict])
 
     for room in simulator.rooms.values():
         print(room.state)
-    print(simulator.agent.state)
+    for agent in simulator.agents.values():
+        print(agent.state)
     print()
 
     simulator.run(20)

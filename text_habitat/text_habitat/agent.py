@@ -10,6 +10,10 @@ class Agent:
         self.name = state_dict[Agent.ID_KEY]
         self.state = State(state_dict, self.REQUIRED_KEYS, self.IMMUTABLE_KEYS)
 
+    @staticmethod
+    def load_agents(agent_dicts):
+        return {agent_dict[Agent.ID_KEY]: Agent(agent_dict) for agent_dict in agent_dicts}
+
     def room_id(self):
         return self.state["room"]
 
