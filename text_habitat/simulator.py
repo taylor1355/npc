@@ -1,4 +1,5 @@
 import config
+import itertools
 import pprint
 
 from text_habitat.action import Action
@@ -17,16 +18,23 @@ from text_habitat.utils import execute_state_updating_code
 # - id method that returns the object's ID (this should replace having an id/name attribute). In code, even the agent's name should be referred to as id for consistency.
 # - __str__ method that returns a string representation of the object
 class Simulator:
-    def __init__(self, agent_dict, room_dicts):
-        self.agents = Agent.load_agents(agent_dict)
+    def __init__(self, room_dicts):
         self.rooms = Room.load_rooms(room_dicts)
         self.gamemaster = Gamemaster()
-
         self.timestep = 0
+
+        agents = itertools.chain.from_iterable(room.state["agents"].values() for room in self.rooms.values())
         self.events = EventQueue([
-            ChooseActionEvent(self.timestep, agent.name)
-            for agent in self.agents.values()
+            ChooseActionEvent(self.timestep, agent.id)
+            for agent in agents
         ])
+
+    def locate_agent(self, agent_id):
+        for room in self.rooms.values():
+            room_agents = room.state["agents"]
+            if agent_id in room_agents:
+                return room, room_agents[agent_id]
+        raise ValueError(f"Agent with id {agent_id} not found in any room.")
 
     # TODO: store event history
     def run(self, num_timesteps):
@@ -38,20 +46,19 @@ class Simulator:
             # TODO: move event handlers to the event classes
             new_events = []
             if isinstance(event, ChooseActionEvent):
-                agent = self.agents[event.agent_id]
-                room = self.rooms[agent.room_id()]
+                room, agent = self.locate_agent(event.agent_id)
 
                 room_description = str(room.state)
                 action_intent = agent.decide_action(room_description)
 
                 new_events.append(
-                    ConstructActionEvent(self.timestep, agent.name, action_intent)
+                    ConstructActionEvent(self.timestep, agent.id, action_intent)
                 )
             elif isinstance(event, ConstructActionEvent):
-                agent = self.agents[event.agent_id]
-                room = self.rooms[agent.room_id()]
+                room, agent = self.locate_agent(event.agent_id)
 
-                state_updating_code, time_taken, metadata = self.gamemaster.generate_user_action_code(event.action_intent, room.state, agent.state)
+                state_updating_code, time_taken, metadata = self.gamemaster.generate_user_action_code(agent.id, event.action_intent, room.state)
+                # TODO: instead of having an Action object, move the relevant metadata to the AffectRoomEvent
                 action = Action(
                     start_time=self.timestep,
                     end_time=self.timestep + time_taken,
@@ -66,37 +73,43 @@ class Simulator:
                 print()
 
                 new_events.extend([
-                    AffectRoomEvent(self.timestep, agent.name, room.id, action.state_updating_code, check_state=True),
-                    ChooseActionEvent(self.timestep + time_taken, agent.name)
+                    AffectRoomEvent(self.timestep, room.id, state_updating_code, check_state=True),
+                    ChooseActionEvent(self.timestep + time_taken, agent.id)
                 ])
             elif isinstance(event, AffectRoomEvent):
-                agent = self.agents[event.agent_id]
                 room = self.rooms[event.room_id]
 
-                updated_room_state, updated_agent_state = execute_state_updating_code(event.state_modifying_code, room.state, agent.state)
+                updated_room_state, agent_moves = execute_state_updating_code(event.state_modifying_code, room.state)
                 room.update(updated_room_state)
-                agent.update(updated_agent_state)
+                for agent_id, new_room_id in agent_moves.items():
+                    if new_room_id not in self.rooms:
+                        print(f"Warning: room with id {new_room_id} not found.")
+                        continue
+                    elif agent_id not in room.state.state_dict["agents"]:
+                        print(f"Warning: agent with id {agent_id} not found in room {room.id}.")
+                        continue
+
+                    new_room = self.rooms[new_room_id]
+                    room.move_agent(agent_id, new_room)
 
                 print(room.state)
-                print(agent.state)
                 print()
 
                 if event.check_state:
                     new_events.append(
-                        CheckRoomStateEvent(self.timestep, agent.name, room.id)
+                        CheckRoomStateEvent(self.timestep, room.id)
                     )
             elif isinstance(event, CheckRoomStateEvent):
-                agent = self.agents[event.agent_id]
                 room = self.rooms[event.room_id]
 
-                state_correction_code, metadata = self.gamemaster.generate_state_correction_code(room.state, agent.state)
+                state_correction_code, metadata = self.gamemaster.generate_state_correction_code(room.state)
             
                 print(100 * "-")
                 print(state_correction_code)
                 pprint.pprint(metadata)
 
                 new_events.append(
-                    AffectRoomEvent(self.timestep, agent.name, room.id, state_correction_code, check_state=False, metadata=metadata)
+                    AffectRoomEvent(self.timestep, room.id, state_correction_code, check_state=False, metadata=metadata)
                 )
 
             if new_events:
@@ -113,18 +126,18 @@ if __name__ == "__main__":
     api_keys = config.Config(api_keys_path)
     authenticate_openai(api_keys['OPENAI_API_KEY'])
 
-    agent_dict = {
-        "name": "Alice",
-        "description": "a curious and energetic person",
-        "status": "awake",
-        "emotional_status": "neutral",
-        "location": "in the center of the living room",
-        "room": "living_room"
-    }
-
     living_room_dict = {
         "id": "living_room",
         "description": "a cozy living room",
+        "agents": {
+            "Alice": {
+                "name": "Alice",
+                "description": "a curious and energetic chef who really wants to cook something delicious",
+                "physical_status": "hungry",
+                "emotional_status": "excited to cook",
+                "location": "standing in the center of the room"
+            }
+        },
         "entities": {
             "sofa": {
                 "id": "sofa",
@@ -163,6 +176,8 @@ if __name__ == "__main__":
     kitchen_room_dict = {
         "id": "kitchen",
         "description": "a spacious kitchen",
+        "agents": {
+        },
         "entities": {
             "fridge": {
                 "id": "fridge",
@@ -192,12 +207,10 @@ if __name__ == "__main__":
         }
     }
 
-    simulator = Simulator([agent_dict], [living_room_dict, kitchen_room_dict])
+    simulator = Simulator([living_room_dict, kitchen_room_dict])
 
     for room in simulator.rooms.values():
         print(room.state)
-    for agent in simulator.agents.values():
-        print(agent.state)
     print()
 
     simulator.run(20)

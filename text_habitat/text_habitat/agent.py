@@ -3,19 +3,16 @@ from .state import State
 
 class Agent:
     ID_KEY = "name"
-    REQUIRED_KEYS = [ID_KEY, "description", "status", "location", "room"]
+    REQUIRED_KEYS = [ID_KEY, "description", "physical_status", "emotional_status", "location"]
     IMMUTABLE_KEYS = [ID_KEY]
 
     def __init__(self, state_dict):
-        self.name = state_dict[Agent.ID_KEY]
+        self.id = state_dict[Agent.ID_KEY]
         self.state = State(state_dict, self.REQUIRED_KEYS, self.IMMUTABLE_KEYS)
 
     @staticmethod
     def load_agents(agent_dicts):
         return {agent_dict[Agent.ID_KEY]: Agent(agent_dict) for agent_dict in agent_dicts}
-
-    def room_id(self):
-        return self.state["room"]
 
     def decide_action(self, room_description):
         action_str = "Walk into the room." # TODO: add action history to be able to fill this out and give a summary of past actions
@@ -43,7 +40,7 @@ class Agent:
            f"{action_str}",
             "</action>",
         ])
-        system_prompt = f"You are '{self.name}', an intelligent being in this virtual world."
+        system_prompt = f"You are '{self.id}', an intelligent being in this virtual world."
         return get_llm_completion(prompt, system_prompt)
 
     def update(self, new_state_dict):

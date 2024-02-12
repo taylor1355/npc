@@ -39,18 +39,14 @@ class ConstructActionEvent(Event):
         self.agent_id = agent_id
         self.action_intent = action_intent
 
-# TODO: instead of taking agent_id, should be able to handle all agents in the room
 class AffectRoomEvent(Event):
-    def __init__(self, timestep, agent_id, room_id, state_updating_code, check_state=False, metadata=None):
+    def __init__(self, timestep, room_id, state_updating_code, check_state=False, metadata=None):
         super().__init__(timestep, metadata=metadata)
-        self.agent_id = agent_id
         self.room_id = room_id
         self.state_modifying_code = state_updating_code
         self.check_state = check_state
 
-# TODO: instead of taking agent_id, should be able to handle all agents in the room
 class CheckRoomStateEvent(Event):
-    def __init__(self, timestep, agent_id, room_id):
+    def __init__(self, timestep, room_id):
         super().__init__(timestep)
-        self.agent_id = agent_id
         self.room_id = room_id

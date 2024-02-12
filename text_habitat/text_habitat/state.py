@@ -2,6 +2,8 @@ import pprint
 
 from .utils import PPRINT_WIDTH
 
+# TODO: move this logic into a StatefulObject class, which should be the superclass of Room, Agent, and Entity
+# This will make manipulating/accessing the state less clunky and allow for further reducing the amount of duplicated code.
 class State:
     def __init__(self, initial_state_dict, required_keys, immutable_keys, key_serializers=None):
         self.state_dict = initial_state_dict

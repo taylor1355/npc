@@ -4,9 +4,13 @@ import re
 PPRINT_WIDTH = 120
 VERBOSE = True
 
-def execute_state_updating_code(state_updating_code, room_state, agent_state):
+def execute_state_updating_code(state_updating_code, room_state):
     room_state_dict = copy.deepcopy(room_state.state_dict)
-    agent_state_dict = copy.deepcopy(agent_state.state_dict)
+    
+    agent_moves = {}
+    def move_agent(agent_id, new_room_id, location_in_new_room):
+        room_state_dict["agents"][agent_id]["location"] = location_in_new_room
+        agent_moves[agent_id] = new_room_id
 
     for line in state_updating_code.split("\n"):
         try:
@@ -16,7 +20,7 @@ def execute_state_updating_code(state_updating_code, room_state, agent_state):
                 print(f"Warning: state_updating_code (line '{line}') failed to execute.")
                 print(e)
         
-    return room_state_dict, agent_state_dict
+    return room_state_dict, agent_moves
 
 
 def extract_tags(text, defaults=None):
