@@ -2,14 +2,18 @@
 name = "npc"
 version = "0.1.0"
 description = ""
-authors = ["Your Name <you@example.com>"]
+authors = ["hearntaylor@gmail.com"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
-llama-index = "^0.10.61"
 ipykernel = "^6.29.5"
-
+torch = "2.0.0"
+sentence-transformers = "^3.0.1"
+config = "^0.5.1"
+llama-index = "^0.11.3"
+llama-index-llms-anthropic = "^0.3.0"
+llama-index-embeddings-huggingface = "^0.3.1"
 
 [build-system]
 requires = ["poetry-core"]
