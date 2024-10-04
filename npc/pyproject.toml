@@ -1,8 +1,11 @@
 [tool.poetry]
 name = "npc"
 version = "0.1.0"
+packages = [
+    { include = "npc", from = "src" }
+]
 description = ""
-authors = ["hearntaylor@gmail.com"]
+authors = ["Taylor Hearn <hearntaylor@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
@@ -14,6 +17,9 @@ config = "^0.5.1"
 llama-index = "^0.11.3"
 llama-index-llms-anthropic = "^0.3.0"
 llama-index-embeddings-huggingface = "^0.3.1"
+pydantic = "^2.9.0"
+rich = "^13.8.1"
+json-repair = "^0.29.5"
 
 [build-system]
 requires = ["poetry-core"]

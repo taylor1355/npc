@@ -1,0 +1,1 @@
+from npc.interfaces.base_interface import *
