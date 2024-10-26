@@ -1,4 +1,4 @@
-from npc.prompts.common import create_prompt_template, Prompt, TagPattern
+from npc.prompts.prompt_common import create_prompt_template, Prompt, TagPattern
 
 SYSTEM_PROMPT = [
     "You are an expert cognitive scientist specializing in memory consolidation and retrieval processes.",
@@ -22,6 +22,8 @@ USER_PROMPT = [
     "10. Reflect individual differences in memory processing by allowing for some variability in the synthesis approach.",
     "",
     "Ensure that the memory report is coherent, psychologically plausible, and supports the agent's competence in decision-making and problem-solving."
+    " It should be written in the voice of the agent, reflecting their internal thoughts and knowledge. Use the first-person perspective. The cognitive"
+    " science terminology should be avoided, and the report should be written in clear, everyday language that the agent would use.",
     "",
     "Here is the current working memory and retrieved memories for reference:",
     "<working_memory>",
