@@ -75,6 +75,6 @@ prompt = Prompt(
     input_tags=["guide", "previous_sections", "previous_action", "previous_outcome"],
     output_tag_patterns=[
         TagPattern("next_section"),
-        TagPattern(r"action_\d+", name="actions", multimatch=True),
+        TagPattern(r"action_\d+", name="actions", templated=True),
     ],
 )

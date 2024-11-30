@@ -1,6 +1,10 @@
+*.cfg
+*.pickle
+*_credentials.json
+*token.json
+
 wandb/
 .vscode/
-*.cfg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

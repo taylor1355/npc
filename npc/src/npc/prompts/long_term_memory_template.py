@@ -43,5 +43,5 @@ prompt = Prompt(
         user_prompt=USER_PROMPT,
     ),
     input_tags=["working_memory", "observation"],
-    output_tag_patterns=[TagPattern(r"memory_\d+", name="memories", multimatch=True)],
+    output_tag_patterns=[TagPattern(r"memory_\d+", name="memories", templated=True)],
 )

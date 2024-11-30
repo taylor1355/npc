@@ -102,8 +102,8 @@ prompt = Prompt(
     ),
     input_tags=["guide", "previous_sections", "previous_action"],
     output_tag_patterns=[
-        TagPattern(r"outcome_\d+", name="outcomes", multimatch=True),
-        TagPattern(r"likelihood_\d+", name="likelihoods", multimatch=True),
-        TagPattern(r"ends_story_\d+", name="ends_stories", multimatch=True),
+        TagPattern(r"outcome_\d+", name="outcomes", templated=True),
+        TagPattern(r"likelihood_\d+", name="likelihoods", templated=True),
+        TagPattern(r"ends_story_\d+", name="ends_stories", templated=True),
     ],
 )
