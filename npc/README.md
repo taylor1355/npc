@@ -1,6 +1,6 @@
 # Setup
 ## API setup
-The following files should be found in the root directory of the repo:
+The following files should be found in `npc.project_config.CREDENTIALS_DIR` directory of the repo:
 
 - *api_keys.cfg*
 ```
