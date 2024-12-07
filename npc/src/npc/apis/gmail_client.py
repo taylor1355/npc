@@ -1,6 +1,7 @@
 import ezgmail
 import logging
 import os
+import portpicker
 import random
 import time
 from dataclasses import dataclass, field
@@ -8,7 +9,7 @@ from datetime import datetime
 from ezgmail import GmailMessage, GmailThread
 from functools import wraps
 from google.auth.exceptions import RefreshError
-from typing import Callable, Iterator, Optional, TypeVar
+from typing import Callable, Optional, TypeVar
 
 from npc.project_config import GMAIL_CREDENTIALS_PATH, GMAIL_TOKEN_PATH
 
@@ -28,7 +29,6 @@ class OperationError(GmailClientError):
     pass
 
 
-# TODO: instead of defining a custom retry decorator, use tenacity
 @dataclass
 class RetryConfig:
     """Configuration for retry behavior"""
@@ -62,14 +62,7 @@ def with_retries(operation_name: str):
                     self._ensure_authenticated()
                 except Exception as e:
                     last_exception = e
-                    logging.error(
-                        "Operation failed",
-                        extra={
-                            'operation': operation_name,
-                            'attempt': attempt + 1,
-                            'error': str(e),
-                        }
-                    )
+                    logging.error(f"Operation {operation_name} failed (attempt {attempt + 1}).\n{repr(e)}")
                 
                 if attempt < self.retry_config.max_retries - 1:
                     delay = min(
@@ -82,6 +75,8 @@ def with_retries(operation_name: str):
             raise OperationError(
                 f"{operation_name} failed after {self.retry_config.max_retries} attempts"
             ) from last_exception
+
+            logging.debug(f"Operation {operation_name} succeeded after {attempt + 1} attempts")
             
         return wrapper
     return decorator
@@ -149,39 +144,41 @@ class GmailClient:
     
     def __post_init__(self):
         self._ensure_authenticated()
-    
+
     def _ensure_authenticated(self, _allow_retry=True) -> None:
         """Ensures authentication is valid"""
         if not ezgmail.LOGGED_IN:
             try:
+                # Get a random available port
+                port = portpicker.pick_unused_port()
+                
                 ezgmail.init(
                     credentialsFile=GMAIL_CREDENTIALS_PATH,
                     tokenFile=GMAIL_TOKEN_PATH
                 )
+                
+                if hasattr(ezgmail, '_flow'):
+                    creds = ezgmail._flow.run_local_server(
+                        port=port,
+                        success_message='Authentication successful! You can close this window.'
+                    )
+                    ezgmail._flow.credentials = creds
+                    
                 # Test authentication with actual API call
                 ezgmail.SERVICE_GMAIL.users().getProfile(userId='me').execute()
+                
             except Exception as e:
                 if _allow_retry:
                     if os.path.exists(GMAIL_TOKEN_PATH):
-                        os.remove(GMAIL_TOKEN_PATH) 
+                        os.remove(GMAIL_TOKEN_PATH)
                         logging.info("Removed invalid token file")
                     self._ensure_authenticated(_allow_retry=False)
                 else:
                     raise AuthenticationError("Failed to authenticate") from e
     
-    @with_retries("retrieve_emails")
-    def retrieve_emails(self, search_options: GmailSearchOptions, max_results: int = 10) -> list[Email]:
-        """Retrieve emails matching search criteria"""
-        emails = []
-        threads = self._find_matching_threads(search_options, max_results)
-        for email in self._extract_emails_from_threads(threads):
-            emails.append(email)
-            if len(emails) >= max_results:
-                break
-        return emails
-    
-    def _find_matching_threads(self, search_options: GmailSearchOptions, max_results: int) -> list[GmailThread]:
-        """Find Gmail threads matching the search criteria"""
+    @with_retries("retrieve_threads")
+    def retrieve_threads(self, search_options: GmailSearchOptions, max_results: int = 10) -> list[GmailThread]:
+        """Retrieve email threads matching search criteria"""
         try:
             query = search_options.to_query()
             return ezgmail.search(query, maxResults=max_results)
@@ -189,39 +186,31 @@ class GmailClient:
             logging.error(f"Failed to search threads: {e}")
             return []
     
-    def _extract_emails_from_threads(self, threads: list[GmailThread]) -> Iterator[Email]:
-        """Extract individual emails from a list of threads"""
-        for thread in threads:
-            try:
-                for message in thread.messages:
-                    try:
-                        yield Email.from_message(message, thread.id)
-                    except Exception as e:
-                        logging.warning(
-                            f"Failed to process message in thread {thread.id}: {e}"
-                        )
-            except Exception as e:
-                logging.warning(f"Failed to process thread {thread.id}: {e}")
-    
-    def _get_thread(self, thread_id: str) -> GmailThread:
-        """Get a thread by ID"""
-        return ezgmail.search(f'thread:{thread_id}', maxResults=1)[0]
+    def get_latest_email(self, thread: GmailThread) -> Optional[Email]:
+        """Get the most recent email from a thread"""
+        try:
+            if not thread.messages:
+                return None
+            latest_message = thread.messages[-1]  # Last message in thread is most recent
+            return Email.from_message(latest_message, thread.id)
+        except Exception as e:
+            logging.warning(f"Failed to get latest email from thread {thread.id}: {e}")
+            return None
     
     @with_retries("apply_label")
-    def apply_label(self, thread_id: str, label: str) -> None:
+    def apply_label(self, thread: GmailThread, label: str) -> None:
         """Apply a label to an email thread"""
-        self._get_thread(thread_id).addLabel(label)
+        thread.addLabel(label)
     
     @with_retries("remove_label")
-    def remove_label(self, thread_id: str, label: str) -> None:
+    def remove_label(self, thread: GmailThread, label: str) -> None:
         """Remove a label from an email thread"""
-        self._get_thread(thread_id).removeLabel(label)
+        thread.removeLabel(label)
     
-    def archive_thread(self, thread_id: str) -> None:
+    def archive_thread(self, thread: GmailThread) -> None:
         """Archive an email thread"""
-        self.remove_label(thread_id, "INBOX")
+        self.remove_label(thread, "INBOX")
     
-    @with_retries("mark_as_read")
-    def mark_as_read(self, thread_id: str) -> None:
+    def mark_as_read(self, thread: GmailThread) -> None:
         """Mark an email thread as read"""
-        self._get_thread(thread_id).markAsRead()
+        thread.markAsRead()

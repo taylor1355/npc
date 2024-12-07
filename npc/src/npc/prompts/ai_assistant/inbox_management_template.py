@@ -10,7 +10,7 @@ class EmailDestination(Enum):
     BUSINESS_TRANSACTION = "business_transaction"
     ARCHIVE = "archive"
     DELETE = "delete"
-    KEEP_IN_INBOX = "keep_in_inbox"
+    INBOX = "inbox"
 
     @classmethod
     def choices_str(cls) -> str:
@@ -24,19 +24,19 @@ class EmailDestination(Enum):
             text: String representation of destination
 
         Returns:
-            Corresponding EmailDestination enum value, defaults to KEEP_IN_INBOX if invalid
+            Corresponding EmailDestination enum value, defaults to INBOX if invalid
         """
         try:
             return EmailDestination[text.strip().upper()]
         except KeyError:
-            logging.warning(f"Invalid destination value: {text}. Defaulting to KEEP_IN_INBOX.")
-            return EmailDestination.KEEP_IN_INBOX
+            logging.warning(f"Invalid destination value: {text}. Defaulting to INBOX.")
+            return EmailDestination.INBOX
 
 
 SYSTEM_PROMPT = [
     "You are an expert email organization assistant specializing in inbox management and workflow optimization."
-    " Your task is to analyze an email and determine whether it requires user intervention and what its most"
-    " appropriate destination should be."
+    " Your task is to analyze an email and determine whether it should be marked as read and what destination"
+    " it should be sent to."
 ]
 
 USER_PROMPT = [
@@ -55,17 +55,17 @@ USER_PROMPT = [
     "# Analysis Guidelines",
     "Please follow these steps to analyze the email:",
     "",
-    "## 1. User Intervention Assessment",
-    "First, analyze whether the email requires user attention. Consider the following factors:",
+    "## 1. Read Status Assessment",
+    "First, analyze whether the email should be marked as read. Consider the following factors:",
     "",
-    "Requires User Intervention:",
+    "Keep Unread (Don't Mark as Read):",
     "- Personal communications from friends, family, or important contacts",
     "- Time-sensitive notifications (e.g., payment deadlines, appointment reminders)",
     "- Security-related communications (2FA codes, account alerts)",
     "- Direct requests or questions requiring a response",
     "- Important business communications needing review or action",
     "",
-    "Does Not Require User Intervention:",
+    "Mark as Read:",
     "- Newsletters and promotional content",
     "- Automated system notifications",
     "- Marketing materials",
@@ -100,7 +100,7 @@ USER_PROMPT = [
     "- Duplicate messages",
     "- Temporary notifications (e.g., one-time codes)",
     "",
-    "KEEP_IN_INBOX:",
+    "INBOX:",
     "- Emails that the user sent to themselves",
     "- Emails requiring immediate attention",
     "- Ongoing discussions",
@@ -111,13 +111,13 @@ USER_PROMPT = [
     "Provide your analysis in the following structure:",
     "",
     "## 1. Detailed Analysis",
-    "In <user_intervention_analysis> tags, provide a JSON-structured analysis:",
-    "<user_intervention_analysis>",
+    "In <read_status_analysis> tags, provide a JSON-structured analysis:",
+    "<read_status_analysis>",
     "{{",
-    "   'intervention_required_reasons': 'Factors supporting user intervention'",
-    "   'intervention_not_required_reasons': 'Factors supporting no user intervention'",
+    "   'keep_unread_reasons': 'Factors supporting keeping unread'",
+    "   'mark_read_reasons': 'Factors supporting marking as read'",
     "}}",
-    "</user_intervention_analysis>",
+    "</read_status_analysis>",
     "",
     "In <destination_analysis> tags, provide a JSON-structured analysis:",
     "<destination_analysis>",
@@ -135,9 +135,9 @@ USER_PROMPT = [
     "## 2. Final Decisions",
     "Based on your analysis, provide the final decisions in these tags:",
     "",
-    "<user_intervention_required>",
+    "<mark_as_read>",
     "true or false",
-    "</user_intervention_required>",
+    "</mark_as_read>",
     "<destination>",
     f"{EmailDestination.choices_str()}",
     "</destination>",
@@ -150,12 +150,9 @@ prompt = Prompt(
     ),
     input_tags=["sender", "subject", "email_summary"],
     output_tag_patterns=[
-        TagPattern("user_intervention_analysis"),
+        TagPattern("read_status_analysis"),
         TagPattern("destination_analysis"),
-        TagPattern("user_intervention_required"),
+        TagPattern("mark_as_read"),
         TagPattern("destination", parser=EmailDestination.parse),
     ],
 )
-
-if __name__ == "__main__":
-    print("\n".join(SYSTEM_PROMPT + USER_PROMPT))

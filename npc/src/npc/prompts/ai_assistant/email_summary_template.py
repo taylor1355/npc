@@ -32,9 +32,7 @@ SYSTEM_PROMPT = [
     "Your goal is to help users quickly understand and prioritize their incoming messages."
 ]
 
-# TODO: email_summarizer needs to handle new input fields (received_datetime, current_date). received_datetime should be to the minute.
-# TODO: email_summarizer needs to handle new output fields (priority_analysis, link_i, link_description_i)
-# TODO: email_summarizer needs to invalidate the cache for any emails from previous days. record the last cache update time.
+
 USER_PROMPT = [
     "# Email Details",
     "Here are the details of the email you need to analyze:",
@@ -113,18 +111,21 @@ USER_PROMPT = [
     "After your analysis, state the final priority level in <priority> tags in the following format.",
     "<priority>URGENT/HIGH/MEDIUM/LOW</priority>",
     "",
-    "## 3. Link Extraction (for Medium or Higher Priority)",
-    "If the email's priority is Medium or higher, extract up to three important links from the email body. For each link:",
+    "## 3. Link Extraction (for medium or higher priority)",
+    "If the email's priority is medium or higher, extract up to three important links from the email body."
+    " The one exception is that unsubscribe links should always be included, even for low priority emails.",
+    "For each link:",
     "- Place the URL in <link_i> tags, where i is the link number (link_1, link_2, link_3).",
     "- Provide a brief description of where the link leads in <link_description_i> tags.",
     "",
     "## 4. Summary",
-    "Finally, provide a clear, concise summary in <summary></summary> tags. Include:",
+    "Finally, provide a clear, concise summary in <summary></summary> tags including:",
     "- The main content or purpose of the email",
     "- Any required actions and their deadlines",
     "- Why this email is noteworthy or why it can be deprioritized",
     "- For medium or higher priority emails, mention the presence of important links",
 ]
+
 
 prompt = Prompt(
     template=create_prompt_template(
