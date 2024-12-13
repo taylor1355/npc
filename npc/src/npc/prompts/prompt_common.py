@@ -157,7 +157,8 @@ class Prompt:
             output: The raw LLM response text to parse
             
         Returns:
-            Dictionary containing the full response and extracted tag values
+            Dictionary mapping tag names to their extracted/parsed values.
+            Includes the full response text under the reserved key Prompt.RESPONSE_KEY.
         """
         return {
             self.RESPONSE_KEY: output,

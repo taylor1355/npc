@@ -5,10 +5,10 @@ from enum import Enum
 from typing import Optional
 
 from npc.apis.gmail_client import Email, GmailClient, GmailThread
-from npc.apis.llm_client import LLMClient, Model
-from npc.prompts.ai_assistant.inbox_management_template import (
+from npc.apis.llm_client import LLMFunction, Model
+from npc.prompts.ai_assistant.email_action_template import (
     EmailDestination,
-    prompt as inbox_management_prompt,
+    prompt as email_action_prompt,
 )
 from npc.simulators.ai_assistant.tools.email_summarizer import EmailSummarizer
 from npc.simulators.ai_assistant.tools.tool import Tool
@@ -86,16 +86,95 @@ class InboxAction:
             logging.error(f"Failed to execute action for email '{email_description}': {repr(e)}")
 
 
+class InboxManager(Tool):
+    """Tool for managing inbox by automatically suggesting and executing actions on email threads"""
+    def __init__(
+        self,
+        llm: Model,
+        email_summarizer: EmailSummarizer,
+        gmail_client: GmailClient,
+        label_mapping: dict[EmailDestination, str]
+    ) -> None:
+        super().__init__()
+        self.email_summarizer = email_summarizer
+        self.gmail_client = gmail_client
+        self.label_mapping = label_mapping
+        
+        for dest in EmailDestination:
+            if dest not in self.label_mapping:
+                raise ValueError(f"Incomplete label mapping, missing a {dest} label")
+        
+        self.email_action_recommender = LLMFunction(email_action_prompt, llm)
+
+    def suggest_actions(self, threads: list[GmailThread]) -> list[InboxAction]:
+        """
+        Generate suggested actions for the given threads
+        
+        Args:
+            threads: List of email threads to process
+        """
+        actions: list[InboxAction] = []
+        for thread in threads:
+            try:
+                latest_email = self.gmail_client.get_latest_email(thread)
+                if not latest_email:
+                    continue
+                
+                summary = self.email_summarizer.summarize(latest_email)
+                
+                action_response = self.email_action_recommender.generate(
+                    email_summary=summary.summary,
+                    sender=latest_email.sender,
+                    subject=latest_email.subject
+                )
+                action = InboxAction(
+                    thread=thread,
+                    destination=action_response["destination"],
+                    mark_as_read=action_response["mark_as_read"].lower() == "true",
+                )
+                actions.append(action)
+            except Exception as e:
+                logging.error(f"Failed to suggest action for email from {latest_email.sender if latest_email else 'unknown'}")
+                action = InboxAction(
+                    thread=thread,
+                    destination=EmailDestination.INBOX,
+                    mark_as_read=False,
+                )
+                actions.append(action)
+        
+        return actions
+
+    def execute_actions(self, actions: list[InboxAction]) -> list[InboxAction]:
+        """
+        Execute the provided actions
+        
+        Args:
+            actions: List of actions to execute
+            
+        Returns:
+            List of successfully executed actions
+        """
+        for action in actions:
+            if action.status != Status.CANCELED:
+                action.execute(self.gmail_client, self.label_mapping)
+        
+        return [action for action in actions if action.status == Status.SUCCEEDED]
+    
+    @property
+    def description(self) -> str:
+        return "Manages inbox by organizing email threads based on content analysis and user preferences"
+
+
 class InboxManagerShell(Cmd):
     """Interactive command processor for managing email threads"""
     
     BATCH_SIZE = 5
 
-    def __init__(self, threads: list[GmailThread], actions: list[InboxAction], gmail_client: GmailClient):
+    def __init__(self, inbox_manager: InboxManager, threads: list[GmailThread]):
         super().__init__()
+        self.inbox_manager = inbox_manager
         self.threads = threads
-        self.actions = actions
-        self.gmail_client = gmail_client
+        self.actions = inbox_manager.suggest_actions(threads)
         self.batch_start = 0
         self.completed = False
         self.canceled = False
@@ -206,11 +285,10 @@ class InboxManagerShell(Cmd):
         ))
         
         for i, (thread, action) in enumerate(current_batch, 1):
-            latest_email = self.gmail_client.get_latest_email(thread)
+            latest_email = self.inbox_manager.gmail_client.get_latest_email(thread)
             if latest_email:
                 canceled_str = "[ACTION CANCELED] " if action.status == Status.CANCELED else ""
                 print(f"\n{i}. {canceled_str}From: {latest_email.sender}")
-
                 print(f"   Subject: {latest_email.subject}")
 
                 destination_str = f"Move to {action.destination.value}"
@@ -246,109 +324,11 @@ class InboxManagerShell(Cmd):
         print("quit            - Cancel all and exit")
         print("help            - Show this message")
 
-
-class InboxManager(Tool):
-    """Tool for managing inbox by automatically suggesting and executing actions on email threads"""
-    def __init__(
-        self,
-        llm: Model,
-        email_summarizer: EmailSummarizer,
-        gmail_client: GmailClient,
-        label_mapping: dict[EmailDestination, str]
-    ) -> None:
-        super().__init__(llm)
-        self.email_summarizer = email_summarizer
-        self.gmail_client = gmail_client
-
-        self.label_mapping = label_mapping
-        for dest in EmailDestination:
-            if dest not in self.label_mapping:
-                raise ValueError(f"Incomplete label mapping, missing a {dest} label")
-
-    def _initialize_generators(self) -> None:
-        """Initialize the LLM client for generating inbox management decisions"""
-        self.inbox_manager = LLMClient(inbox_management_prompt, self.llm)
-
-    def manage_inbox(self, threads: list[GmailThread]) -> list[InboxAction]:
-        return self.execute(threads)
-    
-    def execute(self, threads: list[GmailThread]) -> list[InboxAction]:
-        """Suggest and execute actions for organizing the inbox with user interaction"""
-        if not threads:
-            logging.info("No threads to process")
+    def run(self) -> list[InboxAction]:
+        """Run the shell and return executed actions"""
+        self.cmdloop()
+        
+        if self.canceled:
             return []
             
-        actions = self._suggest_actions(threads)
-        
-        # Use command shell for interaction
-        shell = InboxManagerShell(threads, actions, self.gmail_client)
-        shell.cmdloop()
-        
-        if shell.canceled:
-            return []
-            
-        # Execute non-canceled actions
-        for action in actions:
-            if action.status != Status.CANCELED:
-                action.execute(self.gmail_client, self.label_mapping)
-        
-        # TODO: print summary of executed actions
-        # Also print failed actions, if any
-
-        return [action for action in actions if action.status == Status.SUCCEEDED]
-    
-    def _suggest_actions(self, threads: list[GmailThread]) -> list[InboxAction]:
-        """
-        Generate suggested actions for the given threads
-        
-        Args:
-            threads: List of email threads to process
-            
-        Returns:
-            List of suggested actions
-        """
-        actions: list[InboxAction] = []
-        for thread in threads:
-            try:
-                # Get latest email from thread
-                latest_email = self.gmail_client.get_latest_email(thread)
-                if not latest_email:
-                    continue
-                
-                # Get or generate summary
-                summary = self.email_summarizer.summarize(latest_email)
-                
-                # Generate inbox management suggestion
-                response = self.inbox_manager.generate_response(
-                    email_summary=summary.summary,
-                    sender=latest_email.sender,
-                    subject=latest_email.subject
-                )
-                
-                action = InboxAction(
-                    thread=thread,
-                    destination=response["destination"],
-                    mark_as_read=response["mark_as_read"].lower() == "true",
-                )
-                actions.append(action)
-            except Exception as e:
-                logging.error(f"Failed to suggest action for email from {latest_email.sender if latest_email else 'unknown'}")
-                # Create default action that keeps thread in inbox
-                action = InboxAction(
-                    thread=thread,
-                    destination=EmailDestination.INBOX,
-                    mark_as_read=False,
-                )
-                actions.append(action)
-        
-        return actions
-    
-    @property
-    def description(self) -> str:
-        return "Manages inbox by organizing email threads based on content analysis and user preferences"
-    
-    @property
-    def required_inputs(self) -> dict[str, str]:
-        return {
-            "threads": "List of GmailThread objects to process"
-        }
+        return self.inbox_manager.execute_actions(self.actions)

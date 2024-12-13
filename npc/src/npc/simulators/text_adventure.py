@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 from pprint import pformat
 
-from npc.apis.llm_client import LLMClient
+from npc.apis.llm_client import LLMFunction
 from npc.prompts.prompt_common import TagPattern
 from npc.prompts.text_adventure.story_concept_template import prompt as story_concept_prompt
 from npc.prompts.text_adventure.story_outcomes_template import prompt as story_outcomes_prompt
@@ -54,8 +54,8 @@ class StoryNode:
         sampled_outcome = ""
         if previous_action:
             # Generate outcomes
-            story_outcomes_generator = LLMClient(story_outcomes_prompt, self.llm)
-            self.story_outcomes_response = story_outcomes_generator.generate_response(
+            story_outcomes_generator = LLMFunction(story_outcomes_prompt, self.llm)
+            self.story_outcomes_response = story_outcomes_generator.generate(
                 guide=self.story_guide,
                 previous_sections=story_so_far,
                 previous_action=self.previous_action
@@ -80,8 +80,8 @@ class StoryNode:
             sampled_outcome = self.outcomes[sampled_outcome_index]
 
         # Generate next section based on the sampled outcome
-        story_section_generator = LLMClient(story_section_prompt, self.llm)
-        self.story_section_response = story_section_generator.generate_response(
+        story_section_generator = LLMFunction(story_section_prompt, self.llm)
+        self.story_section_response = story_section_generator.generate(
             guide=self.story_guide,
             previous_sections=story_so_far,
             previous_action=self.previous_action,
@@ -132,8 +132,8 @@ class TextAdventureSimulator:
         self.current_node = self.root_node
 
     def _generate_story_guide(self, story_request: str) -> str:
-        story_concept_generator = LLMClient(story_concept_prompt, self.llm)
-        response = story_concept_generator.generate_response(story_request=story_request)
+        story_concept_generator = LLMFunction(story_concept_prompt, self.llm)
+        response = story_concept_generator.generate(story_request=story_request)
         return response["guide"]
 
     @property

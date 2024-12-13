@@ -1,11 +1,12 @@
 from typing import Any
 
+from npc.apis.llm_client import Model
 from npc.simulators.ai_assistant.tools.email_briefing_generator import EmailBriefingGenerator
 from npc.simulators.ai_assistant.tools.email_summarizer import EmailSummarizer
 from npc.simulators.ai_assistant.tools.inbox_manager import InboxManager
 
 class AIAssistant:
-    def __init__(self, llm):
+    def __init__(self, llm: Model):
         self.llm = llm
 
         self.email_summarizer = EmailSummarizer(llm)

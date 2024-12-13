@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import Enum
 from llama_index.llms.anthropic import Anthropic
 
@@ -10,22 +11,22 @@ class Model(Enum):
     SONNET = Anthropic(model="claude-3-5-sonnet-20240620", api_key=ANTHROPIC_API_KEY, max_tokens=4096)
 
 
-class LLMClient:
-    PROMPT_KEY = "prompt"
+def get_llm_response(text: str, model: Model) -> str:
+    response = model.value.chat(text)
+    return response.message.content
 
-    def __init__(
-            self,
-            prompt: Prompt,
-            model: Model,
-    ):
-        self.prompt = prompt
-        self.model = model.value
+
+@dataclass
+class LLMFunction:
+    PROMPT_KEY = "prompt"
+    
+    prompt: Prompt
+    model: Model
 
     # TODO: automatically stop generation when all output tags have been closed (can't do this for formatted tags though)
-    def generate_response(self, **input_tag_contents) -> str:
+    def generate(self, **input_tag_contents) -> str:
         formatted_prompt = self.prompt.format(**input_tag_contents)
-        response = self.model.chat(formatted_prompt)
-        output = response.message.content
+        output = get_llm_response(formatted_prompt, self.model)
         return {
             self.PROMPT_KEY: formatted_prompt,    
             **self.prompt.parse_output(output),

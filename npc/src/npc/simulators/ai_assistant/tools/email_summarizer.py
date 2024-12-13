@@ -1,21 +1,18 @@
 import aiofiles
 import asyncio
 import logging
+import pickle
 import threading
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 
 from npc.project_config import CACHE_DIR
 from npc.apis.gmail_client import Email
-from npc.apis.llm_client import LLMClient
+from npc.apis.llm_client import LLMFunction, Model
 from npc.prompts.ai_assistant.email_summary_template import prompt as email_summary_prompt, EmailPriority
 from npc.simulators.ai_assistant.tools.tool import Tool
-
-import pickle
-from pathlib import Path
-from typing import Optional, Dict
-from datetime import datetime, timedelta
 
 
 @dataclass
@@ -45,14 +42,17 @@ class EmailSummaryCache:
     """
     Thread-safe persistent cache for email summaries that periodically removes old entries.
     Uses async I/O for non-blocking saves and batches updates for efficiency.
+    Follows the singleton pattern to ensure a single cache instance.
     """
     
     _instance = None
     _lock = threading.Lock()
 
     def __new__(cls):
+        # Singleton logic
         if cls._instance is None:
             with cls._lock:
+                # Double-checked locking
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialize()
@@ -62,7 +62,7 @@ class EmailSummaryCache:
         self.cache_dir = Path(CACHE_DIR)
         self.cache_file = self.cache_dir / 'email_summaries.pkl'
         
-        self._memory_cache: Dict[str, EmailSummary] = {}
+        self._memory_cache: dict[str, EmailSummary] = {}
         self._lock = threading.RLock()
         self._unsaved_changes = False
         self._last_cleanup = datetime.min
@@ -143,51 +143,38 @@ class EmailSummaryCache:
 class EmailSummarizer(Tool):
     """Tool for generating email summaries with priority classification and content categorization."""
     
-    def __init__(self, llm: any) -> None:
-        super().__init__(llm)
+    def __init__(self, llm: Model) -> None:
+        super().__init__()
         self.cache = EmailSummaryCache()
-
-    def _initialize_generators(self) -> None:
-        self.summary_generator = LLMClient(email_summary_prompt, self.llm)
+        self.summary_generator = LLMFunction(email_summary_prompt, llm)
 
     def summarize(self, email: Email) -> EmailSummary:
-        return self.execute(email)
-
-    def execute(self, email: Email) -> EmailSummary:
         """Generate or retrieve cached email summary."""
         cached_summary = self.cache.get_summary(email.id)
         if cached_summary:
             return cached_summary
         
-        response = self.summary_generator.generate_response(
+        summary_response = self.summary_generator.generate(
             subject=email.subject,
             sender=email.sender,
             body=email.body,
             received_datetime=email.timestamp.strftime("%Y-%m-%d %H:%M"),
             current_date=datetime.now().strftime("%Y-%m-%d")
         )
-        
-        email_summary = EmailSummary(
+        summary = EmailSummary(
             email_id=email.id,
-            priority=response['priority'],
-            email_type=response['type'],
-            summary=response['summary'],
-            priority_analysis=response['priority_analysis'],
-            links={link: desc for link, desc in zip(response["links"], response["link_descriptions"])},
+            priority=summary_response['priority'],
+            email_type=summary_response['type'],
+            summary=summary_response['summary'],
+            priority_analysis=summary_response['priority_analysis'],
+            links={link: desc for link, desc in zip(summary_response["links"], summary_response["link_descriptions"])},
             received_time=email.timestamp,
             _last_cache_update_time=datetime.now()
         )
-        
-        self.cache.cache_summary(email_summary)
-        return email_summary
+        self.cache.cache_summary(summary)
+        return summary
 
     @property
     def description(self) -> str:
         return "Generates summaries of emails by analyzing their content"
     
-    @property
-    def required_inputs(self) -> dict[str, str]:
-        return {
-            "email": "Email object containing email metadata and content"
-        }
-        

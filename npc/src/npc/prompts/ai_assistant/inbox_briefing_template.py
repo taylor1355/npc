@@ -6,6 +6,8 @@ SYSTEM_PROMPT = [
     " similar in style to a presidential daily brief but focused on the user's information ecosystem."
 ]
 
+# TODO: make per-email analysis formatted as a JSON list to improve LLM-adherence
+# TODO: the final product of the outline step should be a table of contents
 USER_PROMPT = [
     "Here are the email summaries you need to analyze:",
     "",
@@ -20,8 +22,9 @@ USER_PROMPT = [
     "For each email summary:",
     "- Identify any action items it contains",
     "- If this email contains interesting information, what would the user have learned from carefully reading the email?",
-    "- Critically think about whether to include any links mentioned (only if the user is quite likely to want to click them)",
+    "- Think critically about whether to include any links mentioned. Links should only be included if the user is quite likely to want to click them.",
     "- What are some properties this email shares in common with other emails? This can he helpful for grouping emails together.",
+    "- Identify whether this email needs to be referenced by name in the executive summary or whether it can be grouped with other emails.",
     "- Strategize how this information should be integrated into the briefing.",
     "",
     "Now, plan how you will structure the briefing to communicate the information to the user in a low-cognitive-load, high-impact way.", 
