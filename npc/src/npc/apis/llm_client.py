@@ -4,6 +4,7 @@ from llama_index.llms.anthropic import Anthropic
 
 from npc.project_config import ANTHROPIC_API_KEY
 from npc.prompts.prompt_common import Prompt
+from npc.prompts import NpcPrompt
 
 
 class Model(Enum):
@@ -20,14 +21,15 @@ def get_llm_response(text: str, model: Model) -> str:
 class LLMFunction:
     PROMPT_KEY = "prompt"
     
-    prompt: Prompt
+    prompt: NpcPrompt
     model: Model
 
     # TODO: automatically stop generation when all output tags have been closed (can't do this for formatted tags though)
     def generate(self, **input_tag_contents) -> str:
-        formatted_prompt = self.prompt.format(**input_tag_contents)
+        prompt_obj = self.prompt.value
+        formatted_prompt = prompt_obj.format(**input_tag_contents)
         output = get_llm_response(formatted_prompt, self.model)
         return {
             self.PROMPT_KEY: formatted_prompt,    
-            **self.prompt.parse_output(output),
+            **prompt_obj.parse_output(output),
         }
