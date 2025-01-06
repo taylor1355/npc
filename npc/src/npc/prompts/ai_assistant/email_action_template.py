@@ -5,6 +5,7 @@ import logging
 from npc.prompts.prompt_common import create_prompt_template, Prompt, TagPattern
 
 
+# TODO: move to gmail_client.py
 class EmailDestination(Enum):
     NEWSLETTER = "newsletter"
     BUSINESS_TRANSACTION = "business_transaction"

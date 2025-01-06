@@ -97,7 +97,7 @@ class GmailSearchOptions:
             query_parts.extend(f"label:{label}" for label in self.labels)
         return " ".join(query_parts) if query_parts else "in:inbox"
 
-
+# TODO: add a "Thread" class, which inherits from GmailThread. This will make it so that external clients don't have to deal with GmailThread directly.
 @dataclass
 class Email:
     """Represents a Gmail email message"""
@@ -137,6 +137,7 @@ class Email:
                 return "Could not decode message body"
 
 
+# TODO: cache emails by threads (generalize the summary cache logic)
 @dataclass
 class GmailClient:
     """Client for interacting with Gmail API"""
