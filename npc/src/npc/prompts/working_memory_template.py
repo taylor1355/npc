@@ -1,4 +1,4 @@
-from npc.prompts.prompt_common import create_prompt_template, Prompt, TagPattern
+from .prompt_common import create_prompt_template, Prompt, TagPattern
 
 SYSTEM_PROMPT = [
     "You are a cognitive neuroscientist specializing in working memory dynamics and attentional processes.",
