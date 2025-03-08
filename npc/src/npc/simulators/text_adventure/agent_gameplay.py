@@ -1,16 +1,22 @@
 import textwrap
-from npc.agent.agent import Agent, LLMConfig
-from npc.interfaces.text_adventure_interface import TextAdventureInterface, TextAdventureResponse
+from npc.agent.agent import Agent, AgentLLMConfig
+from npc.interfaces.text_adventure_interface import TextAdventureInterface, TextAdventureResponse, TextAdventureRequest
 from .story_engine import TextAdventureSimulator
 
 def run_agent_playthrough(
     simulator: TextAdventureSimulator, 
-    config: LLMConfig, 
-    max_steps: int = 3
+    llm_config: AgentLLMConfig, 
+    max_steps: int = 3,
+    personality_traits: list[str] = [],
+    initial_working_memory: str = ""
 ):
     """Run an automated story playthrough with an AI agent"""
     simulator_interface = TextAdventureInterface(simulator)
-    agent = Agent(simulator_interface=simulator_interface, llm_config=config)
+    agent = Agent(
+        llm_config=llm_config,
+        personality_traits=personality_traits,
+        initial_working_memory=initial_working_memory
+    )
 
     simulator_response = TextAdventureResponse(
         success=True,
@@ -26,8 +32,17 @@ def run_agent_playthrough(
             textwrap.fill(simulator_response.observation, width=120),
             "",
         ]))
-        agent.update_state(simulator_response)
-        simulator_request = agent.choose_action()
+        
+        # Process observation and choose action using updated agent interface
+        action_index = agent.process_observation(
+            observation=simulator_response.observation,
+            available_actions=simulator_response.available_actions
+        )
+        
+        # Create request with chosen action
+        simulator_request = TextAdventureRequest(action_index=action_index)
+        
+        # Execute action in simulator
         simulator_response = simulator_interface.execute(simulator_request)
         
         if not simulator_response.success:

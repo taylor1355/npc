@@ -9,7 +9,7 @@ from mcp.client.stdio import stdio_client
 async def main():
     # Start MCP server
     server_params = StdioServerParameters(
-        command="python",
+        command="python3",
         args=["-m", "npc.mcp_server"],
     )
     

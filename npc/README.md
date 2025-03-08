@@ -4,8 +4,8 @@ The following files should be found in `npc.project_config.CREDENTIALS_DIR` dire
 
 - *api_keys.cfg*
 ```
-ANTHROPIC_API_KEY:"{anthropic api key}"
 OPENAI_API_KEY:"{openai api key}"
+OPENROUTER_API_KEY:"{openrouter api key}"
 PERPLEXITY_API_KEY:"{perplexity api key}"
 ```
 

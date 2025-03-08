@@ -6,9 +6,9 @@ import json
 
 from fastmcp import FastMCP, Context
 
-from npc.agent.agent import Agent, LLMConfig
+from npc.agent.agent import Agent, AgentLLMConfig
 from npc.apis.llm_client import Model
-from npc.project_config import ANTHROPIC_API_KEY
+from npc.project_config import OPENROUTER_API_KEY
 
 
 @dataclass
@@ -26,7 +26,7 @@ class AgentManager:
         self.agents: Dict[str, Agent] = {}
         
         # Default LLM config using latest models
-        self.default_llm_config = LLMConfig(
+        self.default_llm_config = AgentLLMConfig(
             small_llm=Model.HAIKU,
             large_llm=Model.SONNET,
         )
@@ -179,6 +179,6 @@ async def get_agent_info(agent_id: str) -> str:
 
 
 if __name__ == "__main__":
-    if not ANTHROPIC_API_KEY:
-        raise ValueError("ANTHROPIC_API_KEY must be set in project_config.py")
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY must be set in project_config.py")
     mcp.run()

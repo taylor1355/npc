@@ -133,18 +133,8 @@ class Prompt:
         if any(pattern.name == self.RESPONSE_KEY for pattern in self.output_tag_patterns):
             raise ValueError(f"Output tag patterns cannot have the reserved name '{self.RESPONSE_KEY}'.")
 
-    def format(self, **input_tag_contents) -> str:
-        """Format the prompt template with provided input values.
-        
-        Args:
-            **input_tag_contents: Keyword arguments containing values for input tags
-            
-        Returns:
-            Formatted prompt string
-            
-        Raises:
-            ValueError: If any required input tags are missing
-        """
+    def format(self, **input_tag_contents) -> list[ChatMessage]:
+        """Format the prompt template with provided input values."""
         missing_tags = set(self.input_tags) - set(input_tag_contents.keys())
         if missing_tags:
             raise ValueError(f"Missing required input tags: {missing_tags}")
@@ -160,18 +150,11 @@ class Prompt:
             Dictionary mapping tag names to their extracted/parsed values.
             Includes the full response text under the reserved key Prompt.RESPONSE_KEY.
         """
+        output_tag_contents = {
+            tag_pattern.name: tag_pattern.extract_from(output)
+            for tag_pattern in self.output_tag_patterns
+        }
         return {
             self.RESPONSE_KEY: output,
-            **self._extract_output_tags(output),
+            **output_tag_contents,
         }
-
-    def _extract_output_tags(self, output: str) -> dict[str, Any]:
-        """Extract and parse all configured output tags from response text.
-        
-        Args:
-            output: The text to extract tags from
-            
-        Returns:
-            Dictionary mapping tag names to their extracted/parsed values
-        """
-        return {tag_pattern.name: tag_pattern.extract_from(output) for tag_pattern in self.output_tag_patterns}

@@ -4,20 +4,17 @@ import json
 import logging
 import textwrap
 from dataclasses import dataclass
-from typing import Dict, List
 
-from llama_index.llms.anthropic import Anthropic
-
-from npc.apis.llm_client import LLMFunction
-from npc.prompts import NpcPrompt
+from npc.apis.llm_client import LLMFunction, Model
+from npc.prompts import AgentPrompt
 
 from .memory_database import MemoryDatabase
 
 
 @dataclass
-class LLMConfig:
-    small_llm: Anthropic
-    large_llm: Anthropic
+class AgentLLMConfig:
+    small_llm: Model
+    large_llm: Model
 
 
 class Agent:
@@ -25,10 +22,10 @@ class Agent:
     
     def __init__(
             self, 
-            llm_config: LLMConfig,
+            llm_config: AgentLLMConfig,
             initial_working_memory: str = "",
-            initial_long_term_memories: List[str] = [],
-            personality_traits: List[str] = [],
+            initial_long_term_memories: list[str] = [],
+            personality_traits: list[str] = [],
         ):
         self.working_memory = initial_working_memory
         self.long_term_memory = MemoryDatabase(initial_long_term_memories)
@@ -39,13 +36,13 @@ class Agent:
         self.current_actions = None
 
         # LLM functions for memory and decision making
-        self.query_generator = LLMFunction(NpcPrompt.MEMORY_QUERIES, llm_config.small_llm)
-        self.memory_report_generator = LLMFunction(NpcPrompt.MEMORY_REPORT, llm_config.small_llm)
-        self.working_memory_generator = LLMFunction(NpcPrompt.WORKING_MEMORY, llm_config.small_llm)
-        self.long_term_memory_generator = LLMFunction(NpcPrompt.LONG_TERM_MEMORY, llm_config.small_llm)
-        self.action_decision_generator = LLMFunction(NpcPrompt.ACTION_DECISION, llm_config.small_llm)
+        self.query_generator = LLMFunction(AgentPrompt.MEMORY_QUERIES, llm_config.small_llm)
+        self.memory_report_generator = LLMFunction(AgentPrompt.MEMORY_REPORT, llm_config.small_llm)
+        self.working_memory_generator = LLMFunction(AgentPrompt.WORKING_MEMORY, llm_config.small_llm)
+        self.long_term_memory_generator = LLMFunction(AgentPrompt.LONG_TERM_MEMORY, llm_config.small_llm)
+        self.action_decision_generator = LLMFunction(AgentPrompt.ACTION_DECISION, llm_config.small_llm)
 
-    def process_observation(self, observation: str, available_actions: Dict[int, str]) -> int:
+    def process_observation(self, observation: str, available_actions: dict[int, str]) -> int:
         """Process an observation and choose an action
         
         Args:
