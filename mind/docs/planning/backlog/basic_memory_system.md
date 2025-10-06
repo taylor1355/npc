@@ -1,5 +1,7 @@
 # Memory System with Scoring
 
+**Status:** ✅ Partially Implemented (Basic system complete, scoring not yet added)
+
 ## Problem Statement
 
 NPCs need to remember their experiences to maintain continuity and make informed decisions. Without memory, each decision is made in isolation, creating inconsistent and unbelievable behavior.
@@ -50,16 +52,37 @@ NPCs need to remember their experiences to maintain continuity and make informed
 - Vector store implementation (llama-index)
 - Basic LLM for importance scoring
 
+## Current Implementation
+
+✅ **Completed:**
+- Vector store via ChromaDB with semantic search
+- Memory query generation from observations
+- Top-k retrieval per query
+- Basic Memory model with text content
+
+⚠️ **Missing:**
+- Importance scoring during formation
+- Recency decay in retrieval
+- Emotional intensity weighting
+- Memory metadata (timestamp, location, ID)
+- Memory deduplication
+
+## Next Steps
+
+See [roadmap.md](../roadmap.md) Phase 1 for:
+1. Memory metadata enhancement (1.1)
+2. Memory importance scoring (1.2)
+3. Memory deduplication (1.4)
+
 ## Priority Rationale
 
 **Obviousness**: Very high - Memory is clearly required for any cognitive continuity. The need is unambiguous even if implementation has choices.
 
-**Development Velocity**: Massive positive long-term, neutral short-term
-- Short-term: Replacing current simple memory with scored retrieval adds some complexity
+**Development Velocity**: Massive positive long-term
 - Tech tree effect: Every other cognitive feature depends on this - it's THE bottleneck
 - Enables: working memory, planning, reflection, social memory, everything
-- Net: Extremely positive due to unlocking everything else
+- ✅ Basic system now complete and unblocking development
 
 **Concreteness**: Moderate - Players won't directly see memory, but will see more consistent NPC behavior
 
-This is the foundational feature that everything else builds upon.
+This is the foundational feature that everything else builds upon. **Basic implementation is now complete; enhancements remain.**

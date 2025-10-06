@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class Memory(BaseModel):
     """A single memory with metadata"""
+    id: str
     content: str
     timestamp: float | None = None
     importance: float = Field(default=1.0, ge=0.0, le=10.0)

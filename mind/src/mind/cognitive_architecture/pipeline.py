@@ -8,13 +8,13 @@ from .nodes.memory_query.node import MemoryQueryNode
 from .nodes.memory_retrieval.node import MemoryRetrievalNode
 from .nodes.cognitive_update.node import CognitiveUpdateNode
 from .nodes.action_selection.node import ActionSelectionNode
-from .memory.store import MemoryStore
+from .memory.vector_db_memory import VectorDBMemory
 
 
 class CognitivePipeline:
     """Orchestrates the cognitive processing pipeline using LangGraph"""
 
-    def __init__(self, llm: BaseChatModel, memory_store: MemoryStore):
+    def __init__(self, llm: BaseChatModel, memory_store: VectorDBMemory):
         self.llm = llm
         self.memory_store = memory_store
 

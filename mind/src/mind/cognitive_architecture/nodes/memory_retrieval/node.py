@@ -30,14 +30,21 @@ class MemoryRetrievalNode(Node):
     async def process(self, state: PipelineState) -> PipelineState:
         """Retrieve memories using the queries in state"""
 
-        memories = []
-
         # Retrieve memories for each query
+        all_memories = []
         for query in state.memory_queries:
             results = await self.memory_store.search(query, top_k=self.memories_per_query)
-            memories.extend(results)
+            all_memories.extend(results)
+
+        # Deduplicate by memory ID, keeping first occurrence
+        seen_ids = set()
+        deduplicated_memories = []
+        for memory in all_memories:
+            if memory.id not in seen_ids:
+                seen_ids.add(memory.id)
+                deduplicated_memories.append(memory)
 
         # Update state
-        state.retrieved_memories = memories
+        state.retrieved_memories = deduplicated_memories
 
         return state

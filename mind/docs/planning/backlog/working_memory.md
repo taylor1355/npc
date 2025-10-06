@@ -1,5 +1,7 @@
 # Working Memory Management
 
+**Status:** ✅ Partially Implemented (Basic working memory exists, needs structure)
+
 ## Problem Statement
 
 NPCs need to maintain context across decision cycles. Currently, each decision starts fresh, losing important context about ongoing activities, recent events, and current goals. This creates disjointed behavior where NPCs "forget" what they were just doing.
@@ -59,15 +61,36 @@ As context grows:
 - Observation formatting from simulation
 - Clear notion of "importance" for pruning
 
+## Current Implementation
+
+✅ **Completed:**
+- Working memory field in PipelineState
+- Cognitive update node maintains working memory across cycles
+- Memory integration pulls relevant long-term memories
+
+⚠️ **Current Limitations:**
+- Unstructured (simple string format)
+- No automatic pruning/summarization
+- No explicit goal or plan tracking
+- Limited psychological richness
+
+## Next Steps
+
+See [roadmap.md](../roadmap.md) Phase 2 for:
+1. Flexible Cognitive State (2.1) - Structured working memory with goals, plans, emotional state
+2. Selective Memory Formation (2.2) - Only store significant experiences
+3. Tool-Based Updates (Phase 3) - Granular state updates without full regeneration
+
 ## Priority Rationale
 
 **Obviousness**: High - Clearly needed for continuity between decisions. Without it, NPCs "forget" what they were just doing.
 
 **Development Velocity**: Mixed
-- Short-term: Adds state management complexity and context window management
+- Short-term: Adding structure and tools adds complexity
 - Long-term: Enables multi-step behaviors, conversations, goal pursuit
-- Net: Slightly positive - foundational for coherent behavior
+- ✅ Basic implementation complete and unblocking development
+- Net: Positive - foundational for coherent behavior
 
 **Concreteness**: High - Players immediately notice when NPCs remember context vs acting randomly. Visible in conversations and multi-step tasks.
 
-Essential for any behavior more complex than single actions.
+Essential for any behavior more complex than single actions. **Basic implementation complete; structural improvements remain.**

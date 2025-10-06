@@ -4,12 +4,45 @@ import time
 from typing import Optional
 import chromadb
 from sentence_transformers import SentenceTransformer
+from pydantic import BaseModel
 
 from ..models import Memory
+from ..id_generator import IdGenerator
 
 
-class MemoryStore:
-    """Vector-based memory storage using ChromaDB"""
+class ChromaQueryResult(BaseModel):
+    """Wrapper for ChromaDB query results with cleaner access"""
+    ids: list[list[str]]
+    documents: list[list[str]]
+    metadatas: list[list[dict]]
+    distances: list[list[float]] | None = None
+
+    @property
+    def first_query_ids(self) -> list[str]:
+        """Get IDs from first query result"""
+        return self.ids[0] if self.ids else []
+
+    @property
+    def first_query_documents(self) -> list[str]:
+        """Get documents from first query result"""
+        return self.documents[0] if self.documents else []
+
+    @property
+    def first_query_metadatas(self) -> list[dict]:
+        """Get metadatas from first query result"""
+        return self.metadatas[0] if self.metadatas else []
+
+    def iter_first_query(self):
+        """Iterate over (id, document, metadata) tuples for first query"""
+        return zip(
+            self.first_query_ids,
+            self.first_query_documents,
+            self.first_query_metadatas
+        )
+
+
+class VectorDBMemory:
+    """Vector-based memory storage using ChromaDB - a configurable component for memory systems"""
 
     def __init__(
         self,
@@ -40,13 +73,15 @@ class MemoryStore:
             metadata={"hnsw:space": "cosine"}
         )
 
-        self._id_counter = 0
-
     def add_memory(self, content: str, importance: float = 1.0) -> Memory:
         """Add a memory to the store"""
 
+        # Generate memory ID
+        memory_id = IdGenerator.generate_memory_id()
+
         # Create memory object
         memory = Memory(
+            id=memory_id,
             content=content,
             timestamp=time.time(),
             importance=importance
@@ -57,9 +92,8 @@ class MemoryStore:
         memory.embedding = embedding
 
         # Store in ChromaDB
-        self._id_counter += 1
         self.collection.add(
-            ids=[str(self._id_counter)],
+            ids=[memory_id],
             embeddings=[embedding],
             documents=[content],
             metadatas=[{
@@ -83,21 +117,22 @@ class MemoryStore:
         query_embedding = self.encoder.encode(query).tolist()
 
         # Search in ChromaDB
-        results = self.collection.query(
+        raw_results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=min(top_k, self.collection.count())
         )
 
-        if not results["ids"] or not results["ids"][0]:
+        # Parse into typed model
+        results = ChromaQueryResult(**raw_results)
+
+        if not results.first_query_ids:
             return []
 
-        # Convert results to Memory objects
+        # Convert results to Memory objects with combined scoring
         memories = []
         current_time = time.time()
 
-        for i, doc in enumerate(results["documents"][0]):
-            metadata = results["metadatas"][0][i]
-
+        for memory_id, content, metadata in results.iter_first_query():
             # Calculate combined score
             similarity_score = 1.0  # ChromaDB returns sorted by similarity
             importance_score = metadata.get("importance", 1.0) / 10.0
@@ -111,7 +146,8 @@ class MemoryStore:
             )
 
             memory = Memory(
-                content=doc,
+                id=memory_id,
+                content=content,
                 timestamp=metadata.get("timestamp"),
                 importance=metadata.get("importance", 1.0)
             )
