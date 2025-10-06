@@ -5,6 +5,7 @@ from typing import Protocol
 from ..base import Node
 from ...state import PipelineState
 from ...models import Memory
+from ...memory.vector_db_memory import VectorDBQuery
 
 # Default memories to retrieve per query
 DEFAULT_MEMORIES_PER_QUERY = 2
@@ -13,7 +14,7 @@ DEFAULT_MEMORIES_PER_QUERY = 2
 class MemoryStoreProtocol(Protocol):
     """Protocol for memory storage backends"""
 
-    async def search(self, query: str, top_k: int = 5) -> list[Memory]:
+    async def search(self, query: VectorDBQuery) -> list[Memory]:
         """Search for memories"""
         ...
 
@@ -32,8 +33,13 @@ class MemoryRetrievalNode(Node):
 
         # Retrieve memories for each query
         all_memories = []
-        for query in state.memory_queries:
-            results = await self.memory_store.search(query, top_k=self.memories_per_query)
+        for query_text in state.memory_queries:
+            query = VectorDBQuery(
+                query=query_text,
+                top_k=self.memories_per_query,
+                current_simulation_time=state.observation_context.current_simulation_time if hasattr(state.observation_context, 'current_simulation_time') else None
+            )
+            results = await self.memory_store.search(query)
             all_memories.extend(results)
 
         # Deduplicate by memory ID, keeping first occurrence

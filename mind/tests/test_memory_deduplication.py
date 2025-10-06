@@ -1,7 +1,7 @@
 """Test memory deduplication in the retrieval node"""
 
 import pytest
-from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory, VectorDBQuery
 from mind.cognitive_architecture.nodes.memory_retrieval.node import MemoryRetrievalNode
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.models import ObservationContext
@@ -72,7 +72,8 @@ async def test_memory_ids_are_stable():
     original_id = added_memory.id
 
     # Retrieve it
-    results = await memory_store.search("Test memory", top_k=1)
+    query = VectorDBQuery(query="Test memory", top_k=1)
+    results = await memory_store.search(query)
 
     assert len(results) == 1
     assert results[0].id == original_id, \

@@ -40,20 +40,25 @@ Add memory metadata, importance scoring, and conversation tracking to improve re
 ### Deliverables
 
 #### 1.1 Memory Metadata Enhancement
-**Status:** Not started
+**Status:** ✅ Completed
 **Priority:** High
 **Spec:** [simulation_metadata_tool.md](backlog/simulation_metadata_tool.md)
 
 Add contextual metadata to Memory model:
-- `simulation_time`: In-game timestamp when memory was formed
-- `location`: Grid coordinates where event occurred
-- `memory_id`: Unique ID for citation (e.g., "M1234")
-- Display format for LLM: `[M1234 | T:Day2-08:00 | L:(5,10)] Memory content...`
+- ✅ `timestamp`: Simulation timestamp (game ticks/frames)
+- ✅ `location`: Grid coordinates where event occurred
+- ✅ `id`: Unique ID for citation (format: `memory_<uuid>`)
+- ✅ Display format for LLM via `__str__()`: `[memory_<uuid> | T:<timestamp> | L:(x,y)] Memory content...`
+- ✅ Created `VectorDBMetadata` model for type-safe metadata handling
+- ✅ Created `VectorDBQuery` model to encapsulate search parameters
+- ✅ Updated `ObservationContext` with `current_simulation_time` and `agent_location`
+- ✅ Improved VectorDBMemory documentation and renamed parameters for clarity
 
 **Benefits:**
 - NPCs can reason about temporal/spatial context
 - Enables memory citation in decision explanations
 - Improves retrieval relevance through temporal/spatial filtering
+- Strong typing throughout the memory system
 
 #### 1.2 Memory Importance Scoring
 **Status:** Not started
