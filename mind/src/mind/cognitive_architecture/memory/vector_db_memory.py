@@ -164,9 +164,13 @@ class VectorDBMemory:
         query_embedding = self.encoder.encode(query.query).tolist()
 
         # Search in ChromaDB
+        collection_count = self.collection.count()
+        if collection_count == 0:
+            return []
+
         raw_results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=min(query.top_k, self.collection.count())
+            n_results=min(query.top_k, collection_count)
         )
 
         # Parse into typed model
