@@ -4,6 +4,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from .models import Memory, Action, ObservationContext
+from .nodes.cognitive_update.models import NewMemory
 
 
 def merge_dicts(left: dict, right: dict) -> dict:
@@ -21,6 +22,9 @@ class PipelineState(BaseModel):
     working_memory: str = ""
     memory_queries: list[str] = Field(default_factory=list)
     retrieved_memories: list[Memory] = Field(default_factory=list)
+
+    # Daily memory buffer (cleared during sleep/consolidation)
+    daily_memories: list[NewMemory] = Field(default_factory=list)
 
     # Flexible cognitive context
     cognitive_context: dict = Field(default_factory=dict)

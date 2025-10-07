@@ -43,6 +43,10 @@ class CognitiveUpdateNode(LLMNode):
             KEY_GOALS: output.current_goals,
             KEY_EMOTIONAL: output.emotional_state
         }
+
+        # Add new memories to daily buffer
+        state.daily_memories.extend(output.new_memories)
+
         self.track_tokens(state, tokens)
 
         return state

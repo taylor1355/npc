@@ -61,18 +61,22 @@ Add contextual metadata to Memory model:
 - Strong typing throughout the memory system
 
 #### 1.2 Memory Importance Scoring
-**Status:** Not started
+**Status:** ✅ Completed (integrated with 2.2)
 **Priority:** Medium
 
 Implement importance-based retrieval weighting:
-- Assign importance score (1-10) during memory formation
-- Apply recency decay to older memories
-- Calculate emotional weight from memory content
-- Combined scoring: `relevance * importance * recency_factor`
+- ✅ LLM assigns importance scores (1-10) during cognitive update
+- ✅ Recency decay applied in VectorDBMemory.search
+- ✅ Emotional weight evaluated via memory formation guidelines
+- ✅ Combined scoring formula implemented
 
 **Implementation:**
-- Add `calculate_importance()` method to [memory/store.py](../../src/mind/cognitive_architecture/memory/store.py)
-- Modify retrieval to include importance in ranking
+- ✅ NewMemory model with importance field
+- ✅ Daily memory buffer in PipelineState
+- ✅ Cognitive update prompt includes memory formation guidelines
+- ✅ MemoryConsolidationNode (placeholder) for long-term storage
+
+**Note:** See [generative_agents_memory.md](backlog/generative_agents_memory.md) for planned consolidation enhancements.
 
 #### 1.3 Conversation History Tracking
 **Status:** Not started
@@ -135,19 +139,22 @@ Replace string-based working memory with structured but extensible state:
 - Update prompts to work with structured format
 
 #### 2.2 Selective Memory Formation
-**Status:** Not started (regression from old code)
+**Status:** ✅ Completed (basic implementation)
 **Priority:** High
 
 Re-implement conditional long-term memory formation:
-- New pipeline node: `memory_formation`
-- Trigger criteria: emotional intensity, goal relevance, novelty
-- Importance scoring (1-10) during formation
-- Only add significant experiences to long-term memory
+- ✅ Memory formation integrated into cognitive_update node
+- ✅ Trigger criteria: emotional intensity, goal relevance, novelty (in prompt)
+- ✅ Importance scoring (1-10) via LLM evaluation
+- ✅ Daily memory buffer prevents immediate long-term storage pollution
 
 **Implementation:**
-- New `nodes/memory_formation/` module
-- Add conditional edge in pipeline graph
-- Importance calculation based on criteria
+- ✅ NewMemory model in cognitive_update/models.py
+- ✅ Daily memory buffer (`state.daily_memories`)
+- ✅ Memory formation guidelines in cognitive_update prompt
+- ✅ MemoryConsolidationNode for moving daily→long-term storage
+
+**Future Enhancements:** See [generative_agents_memory.md](backlog/generative_agents_memory.md) for sophisticated consolidation (filtering, reflections, abstraction).
 
 #### 2.3 Prompt Refinement
 **Status:** Not started

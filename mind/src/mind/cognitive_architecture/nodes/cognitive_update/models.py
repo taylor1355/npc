@@ -3,6 +3,16 @@
 from pydantic import BaseModel, Field
 
 
+class NewMemory(BaseModel):
+    """A new memory to be stored from this decision cycle"""
+    content: str = Field(description="The memory content")
+    importance: float = Field(
+        description="Importance score (1-10)",
+        ge=1.0,
+        le=10.0
+    )
+
+
 class CognitiveUpdateInput(BaseModel):
     """Input for cognitive context update"""
 
@@ -26,4 +36,8 @@ class CognitiveUpdateOutput(BaseModel):
     )
     updated_working_memory: str = Field(
         description="Updated working memory incorporating new information"
+    )
+    new_memories: list[NewMemory] = Field(
+        default_factory=list,
+        description="New memories to store from this experience (can be empty if nothing significant)"
     )
