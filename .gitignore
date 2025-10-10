@@ -9,6 +9,7 @@ wandb/
 /cache/
 /credentials/
 /tmp/
+mind/tmp/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -5,7 +5,7 @@ import asyncio
 import json
 
 from mind.interfaces.mcp.server import MCPServer
-from mind.interfaces.mcp.models import MindConfig, SimulationRequest, MindResponse
+from mind.interfaces.mcp.models import MindConfig
 from mind.cognitive_architecture.models import (
     Observation,
     StatusObservation,
@@ -119,16 +119,13 @@ async def test_decide_action(mcp_server, test_mind_config, test_observation):
         {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
     )
 
-    # Create simulation request
-    request = SimulationRequest(
-        mind_id="test_mind_001",
-        observation=test_observation
-    )
-
-    # Decide action
+    # Decide action using new structured format
     result = await mcp_server.mcp.call_tool(
         "decide_action",
-        {"request": request.model_dump()}
+        {
+            "mind_id": "test_mind_001",
+            "observation": test_observation.model_dump()
+        }
     )
 
     # Parse response from TextContent list
@@ -203,13 +200,12 @@ async def test_full_workflow(mcp_server, test_mind_config, test_observation):
     assert create_response["status"] == "created"
 
     # Step 2: Make a decision
-    request = SimulationRequest(
-        mind_id="test_mind_001",
-        observation=test_observation
-    )
     result = await mcp_server.mcp.call_tool(
         "decide_action",
-        {"request": request.model_dump()}
+        {
+            "mind_id": "test_mind_001",
+            "observation": test_observation.model_dump()
+        }
     )
     action_response = json.loads(result[0].text)
     assert action_response["status"] == "success"

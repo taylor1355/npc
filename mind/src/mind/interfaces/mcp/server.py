@@ -59,29 +59,42 @@ class MCPServer:
 
         @self.mcp.tool()
         async def decide_action(
-            request: SimulationRequest,
+            mind_id: str,
+            observation: dict,
             ctx: Context = None,
-        ) -> MindResponse:
+        ) -> dict:
             """Process observation from simulation and decide on an action
 
             Args:
-                request: SimulationRequest with mind_id and structured observation
+                mind_id: Unique identifier for the mind
+                observation: Structured observation dict (will be validated to Observation model)
             """
             # Get mind
-            if request.mind_id not in self.minds:
-                return MindResponse(
-                    status="error",
-                    error_message=f"Mind {request.mind_id} not found"
-                )
+            if mind_id not in self.minds:
+                return {
+                    "status": "error",
+                    "action": None,
+                    "error_message": f"Mind {mind_id} not found"
+                }
 
-            mind = self.minds[request.mind_id]
+            mind = self.minds[mind_id]
+
+            # Validate observation dict to Observation model
+            try:
+                obs = Observation.model_validate(observation)
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "action": None,
+                    "error_message": f"Invalid observation format: {str(e)}"
+                }
 
             # Update conversation histories
-            mind.update_conversations(request.observation.conversations)
+            mind.update_conversations(obs.conversations)
 
             # Build pipeline state
             state = PipelineState(
-                observation=request.observation,
+                observation=obs,
                 working_memory=mind.working_memory,
                 personality_traits=mind.traits,
                 conversation_histories=mind.conversation_histories,
@@ -94,10 +107,12 @@ class MCPServer:
             mind.working_memory = result.working_memory
             mind.daily_memories.extend(result.daily_memories)
 
-            return MindResponse(
-                status="success",
-                action=result.chosen_action
-            )
+            # Return action as dict (FastMCP will serialize)
+            return {
+                "status": "success",
+                "action": result.chosen_action.model_dump() if result.chosen_action else None,
+                "error_message": None
+            }
 
         @self.mcp.tool()
         async def consolidate_memories(
