@@ -38,28 +38,27 @@ This roadmap outlines the phased evolution of the NPC cognitive architecture. Th
 Integrate the new CognitivePipeline with the Godot simulation, replacing the old Agent class in the MCP server.
 
 ### Status
-**Not started** - Blocking all other work
+**✅ Completed** - MCP server modernized with structured observations
 
 ### Deliverables
 
 #### 0.1 MCP Server Modernization
-**Status:** Not started
+**Status:** ✅ Completed
 **Priority:** Critical
 **Spec:** [godot_integration.md](backlog/godot_integration.md)
 
-Update MCP server to use CognitivePipeline:
-- Replace `mind.agent.agent.Agent` with `CognitivePipeline`
-- Implement `MindRequest` → `ObservationContext` conversion
-- Implement `Action` → Godot action format conversion
-- Handle event stream processing
-- Add memory consolidation trigger
+Completed implementation:
+- ✅ Created Mind class encapsulating cognitive pipeline + memory store
+- ✅ Structured Observation model (Status, Needs, Vision, Conversation sub-observations)
+- ✅ Godot sends observation dicts directly (no text formatting)
+- ✅ FastMCP server validates dicts → Pydantic models
+- ✅ Returns action dicts for Godot execution
+- ✅ Added consolidate_memories tool for daily→long-term transfers
+- ✅ Renamed all agent → mind terminology throughout
+- ✅ Integration tests passing (5/5)
 
-**Implementation:**
-- Update `mcp_server.py` imports and AgentManager
-- Create event formatter (events → observation text)
-- Create action converter (Action → GDScript format)
-- Add per-agent VectorDBMemory instances
-- Implement `process_observation` with MindRequest/MindResponse
+**Open Items:**
+- ⚠️ **Clean up `src/mind/apis/`** - Currently has 4 different LLM client implementations that need consolidation
 
 ## Phase 1: Memory Enhancements
 

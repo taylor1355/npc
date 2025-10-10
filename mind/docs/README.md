@@ -2,81 +2,93 @@
 
 ## Overview
 
-This repository provides the cognitive architecture for NPCs used in the [NPC simulation module](https://github.com/taylor1355/npc-simulation). It implements agent-based decision making through memory systems and LLM integration, exposed via the Model Context Protocol (MCP) for network communication.
+This repository provides the cognitive architecture for NPCs used in the [NPC simulation](https://github.com/taylor1355/npc-simulation). It implements mind-based decision making through a LangGraph cognitive pipeline with memory systems and LLM integration, exposed via the Model Context Protocol (MCP) for network communication.
 
 ## Architecture
 
 ```
 NPC Cognitive Architecture
-├── Agent System (agent.py)
-│   ├── Working Memory - Recent context and observations
-│   ├── Long-term Memory - Vector database (ChromaDB)
-│   └── Decision Engine - LLM-based action selection
-├── MCP Server (mcp_server.py)
-│   ├── Tool: create_agent - Initialize new NPCs
-│   ├── Tool: process_observation - Generate actions
-│   ├── Tool: cleanup_agent - Remove NPCs
-│   └── Resource: agent://{id}/info - Agent state
-└── Simulators
-    ├── Base Interface (base_interface.py) - Simulator protocol
-    └── Text Adventure (text_adventure.py) - Standalone demo
+├── Cognitive Pipeline (cognitive_architecture/)
+│   ├── Memory Query - Generate semantic search queries
+│   ├── Memory Retrieval - Fetch relevant long-term memories
+│   ├── Cognitive Update - Update working memory, form new memories
+│   └── Action Selection - Choose action based on context
+├── MCP Server (interfaces/mcp/)
+│   ├── Tool: create_mind - Initialize cognitive pipeline
+│   ├── Tool: decide_action - Process observation → action
+│   ├── Tool: consolidate_memories - Daily → long-term storage
+│   ├── Tool: cleanup_mind - Remove mind instance
+│   └── Resources: mind://{id}/* - State endpoints
+└── Memory Systems
+    ├── Working Memory - Pydantic model for current context
+    ├── Daily Memories - Buffer for unconsolidated experiences
+    └── Long-term Memory - ChromaDB vector store
 ```
 
 ## Core Components
 
-### Agent System
+### Cognitive Architecture
 
-The `Agent` class (`src/npc/agent/agent.py`) manages NPC cognition:
+The cognitive pipeline (`src/mind/cognitive_architecture/`) processes observations through a 4-node async pipeline:
 
-**Memory Architecture:**
-- **Working Memory**: Maintains recent observations and current context as text
-- **Long-term Memory**: ChromaDB vector store for semantic retrieval of past experiences
-- **Memory Updates**: Each observation triggers memory queries and working memory updates
+**Memory Systems:**
+- **Working Memory**: Pydantic model tracking situation assessment, active goals, current plan, emotional state
+- **Daily Memories**: Buffer of experiences with importance scores, consolidated at natural break points
+- **Long-term Memory**: ChromaDB vector store enabling semantic retrieval of past experiences
 
-**Decision Process:**
-1. Receive observation from simulator
-2. Query long-term memory for relevant experiences
-3. Update working memory with new context
-4. Generate action decision via LLM
-5. Store significant observations in long-term memory
+**Processing Pipeline:**
+1. **Memory Query**: LLM generates semantic search queries for relevant memories
+2. **Memory Retrieval**: Fetches top-k similar memories from ChromaDB
+3. **Cognitive Update**: Updates working memory with new context, forms new daily memories
+4. **Action Selection**: Chooses action from available options based on full context
+
+**Key Models:**
+- `Observation`: Structured observation with status, needs, vision, conversations
+- `WorkingMemory`: Current situational context with flexible schema
+- `Action`: Chosen action with type and parameters
 
 ### MCP Server
 
-The MCP server (`src/npc/mcp_server.py`) provides network access to agents:
+The MCP server (`src/mind/interfaces/mcp/`) provides network access to minds via Server-Sent Events:
+
+**Mind Management:**
+- `Mind` class encapsulates cognitive pipeline, memory store, conversation histories
+- `Mind.from_config()` creates instances with specified traits and initial memories
+- Dictionary-based registry manages active mind instances
 
 **Tools:**
-- `create_agent(agent_id, config)`: Initialize agent with traits and memories
-- `process_observation(agent_id, observation, available_actions)`: Generate action choice
-- `cleanup_agent(agent_id)`: Remove agent and free resources
+- `create_mind(mind_id, config)`: Initialize mind with cognitive pipeline
+- `decide_action(mind_id, observation)`: Process structured observation → action dict
+- `consolidate_memories(mind_id)`: Transfer daily → long-term storage
+- `cleanup_mind(mind_id)`: Remove mind and free resources
 
 **Resources:**
-- `agent://{agent_id}/info`: Retrieve agent state (traits, working memory)
+- `mind://{id}/state`: Complete mental state snapshot
+- `mind://{id}/working_memory`: Current working memory as JSON
+- `mind://{id}/daily_memories`: Unconsolidated memories list
 
-The server runs on HTTP/SSE transport, typically on port 8000.
+### Integration with Godot
 
-### Integration with Simulation
+The Godot simulation communicates through a layered client system:
 
-The simulation module communicates with this cognitive architecture through a three-tier system:
+**Communication Flow:**
+1. **EntityController** (Godot): Collects `CompositeObservation` with structured sub-observations
+2. **McpMindClient** (GDScript): Serializes observation via `get_data()` → dict
+3. **McpSdkClient** (C#): Manages WebSocket connection and request/response correlation
+4. **MCP Server** (Python): Validates dict → `Observation` model, runs cognitive pipeline
+5. **Response**: Action dict flows back through layers → Godot executes
 
-1. **NpcController** (GDScript): Gathers observations every 3 seconds
-2. **McpNpcClient** (GDScript/C# bridge): Formats observations and sends to MCP
-3. **MCP Server** (this repo): Processes observations and returns actions
-
-**Observation Format:**
-The simulation sends structured observations including:
-- NPC needs (hunger, hygiene, fun, energy) as percentages
-- Visible entities with available interactions
-- Current state and interaction status
-- Recent events (interaction lifecycle, conversations)
+**Observation Structure:**
+Structured data including entity_id, simulation_time, status (position, movement), needs (hunger, energy, etc.), vision (visible entities with interactions), conversations (per-interaction histories).
 
 **Action Types:**
-The cognitive architecture can return:
-- `move_to`: Navigate to specific location
-- `interact_with`: Engage with item or NPC
+- `move_to`: Navigate to specific position
+- `interact_with`: Engage with entity (item or NPC)
 - `wander`: Random movement
 - `wait`: Remain idle
-- `act_in_interaction`: Perform interaction-specific actions
+- `act_in_interaction`: Interaction-specific actions
 - `cancel_interaction`: End current interaction
+- `respond_to_interaction_bid`: Accept/reject interaction requests
 
 ## Setup
 
@@ -87,50 +99,47 @@ poetry install
 
 ### Configuration
 
-Create `credentials/api_keys.cfg`:
-```
-OPENROUTER_API_KEY:"{your-api-key}"
+Set environment variable:
+```bash
+export OPENROUTER_API_KEY="your-api-key"
 ```
 
 ### Running the Server
 ```bash
-# Start MCP server (default: localhost:8000)
-poetry run python -m npc.mcp_server
-
-# Custom host/port
-poetry run python -m npc.mcp_server --host 0.0.0.0 --port 8080
+# Start MCP server (default: localhost:3000)
+poetry run python src/mind/interfaces/mcp/main.py
 ```
 
 ## Development
 
 ### Testing
 ```bash
+# Run integration tests
+poetry run python -m pytest tests/test_mcp_integration.py -v
+
+# All tests
 poetry run pytest
 ```
 
-### Extending Behavior
-
-**Modify Prompts**: Edit templates in `src/npc/prompts/` to change:
-- Memory query generation
-- Working memory updates
-- Action decision logic
-
-**Add Memory Types**: Extend `MemoryDatabase` to support:
-- Different embedding models
-- Additional metadata
-- Custom retrieval strategies
-
-**Create Simulators**: Implement `BaseSimulator` interface for new environments.
+### Project Structure
+```
+src/mind/
+├── cognitive_architecture/    # Pipeline and memory systems
+│   ├── nodes/                 # Pipeline nodes
+│   └── memory/                # Memory implementations
+├── interfaces/mcp/            # MCP server and models
+├── apis/                      # LLM client integration
+└── prompts/                   # LLM prompt templates
+```
 
 ## Documentation
 
-- [agent.md](agent.md) - Detailed agent architecture
-- [mcp-server.md](mcp-server.md) - MCP protocol and tools
-- [simulators.md](simulators.md) - Environment implementations
-- [apis.md](apis.md) - External service integrations
+- [cognitive_architecture/overview.md](cognitive_architecture/overview.md) - Detailed pipeline architecture
+- [interfaces/mcp.md](interfaces/mcp.md) - MCP protocol and tools
+- [planning/roadmap.md](planning/roadmap.md) - Development roadmap
+- [meta/style-guide.md](meta/style-guide.md) - Documentation standards
 
 ## Related Resources
 
-- Simulation module: [$NPC](https://github.com/taylor1355/npc-simulation)
+- Godot simulation: [npc-simulation](https://github.com/taylor1355/npc-simulation)
 - Development guide: [CLAUDE.md](/CLAUDE.md)
-- Style guide: [meta/style-guide.md](meta/style-guide.md)
