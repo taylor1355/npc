@@ -8,6 +8,7 @@ wandb/
 .vscode/
 /cache/
 /credentials/
+/tmp/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

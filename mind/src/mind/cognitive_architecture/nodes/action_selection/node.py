@@ -25,7 +25,7 @@ class ActionSelectionNode(LLMNode):
         """Select an action based on current cognitive and emotional state"""
 
         # Format available actions using their __str__ methods
-        actions_text = "\n".join([f"- {str(action)}" for action in state.observation_context.available_actions])
+        actions_text = "\n".join([f"- {str(action)}" for action in state.available_actions])
 
         # Format cognitive context
         context_text = ""
@@ -39,11 +39,11 @@ class ActionSelectionNode(LLMNode):
             if KEY_EMOTIONAL in state.cognitive_context:
                 context_text += f"Emotional State: {state.cognitive_context[KEY_EMOTIONAL]}"
 
-        personality_text = ", ".join(state.observation_context.personality_traits) if state.observation_context.personality_traits else "No specific traits"
+        personality_text = ", ".join(state.personality_traits) if state.personality_traits else "No specific traits"
 
         # Select action
         output, tokens = await self.call_llm(
-            working_memory=state.working_memory,
+            working_memory=str(state.working_memory),
             cognitive_context=context_text if context_text else "No specific context",
             personality_traits=personality_text,
             available_actions=actions_text

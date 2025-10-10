@@ -25,15 +25,15 @@ class CognitiveUpdateNode(LLMNode):
         """Update cognitive context with retrieved memories and observations"""
 
         # Format memories for prompt
-        memories_text = "\n".join([f"- {m.content}" for m in state.retrieved_memories])
+        memories_text = "\n".join([str(m) for m in state.retrieved_memories])
         if not memories_text:
             memories_text = "No relevant memories found."
 
         # Generate cognitive update
         output, tokens = await self.call_llm(
-            working_memory=state.working_memory,
+            working_memory=str(state.working_memory),
             retrieved_memories=memories_text,
-            observation_text=state.observation_context.observation_text
+            observation_text=str(state.observation)
         )
 
         # Update state

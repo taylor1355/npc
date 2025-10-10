@@ -37,7 +37,7 @@ class MemoryRetrievalNode(Node):
             query = VectorDBQuery(
                 query=query_text,
                 top_k=self.memories_per_query,
-                current_simulation_time=state.observation_context.current_simulation_time if hasattr(state.observation_context, 'current_simulation_time') else None
+                current_simulation_time=state.observation.current_simulation_time
             )
             results = await self.memory_store.search(query)
             all_memories.extend(results)

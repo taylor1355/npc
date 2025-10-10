@@ -27,11 +27,16 @@ class MemoryConsolidationNode(Node):
 
         # Add all daily memories to long-term storage
         for new_memory in state.daily_memories:
+            # Extract location from status observation if available
+            location = None
+            if state.observation.status:
+                location = state.observation.status.position
+
             self.memory_store.add_memory(
                 content=new_memory.content,
                 importance=new_memory.importance,
-                timestamp=state.observation_context.current_simulation_time,
-                location=state.observation_context.agent_location
+                timestamp=state.observation.current_simulation_time,
+                location=location
             )
 
         # Clear daily buffer

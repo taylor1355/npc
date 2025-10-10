@@ -4,6 +4,16 @@
 
 NPCs currently make decisions based on needs and context, but lack consistent personality that would make individuals distinct. Every NPC responds similarly to similar situations. Personality would create behavioral consistency within individuals while maintaining variety across the population.
 
+### Current Implementation
+
+Currently personality is represented as a simple `list[str]` of trait strings passed directly to prompts. This creates tight coupling between the personality representation and prompt engineering. Future needs include:
+- More sophisticated personality models (trait dimensions, values, behavioral patterns)
+- Personality evolution and change over time
+- Integration with emotional and social systems
+- Ability to modify personality representation without changing all prompt code
+
+**Technical Debt**: Replace `list[str]` traits with a `Personality` object to decouple personality representation from its usage in prompts.
+
 ## Status: Requires Literature Review
 
 This feature requires research into:

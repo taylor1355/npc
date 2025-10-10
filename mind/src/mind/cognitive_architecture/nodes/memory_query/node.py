@@ -19,8 +19,8 @@ class MemoryQueryNode(LLMNode):
     async def process(self, state: PipelineState) -> PipelineState:
         """Generate memory queries from observation"""
         output, tokens = await self.call_llm(
-            working_memory=state.working_memory,
-            observation=state.observation_context.observation_text
+            working_memory=str(state.working_memory),
+            observation=str(state.observation)
         )
 
         state.memory_queries = output.queries

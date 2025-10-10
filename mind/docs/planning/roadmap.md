@@ -32,7 +32,36 @@ This roadmap outlines the phased evolution of the NPC cognitive architecture. Th
 - ⚠️ **Unstructured working memory** - String format instead of structured cognitive state
 - ⚠️ **Meta-cognitive prompts** - Still using "cognitive scientist" framing instead of direct embodiment
 
-## Phase 1: Memory Enhancements (CURRENT PRIORITY)
+## Phase 0: Godot Integration (IMMEDIATE PRIORITY)
+
+### Goal
+Integrate the new CognitivePipeline with the Godot simulation, replacing the old Agent class in the MCP server.
+
+### Status
+**Not started** - Blocking all other work
+
+### Deliverables
+
+#### 0.1 MCP Server Modernization
+**Status:** Not started
+**Priority:** Critical
+**Spec:** [godot_integration.md](backlog/godot_integration.md)
+
+Update MCP server to use CognitivePipeline:
+- Replace `mind.agent.agent.Agent` with `CognitivePipeline`
+- Implement `MindRequest` → `ObservationContext` conversion
+- Implement `Action` → Godot action format conversion
+- Handle event stream processing
+- Add memory consolidation trigger
+
+**Implementation:**
+- Update `mcp_server.py` imports and AgentManager
+- Create event formatter (events → observation text)
+- Create action converter (Action → GDScript format)
+- Add per-agent VectorDBMemory instances
+- Implement `process_observation` with MindRequest/MindResponse
+
+## Phase 1: Memory Enhancements
 
 ### Goal
 Add memory metadata, importance scoring, and conversation tracking to improve retrieval quality and reasoning depth.
