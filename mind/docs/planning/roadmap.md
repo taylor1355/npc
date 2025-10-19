@@ -1,348 +1,204 @@
 # Cognitive Architecture Development Roadmap
 
-**Last Updated:** October 5, 2025 (Post-LangGraph Migration)
+**Last Updated:** October 10, 2025
 
-## Overview
+---
 
-This roadmap outlines the phased evolution of the NPC cognitive architecture. The core pipeline has been successfully migrated to LangGraph with significant improvements in code quality and performance.
+## Current State
 
-## Current State (✅ Completed)
-
-### Working Pipeline (4 LLM calls per decision)
-1. **Generate memory queries** (~200 tokens) - Semantic query generation from observations
-2. **Retrieve memories** (no LLM) - Vector search via ChromaDB
-3. **Update cognitive state** (~500 tokens) - Merged memory report + working memory update
-4. **Decide action** (~300 tokens) - Action selection based on cognitive/emotional state
-
-**Total**: ~2000 tokens per decision cycle (~3.5s end-to-end with Gemini Flash Lite)
-
-### Completed Features
-- ✅ **LangGraph Migration** - Clean async pipeline with state management
-- ✅ **Base Class Architecture** - Node & LLMNode eliminate boilerplate (29% code reduction)
-- ✅ **Consolidated Memory Processing** - Single cognitive_update node replaces redundant steps
-- ✅ **Instrumentation** - Automatic timing tracking, token usage tracking
-- ✅ **Test Infrastructure** - Full test notebook (`notebooks/test_cognitive_pipeline.ipynb`)
-- ✅ **Multiple Memory Retrieval** - ChromaDB returns top-k results per query
-- ✅ **Prompt Variable Validation** - Runtime validation via `PROMPT_VARS` sets
+### What's Working
+- LangGraph-based cognitive pipeline (4 nodes: query → retrieve → update → decide)
+- Memory system with metadata, importance scoring, and deduplication
+- Structured working memory (Pydantic models)
+- MCP server with tools and resources
+- Test coverage (integration tests + notebook)
 
 ### Known Issues
-- ⚠️ **Memory Deduplication** - Duplicate memories sometimes retrieved (needs filtering)
-- ⚠️ **No Memory Formation** - Old selective memory formation code removed, not yet reimplemented
-- ⚠️ **Memories lack metadata** - No simulation time, location, or memory IDs
-- ⚠️ **Unstructured working memory** - String format instead of structured cognitive state
-- ⚠️ **Meta-cognitive prompts** - Still using "cognitive scientist" framing instead of direct embodiment
+- Meta-cognitive prompt framing ("You are a cognitive psychologist...") reduces immersion
+- End-to-end integration with npc-simulation repo needs verification
 
-## Phase 0: Godot Integration (IMMEDIATE PRIORITY)
+---
 
-### Goal
-Integrate the new CognitivePipeline with the Godot simulation, replacing the old Agent class in the MCP server.
+## Near-term Priorities (Next 1-2 Weeks)
 
-### Status
-**✅ Completed** - MCP server modernized with structured observations
+### 1. End-to-End Integration Testing
+**Why:** Need to verify mind + npc-simulation work together
+**Effort:** ~1-2 days
+**Priority:** HIGH
 
-### Deliverables
+**Tasks:**
+- Start MCP server (`src/mind/interfaces/mcp/main.py`)
+- Launch npc-simulation Godot project
+- Verify bidirectional communication
+- Test full decision cycle: observation → action → execution
+- Document any integration issues found
 
-#### 0.1 MCP Server Modernization
-**Status:** ✅ Completed
-**Priority:** Critical
-**Spec:** [godot_integration.md](backlog/godot_integration.md)
+**Success Criteria:**
+- NPCs in simulation make decisions via cognitive pipeline
+- No crashes or communication errors
+- Performance is acceptable (<5s per decision)
 
-Completed implementation:
-- ✅ Created Mind class encapsulating cognitive pipeline + memory store
-- ✅ Structured Observation model (Status, Needs, Vision, Conversation sub-observations)
-- ✅ Godot sends observation dicts directly (no text formatting)
-- ✅ FastMCP server validates dicts → Pydantic models
-- ✅ Returns action dicts for Godot execution
-- ✅ Added consolidate_memories tool for daily→long-term transfers
-- ✅ Renamed all agent → mind terminology throughout
-- ✅ Integration tests passing (5/5)
+### 2. Prompt Refinement
+**Why:** Meta-cognitive framing reduces character immersion
+**Effort:** ~1-2 days
+**Priority:** MEDIUM
 
-**Open Items:**
-- ⚠️ **Clean up `src/mind/apis/`** - Currently has 4 different LLM client implementations that need consolidation
+**Tasks:**
+- Review 3 prompt files (memory_query, cognitive_update, action_selection)
+- Rewrite for direct embodiment (first-person perspective)
+- Remove "cognitive psychologist" framing
+- Add concrete examples to each prompt
+- Test behavior changes in notebook
 
-## Phase 1: Memory Enhancements
+**Files to update:**
+- `src/mind/cognitive_architecture/nodes/memory_query/prompt.md`
+- `src/mind/cognitive_architecture/nodes/cognitive_update/prompt.md`
+- `src/mind/cognitive_architecture/nodes/action_selection/prompt.md`
 
-### Goal
-Add memory metadata, importance scoring, and conversation tracking to improve retrieval quality and reasoning depth.
+**Success Criteria:**
+- No meta-cognitive framing remains
+- Consistent voice across all nodes
+- NPCs feel more "inhabited" in testing
 
-### Deliverables
+### 3. Conversation History Formalization (Optional)
+**Why:** Social interactions could benefit from better memory
+**Effort:** ~2-3 days
+**Priority:** LOW (only if social gameplay needs depth)
 
-#### 1.1 Memory Metadata Enhancement
-**Status:** ✅ Completed
-**Priority:** High
-**Spec:** [simulation_metadata_tool.md](backlog/simulation_metadata_tool.md)
+**Current State:**
+- Mind class tracks `conversation_histories` dict
+- Works but not integrated into memory retrieval
 
-Add contextual metadata to Memory model:
-- ✅ `timestamp`: Simulation timestamp (game ticks/frames)
-- ✅ `location`: Grid coordinates where event occurred
-- ✅ `id`: Unique ID for citation (format: `memory_<uuid>`)
-- ✅ Display format for LLM via `__str__()`: `[memory_<uuid> | T:<timestamp> | L:(x,y)] Memory content...`
-- ✅ Created `VectorDBMetadata` model for type-safe metadata handling
-- ✅ Created `VectorDBQuery` model to encapsulate search parameters
-- ✅ Updated `ObservationContext` with `current_simulation_time` and `agent_location`
-- ✅ Improved VectorDBMemory documentation and renamed parameters for clarity
+**Tasks:**
+- Decide: conversation memory vs episodic memory?
+- Add conversation-specific retrieval path
+- Implement context window (last N turns)
+- Test conversation coherence
 
-**Benefits:**
-- NPCs can reason about temporal/spatial context
-- Enables memory citation in decision explanations
-- Improves retrieval relevance through temporal/spatial filtering
-- Strong typing throughout the memory system
+**Success Criteria:**
+- NPCs reference past conversations appropriately
+- No memory bloat from routine chat
 
-#### 1.2 Memory Importance Scoring
-**Status:** ✅ Completed (integrated with 2.2)
-**Priority:** Medium
+---
 
-Implement importance-based retrieval weighting:
-- ✅ LLM assigns importance scores (1-10) during cognitive update
-- ✅ Recency decay applied in VectorDBMemory.search
-- ✅ Emotional weight evaluated via memory formation guidelines
-- ✅ Combined scoring formula implemented
+## Backlog (Future Work)
 
-**Implementation:**
-- ✅ NewMemory model with importance field
-- ✅ Daily memory buffer in PipelineState
-- ✅ Cognitive update prompt includes memory formation guidelines
-- ✅ MemoryConsolidationNode (placeholder) for long-term storage
+Prioritized by **obviousness × development velocity × concreteness** (see [planning/README.md](README.md))
 
-**Note:** See [generative_agents_memory.md](backlog/generative_agents_memory.md) for planned consolidation enhancements.
+### Planning System
+**Impact:** HIGH velocity (unlocks behavioral chunking, goal-driven behavior)
+**Concreteness:** HIGH (immediately visible in gameplay)
+**Specs:** [basic_planning.md](backlog/basic_planning.md), [hierarchical_planning.md](backlog/hierarchical_planning.md)
 
-#### 1.3 Conversation History Tracking
-**Status:** Not started
-**Priority:** Medium
-
-Track dialogue history separately from episodic memory:
-- New conversation memory type with turn tracking
-- Store speaker, content, timestamp
-- Limited context window (last N turns)
-- Separate retrieval path for social context
-
-**Implementation:**
-- New `memory/conversation_memory.py` module
-- Integration with memory_retrieval node
-
-#### 1.4 Memory Deduplication
-**Status:** ✅ Completed
-**Priority:** High (bug fix)
-
-Filter duplicate memories from retrieval results:
-- ✅ Added memory ID field to Memory model
-- ✅ Created IdGenerator utility following Godot pattern
-- ✅ Renamed MemoryStore → VectorDBMemory (modular component design)
-- ✅ Added deduplication logic in [memory_retrieval/node.py](../../src/mind/cognitive_architecture/nodes/memory_retrieval/node.py)
-- ✅ Uses memory IDs to detect duplicates
-- ✅ Keeps first occurrence (preserves relevance ordering)
-
-### Success Metrics
-- Memory citations appear in action decisions
-- Retrieval relevance improves with importance scoring
-- Conversation context influences dialogue actions
-- No duplicate memories in retrieval results
-
-## Phase 2: Structured Cognitive State (NEXT)
-
-### Goal
-Replace unstructured working memory with flexible structured state and add memory formation.
-
-### Deliverables
-
-#### 2.1 Flexible Cognitive State
-**Status:** Not started
-**Priority:** High
-
-Replace string-based working memory with structured but extensible state:
-```json
-{
-  "current_situation": "Working at the forge, feeling focused",
-  "active_goal": "Complete the sword commission",
-  "recent_events": ["Started work", "Greeted apprentice"],
-  "current_plan": ["Finish blade", "Polish", "Deliver"],
-  "emotional_state": "content but slightly tired",
-  // Additional fields as needed - not prescriptive
-}
-```
-
-**Implementation:**
-- Update [state.py](../../src/mind/cognitive_architecture/state.py) with new WorkingMemory model
-- Modify cognitive_update node to output structured state
-- Update prompts to work with structured format
-
-#### 2.2 Selective Memory Formation
-**Status:** ✅ Completed (basic implementation)
-**Priority:** High
-
-Re-implement conditional long-term memory formation:
-- ✅ Memory formation integrated into cognitive_update node
-- ✅ Trigger criteria: emotional intensity, goal relevance, novelty (in prompt)
-- ✅ Importance scoring (1-10) via LLM evaluation
-- ✅ Daily memory buffer prevents immediate long-term storage pollution
-
-**Implementation:**
-- ✅ NewMemory model in cognitive_update/models.py
-- ✅ Daily memory buffer (`state.daily_memories`)
-- ✅ Memory formation guidelines in cognitive_update prompt
-- ✅ MemoryConsolidationNode for moving daily→long-term storage
-
-**Future Enhancements:** See [generative_agents_memory.md](backlog/generative_agents_memory.md) for sophisticated consolidation (filtering, reflections, abstraction).
-
-#### 2.3 Prompt Refinement
-**Status:** Not started
-**Priority:** Medium
-
-Review and improve existing prompts:
-- Consider direct embodiment vs. meta-cognitive framing
-- Ensure consistency across all four nodes
-- Add examples to improve output quality
-- Document simulation mechanics clearly
-
-### Success Metrics
-- Cognitive state maintains coherence across decisions
-- Memory formation reduces noise in memory store
-- Prompt quality assessed through test scenarios
-
-## Phase 3: Tool-Based Updates & Advanced Features (FUTURE)
-
-### Goal
-Enable selective state updates via tool calls and add planning/emotional depth.
-
-### Deliverables
-
-#### 3.1 Tool-Based Selective Updates
-**Status:** Not started
-**Priority:** Low (optimization)
-
-Define tools for granular cognitive updates:
-```python
-def update_situation(new_situation: str):
-    """Update current understanding of situation"""
-
-def add_recent_event(event: str):
-    """Add to recent events list"""
-
-def update_plan(plan_modification: dict):
-    """Modify current plan (add/remove/reorder steps)"""
-
-def set_emotional_state(emotion: str):
-    """Update emotional state"""
-```
-
-**Benefits:**
-- Reduce token usage (update only changed fields)
-- Improve state coherence (preserve unchanged fields)
-- Better debugging (see exactly what changed)
-
-#### 3.2 Enhanced Query Generation
-**Status:** Not started
-**Priority:** Medium
-
-Improve memory query diversity:
-- Use cognitive state to inform queries
-- Contrastive queries (what's different/unexpected)
-- Goal-relevant queries
-- Temporal/situational similarity queries
-
-#### 3.3 Planning System
-**Status:** Not started
-**Priority:** Medium
-**Related Specs:** [basic_planning.md](backlog/basic_planning.md), [hierarchical_planning.md](backlog/hierarchical_planning.md)
-
-Add multi-step planning capabilities:
-- Plans as loose intentions (not rigid schedules)
-- Natural language with optional structure
+Multi-timescale behavioral coherence:
+- Daily routines → weekly goals → long-term aspirations
+- Plans as loose intentions, not rigid schedules
 - Plan adaptation based on outcomes
-- Multiple granularities without fixed hierarchy
 
-#### 3.4 Emotional & Social Features
-**Status:** Not started
-**Priority:** Low
-**Related Specs:** [emotional_memory.md](backlog/emotional_memory.md), [social_memory.md](backlog/social_memory.md), [theory_of_mind.md](backlog/theory_of_mind.md)
+### Enhanced Memory Retrieval
+**Impact:** MEDIUM velocity (improves quality, not architecture)
+**Concreteness:** MEDIUM (subtle gameplay improvements)
+**Spec:** [generative_agents_memory.md](backlog/generative_agents_memory.md)
 
-Advanced emotional and social modeling:
-- Emotional state affects memory retrieval (mood-congruent recall)
-- Relationship tracking in cognitive state
-- Social context influences behavior
-- Theory of mind for other NPCs
-- Personality-driven cognitive patterns
+Improvements to memory search:
+- Contrastive queries (what's different/unexpected?)
+- Goal-relevant memory weighting
+- Reflection generation (higher-order memories)
 
-### Success Metrics (Phase 3)
-- Tool calls reduce token usage where appropriate
-- Planning guides behavior without rigidity
-- Emotional/social features feel natural, not forced
+### Emotional & Social Intelligence
+**Impact:** LOW velocity (adds complexity without enabling new systems)
+**Concreteness:** HIGH (very noticeable in gameplay)
+**Specs:** [emotional_memory.md](backlog/emotional_memory.md), [social_memory.md](backlog/social_memory.md), [theory_of_mind.md](backlog/theory_of_mind.md)
 
-## Implementation Guidelines
+Advanced social modeling:
+- Mood-congruent recall
+- Relationship tracking
+- Theory of mind (modeling other NPCs' beliefs)
+- Emotional contagion
 
-### Design Principles
-- **Flexibility over rigidity** - Let structure emerge from use
-- **Simplicity first** - Add complexity only when needed
-- **Type safety** - Strong typing with Pydantic models
-- **Observability** - Instrument everything (timing, tokens, state changes)
-- **Test-driven** - Test notebook for all major features
+### Tool-Based Selective Updates
+**Impact:** NEUTRAL velocity (optimization, doesn't unlock features)
+**Concreteness:** NONE (invisible to players)
 
-### Architecture Patterns
-- **Base classes eliminate boilerplate** - Node & LLMNode handle common concerns
-- **Prompts in markdown files** - Not hardcoded strings
-- **Automatic instrumentation** - Metaclass magic for timing tracking
-- **Validation at runtime** - PROMPT_VARS catches errors early
+Token usage optimization:
+- Update only changed fields in working memory
+- Reduce token costs without changing behavior
+- Only prioritize if costs become prohibitive
 
-### Testing Strategy
-- **Test notebook** - Primary development tool (`notebooks/test_cognitive_pipeline.ipynb`)
-- **Unit tests** - Mock PipelineState, test individual nodes
-- **Integration tests** - Full pipeline with real LLM calls
-- **Performance profiling** - Monitor timing and token usage
+---
 
-## Technology Stack
+## Architecture Reference
 
-### Core Dependencies
-- **LangGraph** - Pipeline orchestration and state management
-- **LangChain** - LLM abstraction layer (via OpenRouter)
-- **ChromaDB** - Vector database for semantic memory retrieval
-- **Pydantic** - Type-safe data models
+### Pipeline Structure
+```
+1. Memory Query (LLM)
+   ↓
+2. Memory Retrieval (vector search)
+   ↓
+3. Cognitive Update (LLM) - updates WorkingMemory, forms new memories
+   ↓
+4. Action Selection (LLM)
+```
 
-### Why LangGraph
-- First-class async and state management
-- Graph structure fits cognitive pipeline naturally
-- Excellent debugging with visual graph exploration
-- Modern API with strong typing support
+### Key Models
+- **PipelineState** - Data flowing through nodes
+- **WorkingMemory** - Structured cognitive state (situation, goals, plan, emotions)
+- **Memory** - Long-term memory with metadata (id, content, timestamp, location, importance)
+- **Observation** - Structured input from simulation (status, needs, vision, conversations)
+- **Action** - Chosen action with type and parameters
 
-## Quick Reference
-
-### Adding a New Pipeline Node
+### Adding a New Node
 1. Create directory: `nodes/your_node/`
 2. Create `prompt.md` with LLM instructions
 3. Create `models.py` with Pydantic output model
-4. Create `node.py`:
-   ```python
-   from ..base import LLMNode
-   from .models import YourOutput
+4. Create `node.py` extending LLMNode
+5. Add to pipeline in `pipeline.py`
 
-   class YourNode(LLMNode):
-       step_name = "your_step"
-       PROMPT_VARS = {"var1", "var2"}
+See "Quick Reference" section in previous roadmap version for code template.
 
-       def __init__(self, llm):
-           super().__init__(llm, output_model=YourOutput)
+### Testing
+- **Integration tests:** `tests/test_mcp_integration.py`
+- **Test notebook:** `notebooks/test_cognitive_pipeline.ipynb`
+- **Instrumentation:** Automatic timing/token tracking via Node base class
 
-       async def process(self, state):
-           output, tokens = await self.call_llm(
-               var1=state.field1,
-               var2=state.field2
-           )
-           state.your_output = output
-           self.track_tokens(state, tokens)
-           return state
-   ```
-5. Add to pipeline in [pipeline.py](../../src/mind/cognitive_architecture/pipeline.py)
+---
 
-### Configuration
-- **API Key**: `credentials/api_keys.cfg` (format: `OPENROUTER_API_KEY:"{key}"`)
-- **LLM Model**: Set in `get_llm()` call (see [langchain_llm.py](../../src/mind/apis/langchain_llm.py))
-- **Memory Collection**: ChromaDB collection name in MemoryStore constructor
+## Design Principles
 
-## Next Steps
+From [planning/README.md](README.md):
 
-**Immediate priorities (Phase 1):**
-1. Memory metadata enhancement (simulation_time, location, memory_id)
-2. Memory deduplication fix
-3. Memory importance scoring
-4. Conversation history tracking
+1. **Obviousness** - Do obvious things first to constrain less obvious things
+2. **Development Velocity** - How does this affect speed of future development?
+3. **Concreteness** - Does this directly improve player experience?
 
-**See [backlog/](backlog/) for detailed feature specifications.**
+Guidelines:
+- **Flexibility over rigidity** - Let structure emerge from use
+- **Simplicity first** - Add complexity only when needed
+- **Type safety** - Strong typing with Pydantic models
+- **Observability** - Instrument everything
+
+---
+
+## Completed Milestones (Reference)
+
+### Phase 0: Godot Integration (Oct 2025)
+- Mind class with cognitive pipeline + memory store
+- Structured Observation model
+- MCP server with tools (create_mind, decide_action, consolidate_memories, cleanup_mind)
+- Integration tests passing
+
+### Phase 1: Memory Enhancements (Oct 2025)
+- Memory metadata (timestamp, location, unique ID)
+- Importance scoring (1-10)
+- Recency decay in retrieval
+- Deduplication by ID
+
+### Phase 2: Structured Cognitive State (Oct 2025)
+- WorkingMemory Pydantic model
+- Selective memory formation
+- Daily memory buffer with consolidation
+- Extensible schema (`extra = "allow"`)
+
+---
+
+**For detailed feature specifications, see [backlog/](backlog/)**
