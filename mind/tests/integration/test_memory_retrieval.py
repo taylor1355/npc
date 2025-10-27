@@ -1,10 +1,11 @@
 """Test memory deduplication in the retrieval node"""
 
 import pytest
+
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory, VectorDBQuery
+from mind.cognitive_architecture.models import ObservationContext
 from mind.cognitive_architecture.nodes.memory_retrieval.node import MemoryRetrievalNode
 from mind.cognitive_architecture.state import PipelineState
-from mind.cognitive_architecture.models import ObservationContext
 
 
 @pytest.mark.asyncio
@@ -25,16 +26,13 @@ async def test_memory_deduplication():
 
     # Create test state with queries that will return overlapping results
     state = PipelineState(
-        observation_context=ObservationContext(
-            agent_id="test",
-            observation_text="test"
-        ),
+        observation_context=ObservationContext(agent_id="test", observation_text="test"),
         working_memory="test",
         memory_queries=[
             "apprentice learning skills",  # Should match memory 1
             "apprentice training progress",  # Should also match memory 1
             "sword crafting work",  # Should match memory 2
-        ]
+        ],
     )
 
     # Process retrieval
@@ -45,13 +43,13 @@ async def test_memory_deduplication():
     unique_ids = set(memory_ids)
 
     # Should have no duplicates
-    assert len(memory_ids) == len(unique_ids), \
-        f"Found duplicate memory IDs: {memory_ids}"
+    assert len(memory_ids) == len(unique_ids), f"Found duplicate memory IDs: {memory_ids}"
 
     # Each memory should have a unique ID
     for memory in result_state.retrieved_memories:
-        assert memory.id.startswith("memory_"), \
-            f"Memory ID should start with 'memory_' but got: {memory.id}"
+        assert memory.id.startswith(
+            "memory_"
+        ), f"Memory ID should start with 'memory_' but got: {memory.id}"
 
     print(f"✓ Retrieved {len(result_state.retrieved_memories)} unique memories")
     print(f"✓ All memories have unique IDs: {memory_ids}")
@@ -76,8 +74,7 @@ async def test_memory_ids_are_stable():
     results = await memory_store.search(query)
 
     assert len(results) == 1
-    assert results[0].id == original_id, \
-        f"Memory ID changed from {original_id} to {results[0].id}"
+    assert results[0].id == original_id, f"Memory ID changed from {original_id} to {results[0].id}"
 
     print(f"✓ Memory ID is stable: {original_id}")
 

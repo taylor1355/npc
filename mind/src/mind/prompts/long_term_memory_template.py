@@ -1,4 +1,4 @@
-from .prompt_common import create_prompt_template, Prompt, TagPattern
+from .prompt_common import Prompt, TagPattern, create_prompt_template
 
 SYSTEM_PROMPT = [
     "You are a cognitive neuroscientist specializing in long-term memory processes, including encoding, consolidation, and retrieval.",

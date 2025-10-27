@@ -2,10 +2,10 @@
 
 from typing import Protocol
 
-from ..base import Node
-from ...state import PipelineState
-from ...models import Memory
 from ...memory.vector_db_memory import VectorDBQuery
+from ...models import Memory
+from ...state import PipelineState
+from ..base import Node
 
 # Default memories to retrieve per query
 DEFAULT_MEMORIES_PER_QUERY = 2
@@ -24,7 +24,11 @@ class MemoryRetrievalNode(Node):
 
     step_name = "memory_retrieval"
 
-    def __init__(self, memory_store: MemoryStoreProtocol, memories_per_query: int = DEFAULT_MEMORIES_PER_QUERY):
+    def __init__(
+        self,
+        memory_store: MemoryStoreProtocol,
+        memories_per_query: int = DEFAULT_MEMORIES_PER_QUERY,
+    ):
         self.memory_store = memory_store
         self.memories_per_query = memories_per_query
 
@@ -37,7 +41,7 @@ class MemoryRetrievalNode(Node):
             query = VectorDBQuery(
                 query=query_text,
                 top_k=self.memories_per_query,
-                current_simulation_time=state.observation.current_simulation_time
+                current_simulation_time=state.observation.current_simulation_time,
             )
             results = await self.memory_store.search(query)
             all_memories.extend(results)

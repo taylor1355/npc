@@ -2,13 +2,14 @@
 
 import argparse
 
+import uvicorn
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Mount, Route
-import uvicorn
 
 from mind.project_config import OPENROUTER_API_KEY
+
 from .server import MCPServer
 
 
@@ -40,10 +41,15 @@ def create_starlette_app(mcp_server, *, debug: bool = False) -> Starlette:
 def main():
     """Run the MCP server from command line"""
     parser = argparse.ArgumentParser(description="NPC Mind MCP Server")
-    parser.add_argument("--host", type=str, default="127.0.0.1",
-                      help="Host address to bind the server to (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8000,
-                      help="Port to run the server on (default: 8000)")
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host address to bind the server to (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8000, help="Port to run the server on (default: 8000)"
+    )
     args = parser.parse_args()
 
     if not OPENROUTER_API_KEY:

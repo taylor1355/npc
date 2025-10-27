@@ -1,8 +1,8 @@
 """Memory consolidation node - processes daily memories into long-term storage"""
 
-from ..base import Node
-from ...state import PipelineState
 from ...memory.vector_db_memory import VectorDBMemory
+from ...state import PipelineState
+from ..base import Node
 
 
 class MemoryConsolidationNode(Node):
@@ -36,7 +36,7 @@ class MemoryConsolidationNode(Node):
                 content=new_memory.content,
                 importance=new_memory.importance,
                 timestamp=state.observation.current_simulation_time,
-                location=location
+                location=location,
             )
 
         # Clear daily buffer

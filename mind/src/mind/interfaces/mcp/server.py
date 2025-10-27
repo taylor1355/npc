@@ -1,22 +1,19 @@
 """MCP server for mind management"""
 
 import json
-from typing import Dict
 
-from fastmcp import FastMCP, Context
+from fastmcp import Context, FastMCP
 
-from mind.cognitive_architecture.state import PipelineState
-from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.models import Observation
+from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
+from mind.cognitive_architecture.state import PipelineState
 
 from .mind import Mind
 from .models import (
-    MindConfig,
-    SimulationRequest,
-    MindResponse,
-    MindStateResponse,
     ConsolidationResponse,
+    MindConfig,
     MindInfoResponse,
+    MindStateResponse,
 )
 
 
@@ -25,7 +22,7 @@ class MCPServer:
 
     def __init__(self, name="NPC Mind Server"):
         """Initialize the MCP server"""
-        self.minds: Dict[str, Mind] = {}  # Simple dict registry
+        self.minds: dict[str, Mind] = {}  # Simple dict registry
 
         # Create MCP server
         self.mcp = FastMCP(name)
@@ -52,10 +49,7 @@ class MCPServer:
             mind = Mind.from_config(mind_id, config)
             self.minds[mind_id] = mind
 
-            return MindInfoResponse(
-                status="created",
-                mind_id=mind_id
-            )
+            return MindInfoResponse(status="created", mind_id=mind_id)
 
         @self.mcp.tool()
         async def decide_action(
@@ -74,7 +68,7 @@ class MCPServer:
                 return {
                     "status": "error",
                     "action": None,
-                    "error_message": f"Mind {mind_id} not found"
+                    "error_message": f"Mind {mind_id} not found",
                 }
 
             mind = self.minds[mind_id]
@@ -86,7 +80,7 @@ class MCPServer:
                 return {
                     "status": "error",
                     "action": None,
-                    "error_message": f"Invalid observation format: {str(e)}"
+                    "error_message": f"Invalid observation format: {str(e)}",
                 }
 
             # Update conversation histories
@@ -111,7 +105,7 @@ class MCPServer:
             return {
                 "status": "success",
                 "action": result.chosen_action.model_dump() if result.chosen_action else None,
-                "error_message": None
+                "error_message": None,
             }
 
         @self.mcp.tool()
@@ -125,10 +119,7 @@ class MCPServer:
                 mind_id: Mind to consolidate memories for
             """
             if mind_id not in self.minds:
-                return ConsolidationResponse(
-                    status="error",
-                    consolidated_count=0
-                )
+                return ConsolidationResponse(status="error", consolidated_count=0)
 
             mind = self.minds[mind_id]
 
@@ -151,10 +142,7 @@ class MCPServer:
             count = len(mind.daily_memories)
             mind.daily_memories.clear()
 
-            return ConsolidationResponse(
-                status="success",
-                consolidated_count=count
-            )
+            return ConsolidationResponse(status="success", consolidated_count=count)
 
         @self.mcp.tool()
         async def cleanup_mind(
@@ -169,10 +157,7 @@ class MCPServer:
             if mind_id in self.minds:
                 del self.minds[mind_id]
 
-            return MindInfoResponse(
-                status="removed",
-                mind_id=mind_id
-            )
+            return MindInfoResponse(status="removed", mind_id=mind_id)
 
         # === Resources ===
 
@@ -190,7 +175,7 @@ class MCPServer:
                 working_memory=mind.working_memory,
                 daily_memories_count=len(mind.daily_memories),
                 long_term_memory_count=mind.memory_store.collection.count(),
-                active_conversations=list(mind.conversation_histories.keys())
+                active_conversations=list(mind.conversation_histories.keys()),
             )
 
             return state_response.model_dump_json(indent=2)
@@ -213,5 +198,5 @@ class MCPServer:
             mind = self.minds[mind_id]
             return json.dumps(
                 [{"content": m.content, "importance": m.importance} for m in mind.daily_memories],
-                indent=2
+                indent=2,
             )

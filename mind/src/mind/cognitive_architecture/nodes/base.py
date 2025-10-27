@@ -1,13 +1,14 @@
 """Base utilities for pipeline nodes"""
 
-import time
 import inspect
-from pathlib import Path
+import time
 from abc import ABC
-from pydantic import BaseModel
+from pathlib import Path
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import PydanticOutputParser
+from pydantic import BaseModel
 
 from ..state import PipelineState
 
@@ -69,8 +70,7 @@ class LLMNode(Node):
 
         # Format prompt
         prompt = self.prompt_template.format(
-            **prompt_vars,
-            format_instructions=self.parser.get_format_instructions()
+            **prompt_vars, format_instructions=self.parser.get_format_instructions()
         )
 
         # Call LLM

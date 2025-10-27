@@ -1,9 +1,10 @@
 """Pipeline state for LangGraph cognitive architecture"""
 
 from typing import Annotated
+
 from pydantic import BaseModel, Field
 
-from .models import Memory, Action, Observation, ConversationMessage, AvailableAction
+from .models import Action, AvailableAction, ConversationMessage, Memory, Observation
 from .nodes.cognitive_update.models import NewMemory, WorkingMemory
 
 

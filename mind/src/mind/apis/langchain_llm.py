@@ -7,6 +7,7 @@ from mind.project_config import OPENROUTER_API_KEY
 
 class LangChainModel:
     """Model identifiers for OpenRouter-compatible models"""
+
     CLAUDE_SONNET = "anthropic/claude-sonnet-4"
     GEMINI_FLASH = "google/gemini-2.5-flash-preview-09-2025"
     GEMINI_FLASH_LITE = "google/gemini-2.5-flash-lite-preview-09-2025"
@@ -31,5 +32,5 @@ def get_llm(model: str, temperature: float = 0) -> ChatOpenAI:
         model=model,
         openai_api_key=OPENROUTER_API_KEY,
         openai_api_base="https://openrouter.ai/api/v1",
-        temperature=temperature
+        temperature=temperature,
     )

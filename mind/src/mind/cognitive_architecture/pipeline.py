@@ -1,14 +1,14 @@
 """LangGraph cognitive pipeline implementation"""
 
-from langgraph.graph import StateGraph, END
 from langchain_core.language_models import BaseChatModel
+from langgraph.graph import END, StateGraph
 
-from .state import PipelineState
+from .memory.vector_db_memory import VectorDBMemory
+from .nodes.action_selection.node import ActionSelectionNode
+from .nodes.cognitive_update.node import CognitiveUpdateNode
 from .nodes.memory_query.node import MemoryQueryNode
 from .nodes.memory_retrieval.node import MemoryRetrievalNode
-from .nodes.cognitive_update.node import CognitiveUpdateNode
-from .nodes.action_selection.node import ActionSelectionNode
-from .memory.vector_db_memory import VectorDBMemory
+from .state import PipelineState
 
 
 class CognitivePipeline:

@@ -1,12 +1,13 @@
 """Simple, serializable message types for LLM communication"""
 
 from enum import Enum
-from typing import List, Optional
+
 from pydantic import BaseModel
 
 
 class Role(str, Enum):
     """Message roles"""
+
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
@@ -14,6 +15,7 @@ class Role(str, Enum):
 
 class Message(BaseModel):
     """Simple message type that's fully serializable"""
+
     role: Role
     content: str
 
@@ -24,9 +26,10 @@ class Message(BaseModel):
 
 class ChatThread(BaseModel):
     """A thread of messages"""
-    messages: List[Message]
 
-    def to_openai_format(self) -> List[dict]:
+    messages: list[Message]
+
+    def to_openai_format(self) -> list[dict]:
         """Convert to OpenAI API format"""
         return [msg.to_dict() for msg in self.messages]
 

@@ -2,8 +2,8 @@
 
 from langchain_core.language_models import BaseChatModel
 
-from ..base import LLMNode
 from ...state import PipelineState
+from ..base import LLMNode
 from .models import MemoryQueryOutput
 
 
@@ -19,8 +19,7 @@ class MemoryQueryNode(LLMNode):
     async def process(self, state: PipelineState) -> PipelineState:
         """Generate memory queries from observation"""
         output, tokens = await self.call_llm(
-            working_memory=str(state.working_memory),
-            observation=str(state.observation)
+            working_memory=str(state.working_memory), observation=str(state.observation)
         )
 
         state.memory_queries = output.queries

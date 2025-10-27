@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
+from typing import Generic, TypeVar, Union, get_args, get_origin
+
 from json_repair import repair_json
 from pydantic import BaseModel
-from typing import Dict, Generic, TypeVar, Union, get_origin, get_args
 
 
 class SimulatorRequest(BaseModel):
@@ -24,16 +25,18 @@ class SimulatorRequest(BaseModel):
             origin = get_origin(annotation)
             if origin is Union:
                 args = get_args(annotation)
-                return ' | '.join(get_type_name(arg) for arg in args)
-            elif hasattr(annotation, '__name__'):
+                return " | ".join(get_type_name(arg) for arg in args)
+            elif hasattr(annotation, "__name__"):
                 return annotation.__name__
             else:
                 return str(annotation)
 
-        return "\n".join([
-            f"- **{name}** ({get_type_name(field.annotation)}): {field.description}"
-            for name, field in cls.model_fields.items()
-        ])
+        return "\n".join(
+            [
+                f"- **{name}** ({get_type_name(field.annotation)}): {field.description}"
+                for name, field in cls.model_fields.items()
+            ]
+        )
 
     @classmethod
     def parse_json(cls, json_str: str):
@@ -60,10 +63,11 @@ class SimulatorResponse(BaseModel):
     Represents the standard response structure returned by the simulator after executing a request.
     Subclasses can add additional fields if necessary.
     """
+
     success: bool
     message: str
     observation: str
-    available_actions: Dict[int, str]
+    available_actions: dict[int, str]
 
     def observation_llm_str(self) -> str:
         """Generate the observation in an LLM-friendly format.
@@ -79,13 +83,15 @@ class SimulatorResponse(BaseModel):
         Returns:
             str: A formatted string listing the available actions with their indices.
         """
-        return "\n".join([
-            "# Available Actions",
-            *[
-                f"- Action Index {index}: {action}"
-                for index, action in self.available_actions.items()
-            ],
-        ])
+        return "\n".join(
+            [
+                "# Available Actions",
+                *[
+                    f"- Action Index {index}: {action}"
+                    for index, action in self.available_actions.items()
+                ],
+            ]
+        )
 
 
 SimulatorRequestType = TypeVar("SimulatorRequestType", bound=SimulatorRequest)

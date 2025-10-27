@@ -1,14 +1,16 @@
 """Type-safe LLM function wrapper"""
 
 from dataclasses import dataclass
-from typing import TypeVar, Generic, Type, Dict, Any
+from typing import Any, Generic, TypeVar
+
 from pydantic import BaseModel
+
 from mind.apis.llm_client import Model
 from mind.prompts.prompt_common import Prompt
 
 # Generic type variables for input and output
-TInput = TypeVar('TInput', bound=BaseModel)
-TOutput = TypeVar('TOutput', bound=BaseModel)
+TInput = TypeVar("TInput", bound=BaseModel)
+TOutput = TypeVar("TOutput", bound=BaseModel)
 
 
 @dataclass
@@ -17,7 +19,7 @@ class TypedLLMFunction(Generic[TInput, TOutput]):
 
     prompt: Prompt
     model: Model
-    output_type: Type[TOutput]
+    output_type: type[TOutput]
 
     def generate(self, input_data: TInput) -> TOutput:
         """Generate output from input using LLM"""
@@ -41,13 +43,15 @@ class TypedLLMFunction(Generic[TInput, TOutput]):
 @dataclass
 class DebugInfo:
     """Debug information from LLM call"""
+
     prompt_text: str
     raw_response: str
-    parsed_data: Dict[str, Any]
+    parsed_data: dict[str, Any]
 
 
 @dataclass
 class TypedLLMResponse(Generic[TOutput]):
     """Response wrapper that includes debug info"""
+
     data: TOutput
     debug: DebugInfo

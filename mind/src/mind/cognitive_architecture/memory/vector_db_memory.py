@@ -1,17 +1,16 @@
 """Simple memory store using ChromaDB for vector storage"""
 
-import time
-from typing import Optional
 import chromadb
-from sentence_transformers import SentenceTransformer
 from pydantic import BaseModel
+from sentence_transformers import SentenceTransformer
 
-from ..models import Memory
 from ..id_generator import IdGenerator
+from ..models import Memory
 
 
 class VectorDBMetadata(BaseModel):
     """Metadata stored with each memory in ChromaDB"""
+
     importance: float
     timestamp: int | None = None
     location_x: int | None = None
@@ -26,6 +25,7 @@ class VectorDBMetadata(BaseModel):
 
 class VectorDBQuery(BaseModel):
     """Query parameters for vector database search"""
+
     query: str
     top_k: int = 5
     importance_weight: float = 0.3
@@ -35,6 +35,7 @@ class VectorDBQuery(BaseModel):
 
 class ChromaQueryResult(BaseModel):
     """Wrapper for ChromaDB query results with cleaner access"""
+
     ids: list[list[str]]
     documents: list[list[str]]
     metadatas: list[list[dict]]
@@ -57,11 +58,7 @@ class ChromaQueryResult(BaseModel):
 
     def iter_first_query(self):
         """Iterate over (id, document, metadata) tuples for first query"""
-        return zip(
-            self.first_query_ids,
-            self.first_query_documents,
-            self.first_query_metadatas
-        )
+        return zip(self.first_query_ids, self.first_query_documents, self.first_query_metadatas)
 
 
 class VectorDBMemory:
@@ -76,7 +73,7 @@ class VectorDBMemory:
         self,
         collection_name: str = "memories",
         embedding_model: str = "all-MiniLM-L6-v2",
-        storage_path: str | None = None
+        storage_path: str | None = None,
     ):
         """Initialize vector database memory component
 
@@ -89,23 +86,16 @@ class VectorDBMemory:
         self.encoder = SentenceTransformer(embedding_model)
 
         # Initialize ChromaDB with telemetry disabled
-        settings = chromadb.Settings(
-            anonymized_telemetry=False,
-            allow_reset=True
-        )
+        settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
 
         if storage_path:
-            self.client = chromadb.PersistentClient(
-                path=storage_path,
-                settings=settings
-            )
+            self.client = chromadb.PersistentClient(path=storage_path, settings=settings)
         else:
             self.client = chromadb.EphemeralClient(settings=settings)
 
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
-            name=collection_name,
-            metadata={"hnsw:space": "cosine"}
+            name=collection_name, metadata={"hnsw:space": "cosine"}
         )
 
     def add_memory(
@@ -113,7 +103,7 @@ class VectorDBMemory:
         content: str,
         importance: float = 1.0,
         timestamp: int | None = None,
-        location: tuple[int, int] | None = None
+        location: tuple[int, int] | None = None,
     ) -> Memory:
         """Add a memory to the store
 
@@ -133,7 +123,7 @@ class VectorDBMemory:
             content=content,
             timestamp=timestamp,
             importance=importance,
-            location=location
+            location=location,
         )
 
         # Generate embedding
@@ -144,7 +134,7 @@ class VectorDBMemory:
             importance=importance,
             timestamp=timestamp,
             location_x=location[0] if location else None,
-            location_y=location[1] if location else None
+            location_y=location[1] if location else None,
         )
 
         # Store in ChromaDB
@@ -152,7 +142,7 @@ class VectorDBMemory:
             ids=[memory_id],
             embeddings=[embedding],
             documents=[content],
-            metadatas=[metadata.model_dump(exclude_none=True)]
+            metadatas=[metadata.model_dump(exclude_none=True)],
         )
 
         return memory
@@ -169,8 +159,7 @@ class VectorDBMemory:
             return []
 
         raw_results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=min(query.top_k, collection_count)
+            query_embeddings=[query_embedding], n_results=min(query.top_k, collection_count)
         )
 
         # Parse into typed model
@@ -199,9 +188,9 @@ class VectorDBMemory:
                 recency_score = 1.0
 
             combined_score = (
-                (1 - query.importance_weight - query.recency_weight) * similarity_score +
-                query.importance_weight * importance_score +
-                query.recency_weight * recency_score
+                (1 - query.importance_weight - query.recency_weight) * similarity_score
+                + query.importance_weight * importance_score
+                + query.recency_weight * recency_score
             )
 
             memory = Memory(
@@ -209,19 +198,18 @@ class VectorDBMemory:
                 content=content,
                 timestamp=metadata.timestamp,
                 importance=metadata.importance,
-                location=metadata.get_location()
+                location=metadata.get_location(),
             )
             memories.append((combined_score, memory))
 
         # Sort by combined score and return
         memories.sort(key=lambda x: x[0], reverse=True)
-        return [m for _, m in memories[:query.top_k]]
+        return [m for _, m in memories[: query.top_k]]
 
     def clear(self):
         """Clear all memories"""
         self.client.delete_collection(self.collection.name)
         self.collection = self.client.create_collection(
-            name=self.collection.name,
-            metadata={"hnsw:space": "cosine"}
+            name=self.collection.name, metadata={"hnsw:space": "cosine"}
         )
         self._id_counter = 0

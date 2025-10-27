@@ -2,8 +2,8 @@
 
 from langchain_core.language_models import BaseChatModel
 
-from ..base import LLMNode
 from ...state import PipelineState
+from ..base import LLMNode
 from .models import CognitiveUpdateOutput
 
 # Cognitive context dict keys
@@ -33,7 +33,7 @@ class CognitiveUpdateNode(LLMNode):
         output, tokens = await self.call_llm(
             working_memory=str(state.working_memory),
             retrieved_memories=memories_text,
-            observation_text=str(state.observation)
+            observation_text=str(state.observation),
         )
 
         # Update state
@@ -41,7 +41,7 @@ class CognitiveUpdateNode(LLMNode):
         state.cognitive_context = {
             KEY_SITUATION: output.situation_assessment,
             KEY_GOALS: output.current_goals,
-            KEY_EMOTIONAL: output.emotional_state
+            KEY_EMOTIONAL: output.emotional_state,
         }
 
         # Add new memories to daily buffer

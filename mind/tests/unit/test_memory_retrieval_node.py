@@ -1,11 +1,12 @@
 """Unit tests for MemoryRetrievalNode"""
 
-import pytest
 from unittest.mock import AsyncMock
 
+import pytest
+
+from mind.cognitive_architecture.models import Memory, Observation, StatusObservation
 from mind.cognitive_architecture.nodes.memory_retrieval.node import MemoryRetrievalNode
 from mind.cognitive_architecture.state import PipelineState
-from mind.cognitive_architecture.models import Memory, Observation, StatusObservation
 
 
 @pytest.mark.asyncio
@@ -31,9 +32,9 @@ class TestMemoryRetrievalNode:
             observation=Observation(
                 entity_id="test_npc",
                 current_simulation_time=100,
-                status=StatusObservation(position=(5, 10), movement_locked=False)
+                status=StatusObservation(position=(5, 10), movement_locked=False),
             ),
-            memory_queries=["recent blacksmithing work", "sword commission"]
+            memory_queries=["recent blacksmithing work", "sword commission"],
         )
 
     async def test_retrieves_memories_for_queries(self, node, mock_memory_store, basic_state):
@@ -41,7 +42,7 @@ class TestMemoryRetrievalNode:
         # Setup mock to return memories
         mock_memory_store.search.return_value = [
             Memory(id="mem_1", content="Yesterday I worked on a sword", importance=7.0),
-            Memory(id="mem_2", content="Customer ordered ceremonial blade", importance=8.0)
+            Memory(id="mem_2", content="Customer ordered ceremonial blade", importance=8.0),
         ]
 
         # Execute
@@ -62,7 +63,7 @@ class TestMemoryRetrievalNode:
         # Both queries return same memory_1 plus unique memories
         mock_memory_store.search.side_effect = [
             [memory_1, memory_2],  # First query
-            [memory_1, Memory(id="mem_3", content="Forge hot", importance=5.0)]  # Second query
+            [memory_1, Memory(id="mem_3", content="Forge hot", importance=5.0)],  # Second query
         ]
 
         # Execute
@@ -79,9 +80,9 @@ class TestMemoryRetrievalNode:
             observation=Observation(
                 entity_id="test_npc",
                 current_simulation_time=100,
-                status=StatusObservation(position=(5, 10), movement_locked=False)
+                status=StatusObservation(position=(5, 10), movement_locked=False),
             ),
-            memory_queries=[]  # No queries
+            memory_queries=[],  # No queries
         )
 
         # Execute
@@ -121,11 +122,11 @@ class TestMemoryRetrievalNode:
             observation=Observation(
                 entity_id="test_npc",
                 current_simulation_time=100,
-                status=StatusObservation(position=(5, 10), movement_locked=False)
+                status=StatusObservation(position=(5, 10), movement_locked=False),
             ),
             memory_queries=["test query"],
             personality_traits=["brave", "honest"],
-            cognitive_context={"test": "data"}
+            cognitive_context={"test": "data"},
         )
 
         mock_memory_store.search.return_value = []

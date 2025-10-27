@@ -1,28 +1,34 @@
+from pydantic import Field
+
 from mind.interfaces import SimulatorInterface, SimulatorRequest, SimulatorResponse
 from mind.simulators.text_adventure import TextAdventureSimulator
-from pydantic import Field
-from typing import Any, Type
 
 
 class TextAdventureRequest(SimulatorRequest):
-    action_index: int | None = Field(default=None, description="Chosen action index from available options")
-        
+    action_index: int | None = Field(
+        default=None, description="Chosen action index from available options"
+    )
+
 
 class TextAdventureResponse(SimulatorResponse):
     observation: str = Field(required=True, description="New story segment after taking the action")
-    available_actions: dict[int, str] = Field(required=True, description="Available actions in the new story segment")
+    available_actions: dict[int, str] = Field(
+        required=True, description="Available actions in the new story segment"
+    )
 
 
-class TextAdventureInterface(SimulatorInterface[TextAdventureRequest, TextAdventureResponse, TextAdventureSimulator]):
+class TextAdventureInterface(
+    SimulatorInterface[TextAdventureRequest, TextAdventureResponse, TextAdventureSimulator]
+):
     def __init__(self, simulator: TextAdventureSimulator):
         super().__init__(simulator)
 
     @property
-    def request_class(self) -> Type[TextAdventureRequest]:
+    def request_class(self) -> type[TextAdventureRequest]:
         return TextAdventureRequest
 
     @property
-    def response_class(self) -> Type[TextAdventureResponse]:
+    def response_class(self) -> type[TextAdventureResponse]:
         return TextAdventureResponse
 
     def execute(self, request: TextAdventureRequest) -> TextAdventureResponse:

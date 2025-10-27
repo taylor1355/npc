@@ -1,6 +1,7 @@
 """Protocols defining interfaces for cognitive architecture components"""
 
 from typing import Protocol
+
 from .state import PipelineState
 
 

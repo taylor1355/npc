@@ -1,11 +1,13 @@
 """Shared models for the cognitive pipeline"""
 
 from enum import Enum
+
 from pydantic import BaseModel, Field
 
 
 class Memory(BaseModel):
     """A single memory with metadata"""
+
     id: str
     content: str
     timestamp: int | None = None  # Simulation timestamp (game ticks/frames)
@@ -29,6 +31,7 @@ class Memory(BaseModel):
 
 class ActionType(str, Enum):
     """Available action types matching Godot's BaseAction system"""
+
     MOVE_TO = "move_to"
     MOVE_DIRECTION = "move_direction"
     INTERACT_WITH = "interact_with"
@@ -42,6 +45,7 @@ class ActionType(str, Enum):
 
 class Action(BaseModel):
     """Action to be executed, matching Godot's BaseAction format"""
+
     action: ActionType
     parameters: dict = Field(default_factory=dict)
 
@@ -50,17 +54,21 @@ class Action(BaseModel):
 
     def __str__(self) -> str:
         """Format action for LLM consumption"""
-        params_str = ", ".join([f"{k}={v}" for k, v in self.parameters.items()]) if self.parameters else "no parameters"
+        params_str = (
+            ", ".join([f"{k}={v}" for k, v in self.parameters.items()])
+            if self.parameters
+            else "no parameters"
+        )
         return f"{self.action}({params_str})"
 
 
 class AvailableAction(BaseModel):
     """An action that can be taken"""
+
     name: str = Field(description="Action identifier like 'move_to'")
     description: str = Field(description="Human-readable description of what this action does")
     parameters: dict[str, str] = Field(
-        default_factory=dict,
-        description="Parameter names mapped to their descriptions"
+        default_factory=dict, description="Parameter names mapped to their descriptions"
     )
 
     def __str__(self) -> str:
@@ -76,6 +84,7 @@ class AvailableAction(BaseModel):
 
 class StatusObservation(BaseModel):
     """Physical/controller state (singleton - latest overwrites)"""
+
     position: tuple[int, int]
     movement_locked: bool = False
     current_interaction: dict = Field(default_factory=dict)
@@ -84,12 +93,14 @@ class StatusObservation(BaseModel):
 
 class NeedsObservation(BaseModel):
     """Needs state (singleton - latest overwrites)"""
+
     needs: dict[str, float]
     max_value: float = 100.0
 
 
 class EntityData(BaseModel):
     """Visible entity with interaction affordances"""
+
     entity_id: str
     display_name: str
     position: tuple[int, int]
@@ -98,11 +109,13 @@ class EntityData(BaseModel):
 
 class VisionObservation(BaseModel):
     """What the mind sees (singleton - latest overwrites)"""
+
     visible_entities: list[EntityData]
 
 
 class ConversationMessage(BaseModel):
     """Single conversation message"""
+
     speaker_id: str
     speaker_name: str
     message: str
@@ -111,6 +124,7 @@ class ConversationMessage(BaseModel):
 
 class ConversationObservation(BaseModel):
     """Conversation update (per-interaction, mind aggregates)"""
+
     interaction_id: str  # Identifies which conversation
     interaction_name: str
     participants: list[str]
@@ -119,6 +133,7 @@ class ConversationObservation(BaseModel):
 
 class Observation(BaseModel):
     """Complete structured observation"""
+
     entity_id: str  # Mind's entity ID in simulation
     current_simulation_time: int
 
@@ -136,7 +151,7 @@ class Observation(BaseModel):
         if self.status:
             parts.append(f"Position: {self.status.position}")
         if self.needs:
-            needs_str = ", ".join([f"{k}: {v:.0f}%" for k,v in self.needs.needs.items()])
+            needs_str = ", ".join([f"{k}: {v:.0f}%" for k, v in self.needs.needs.items()])
             parts.append(f"Needs: {needs_str}")
         if self.vision:
             entities_str = ", ".join([e.display_name for e in self.vision.visible_entities])

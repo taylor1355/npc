@@ -2,28 +2,25 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Dict, Any
+from typing import Any
 
 from openai import OpenAI
 
 from mind.project_config import OPENROUTER_API_KEY
 from mind.prompts.prompt_common import Prompt
 
-
 # Create an OpenAI client configured to use OpenRouter
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_API_KEY
-)
+client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
 
 
 class Model(Enum):
     """Available LLM models"""
+
     CLAUDE_SONNET = "anthropic/claude-3.5-sonnet"
     CLAUDE_HAIKU = "anthropic/claude-3-haiku"
     GEMINI_FLASH = "google/gemini-2.0-flash-exp:free"
 
-    def get_response(self, messages: List[Dict[str, str]]) -> str:
+    def get_response(self, messages: list[dict[str, str]]) -> str:
         """Get a response from the model"""
         response = client.chat.completions.create(
             model=self.value,
@@ -40,7 +37,7 @@ class LLMFunction:
     prompt: Prompt
     model: Model
 
-    def generate(self, **input_tag_contents) -> Dict[str, Any]:
+    def generate(self, **input_tag_contents) -> dict[str, Any]:
         """Generate a response from the LLM"""
         # Format the prompt
         formatted_prompt = self.prompt.format(**input_tag_contents)

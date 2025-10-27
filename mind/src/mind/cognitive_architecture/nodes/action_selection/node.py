@@ -2,8 +2,8 @@
 
 from langchain_core.language_models import BaseChatModel
 
-from ..base import LLMNode
 from ...state import PipelineState
+from ..base import LLMNode
 from .models import ActionSelectionOutput
 
 # Cognitive context keys (shared with cognitive_update)
@@ -39,14 +39,18 @@ class ActionSelectionNode(LLMNode):
             if KEY_EMOTIONAL in state.cognitive_context:
                 context_text += f"Emotional State: {state.cognitive_context[KEY_EMOTIONAL]}"
 
-        personality_text = ", ".join(state.personality_traits) if state.personality_traits else "No specific traits"
+        personality_text = (
+            ", ".join(state.personality_traits)
+            if state.personality_traits
+            else "No specific traits"
+        )
 
         # Select action
         output, tokens = await self.call_llm(
             working_memory=str(state.working_memory),
             cognitive_context=context_text if context_text else "No specific context",
             personality_traits=personality_text,
-            available_actions=actions_text
+            available_actions=actions_text,
         )
 
         # Update state
