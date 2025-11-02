@@ -3,7 +3,7 @@
 import pytest
 
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory, VectorDBQuery
-from mind.cognitive_architecture.models import ObservationContext
+from mind.cognitive_architecture.models import Observation, StatusObservation
 from mind.cognitive_architecture.nodes.memory_retrieval.node import MemoryRetrievalNode
 from mind.cognitive_architecture.state import PipelineState
 
@@ -26,8 +26,11 @@ async def test_memory_deduplication():
 
     # Create test state with queries that will return overlapping results
     state = PipelineState(
-        observation_context=ObservationContext(agent_id="test", observation_text="test"),
-        working_memory="test",
+        observation=Observation(
+            entity_id="test_npc",
+            current_simulation_time=100,
+            status=StatusObservation(position=(0, 0), movement_locked=False),
+        ),
         memory_queries=[
             "apprentice learning skills",  # Should match memory 1
             "apprentice training progress",  # Should also match memory 1

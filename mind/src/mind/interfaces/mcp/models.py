@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, Field
 
+from mind.apis.langchain_llm import LangChainModel
 from mind.cognitive_architecture.models import Action, Observation
 from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 
@@ -15,7 +16,7 @@ class MindConfig(BaseModel):
     traits: list[str]
 
     # LLM configuration
-    llm_model: str = "gemini/gemini-2.0-flash-lite"  # LangChain model identifier
+    llm_model: str = LangChainModel.GEMINI_FLASH_LITE  # LangChain model identifier
 
     # Memory configuration
     embedding_model: str = "all-MiniLM-L6-v2"

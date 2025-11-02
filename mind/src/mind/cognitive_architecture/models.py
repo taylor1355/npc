@@ -46,11 +46,10 @@ class ActionType(str, Enum):
 class Action(BaseModel):
     """Action to be executed, matching Godot's BaseAction format"""
 
+    model_config = {"use_enum_values": True}
+
     action: ActionType
     parameters: dict = Field(default_factory=dict)
-
-    class Config:
-        use_enum_values = True
 
     def __str__(self) -> str:
         """Format action for LLM consumption"""

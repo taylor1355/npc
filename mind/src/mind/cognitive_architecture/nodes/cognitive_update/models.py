@@ -13,14 +13,13 @@ class NewMemory(BaseModel):
 class WorkingMemory(BaseModel):
     """Structured working memory (flexible, extensible)"""
 
+    model_config = {"extra": "allow"}
+
     situation_assessment: str = ""
     active_goals: list[str] = Field(default_factory=list)
     recent_events: list[str] = Field(default_factory=list)
     current_plan: list[str] = Field(default_factory=list)
     emotional_state: str = ""
-
-    class Config:
-        extra = "allow"  # Enable dynamic fields
 
     def __str__(self) -> str:
         """Format working memory for LLM consumption"""
