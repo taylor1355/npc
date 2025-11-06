@@ -127,7 +127,7 @@ class VectorDBMemory:
         )
 
         # Generate embedding
-        embedding = self.encoder.encode(content).tolist()
+        embedding = self.encoder.encode(content, show_progress_bar=False).tolist()
         memory.embedding = embedding
 
         metadata = VectorDBMetadata(
@@ -151,7 +151,7 @@ class VectorDBMemory:
         """Search for memories using semantic similarity"""
 
         # Generate query embedding
-        query_embedding = self.encoder.encode(query.query).tolist()
+        query_embedding = self.encoder.encode(query.query, show_progress_bar=False).tolist()
 
         # Search in ChromaDB
         collection_count = self.collection.count()
