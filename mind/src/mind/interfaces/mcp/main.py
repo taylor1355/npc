@@ -6,6 +6,8 @@ import logging
 import os
 import signal
 import time
+from collections import deque
+from typing import Optional
 
 # Disable tqdm progress bars to prevent BrokenPipeError in SSE context
 os.environ["TQDM_DISABLE"] = "1"
@@ -13,6 +15,7 @@ os.environ["TQDM_DISABLE"] = "1"
 import uvicorn
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
@@ -24,6 +27,53 @@ logger = logging.getLogger(__name__)
 
 # Track server start time for uptime calculations
 SERVER_START_TIME = time.time()
+
+
+class InMemoryLogHandler(logging.Handler):
+    """Logging handler that stores recent log entries in memory for /logs endpoint"""
+
+    def __init__(self, max_entries: int = 1000):
+        super().__init__()
+        self.max_entries = max_entries
+        self.logs = deque(maxlen=max_entries)
+
+    def emit(self, record: logging.LogRecord):
+        """Store log record in memory buffer"""
+        try:
+            log_entry = {
+                "timestamp": record.created,
+                "level": record.levelname,
+                "message": self.format(record),
+            }
+            self.logs.append(log_entry)
+        except Exception:
+            self.handleError(record)
+
+    def get_logs(self, since: Optional[float] = None, limit: int = 100) -> list[dict]:
+        """
+        Retrieve stored log entries, newest first.
+
+        Args:
+            since: Unix timestamp - only return logs after this time
+            limit: Maximum number of entries to return
+
+        Returns:
+            List of log entry dicts with timestamp, level, message
+        """
+        # Convert deque to list (newest last) then reverse for newest-first
+        all_logs = list(self.logs)
+        all_logs.reverse()
+
+        # Filter by timestamp if provided
+        if since is not None:
+            all_logs = [log for log in all_logs if log["timestamp"] > since]
+
+        # Apply limit
+        return all_logs[:limit]
+
+
+# Global log handler instance
+LOG_HANDLER = InMemoryLogHandler(max_entries=1000)
 
 
 def create_starlette_app(mcp_server, *, debug: bool = False) -> Starlette:
@@ -63,6 +113,27 @@ def create_starlette_app(mcp_server, *, debug: bool = False) -> Starlette:
 
         return JSONResponse({"status": "shutting down"}, status_code=200)
 
+    async def get_logs(request: Request):
+        """Retrieve structured log entries for client consumption"""
+        # Parse query parameters
+        since = request.query_params.get("since")
+        limit = request.query_params.get("limit", "100")
+
+        # Convert parameters to appropriate types
+        try:
+            since_timestamp = float(since) if since else None
+            log_limit = int(limit)
+        except (ValueError, TypeError):
+            return JSONResponse(
+                {"error": "Invalid parameters. 'since' must be a number, 'limit' must be an integer."},
+                status_code=400,
+            )
+
+        # Retrieve logs from handler
+        logs = LOG_HANDLER.get_logs(since=since_timestamp, limit=log_limit)
+
+        return JSONResponse({"logs": logs}, status_code=200)
+
     return Starlette(
         debug=debug,
         routes=[
@@ -70,6 +141,7 @@ def create_starlette_app(mcp_server, *, debug: bool = False) -> Starlette:
             Mount("/sse/", app=sse.handle_post_message),
             Route("/health", endpoint=health_check, methods=["GET"]),
             Route("/shutdown", endpoint=shutdown_server, methods=["POST"]),
+            Route("/logs", endpoint=get_logs, methods=["GET"]),
         ],
     )
 
@@ -90,6 +162,11 @@ def main():
 
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY must be set in project_config.py")
+
+    # Configure logging to capture logs in memory
+    root_logger = logging.getLogger()
+    root_logger.addHandler(LOG_HANDLER)
+    root_logger.setLevel(logging.DEBUG)
 
     # Create the server instance
     server = MCPServer("NPC Mind Server")

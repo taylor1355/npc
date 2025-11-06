@@ -86,7 +86,7 @@ The Godot simulation connects through a layered client system:
 
 ## HTTP Endpoints
 
-Beyond MCP protocol endpoints, the server provides standard HTTP endpoints for lifecycle management.
+Beyond MCP protocol endpoints, the server provides standard HTTP endpoints for lifecycle management and monitoring.
 
 ### /health (GET)
 
@@ -97,6 +97,26 @@ Returns server status and uptime. Used by clients to detect when the server is r
 ### /shutdown (POST)
 
 Triggers graceful server shutdown via HTTP request instead of OS process signals. This enables cross-platform server management without handling Windows/WSL process boundaries, where killing wrapper processes can leave Python processes orphaned.
+
+### /logs (GET)
+
+Returns structured log entries for client-side display and debugging. Stores the most recent 1000 log entries in memory with timestamp, level, and message.
+
+**Query Parameters:**
+- `since` (optional): Unix timestamp - returns only logs after this time for incremental fetching
+- `limit` (optional): Maximum entries to return (default: 100)
+
+**Response Format:**
+```json
+{
+  "logs": [
+    {"timestamp": 1736096823.456, "level": "INFO", "message": "Server started"},
+    {"timestamp": 1736096824.123, "level": "DEBUG", "message": "SSE client connected"}
+  ]
+}
+```
+
+**Integration:** Game clients poll this endpoint every 1-2 seconds to fetch new logs for developer console display alongside simulation logs.
 
 ## Running the Server
 
