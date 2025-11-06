@@ -1,39 +1,75 @@
 """MCP server CLI entry point"""
 
 import argparse
+import asyncio
+import logging
+import os
+import signal
+import time
+
+# Disable tqdm progress bars to prevent BrokenPipeError in SSE context
+os.environ["TQDM_DISABLE"] = "1"
 
 import uvicorn
 from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
-from starlette.requests import Request
+from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from mind.project_config import OPENROUTER_API_KEY
 
 from .server import MCPServer
 
+logger = logging.getLogger(__name__)
+
+# Track server start time for uptime calculations
+SERVER_START_TIME = time.time()
+
 
 def create_starlette_app(mcp_server, *, debug: bool = False) -> Starlette:
     """Create a Starlette application for serving the MCP server with SSE"""
     sse = SseServerTransport("/sse/")
 
-    async def handle_sse(request: Request) -> None:
-        async with sse.connect_sse(
-            request.scope,
-            request.receive,
-            request._send,
-        ) as (read_stream, write_stream):
-            await mcp_server.run(
-                read_stream,
-                write_stream,
-                mcp_server.create_initialization_options(),
-            )
+    class SSEEndpoint:
+        """ASGI app for handling SSE connections"""
+
+        async def __call__(self, scope, receive, send):
+            async with sse.connect_sse(scope, receive, send) as (read_stream, write_stream):
+                await mcp_server.run(
+                    read_stream,
+                    write_stream,
+                    mcp_server.create_initialization_options(),
+                )
+
+    async def health_check(request):
+        """Health check endpoint for monitoring server status"""
+        uptime = time.time() - SERVER_START_TIME
+        return JSONResponse(
+            {"status": "healthy", "version": "1.0", "uptime_seconds": round(uptime, 2)},
+            status_code=200,
+        )
+
+    async def shutdown_server(request):
+        """Shut down the MCP server via HTTP request"""
+        logger.info("Shutdown request received from client")
+
+        def trigger_shutdown():
+            """Send SIGTERM to self for graceful shutdown"""
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        # Schedule shutdown after response is sent
+        loop = asyncio.get_event_loop()
+        loop.call_later(0.5, trigger_shutdown)
+
+        return JSONResponse({"status": "shutting down"}, status_code=200)
 
     return Starlette(
         debug=debug,
         routes=[
-            Route("/sse", endpoint=handle_sse),
+            Route("/sse", endpoint=SSEEndpoint()),
             Mount("/sse/", app=sse.handle_post_message),
+            Route("/health", endpoint=health_check, methods=["GET"]),
+            Route("/shutdown", endpoint=shutdown_server, methods=["POST"]),
         ],
     )
 
