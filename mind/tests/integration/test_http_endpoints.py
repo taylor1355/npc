@@ -13,6 +13,9 @@ from mind.interfaces.mcp.server import MCPServer
 @pytest.fixture
 def test_client():
     """Create a test client for the Starlette app"""
+    # Clear logs before creating new app to avoid accumulation
+    LOG_HANDLER.logs.clear()
+
     server = MCPServer("Test Server")
     mcp_server = server.mcp._mcp_server
     app = create_starlette_app(mcp_server, debug=True)
