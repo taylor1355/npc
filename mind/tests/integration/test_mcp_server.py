@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from mind.cognitive_architecture.models import (
+from mind.cognitive_architecture.observations import (
     EntityData,
     NeedsObservation,
     Observation,

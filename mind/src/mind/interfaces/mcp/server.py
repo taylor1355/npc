@@ -7,7 +7,7 @@ import uuid
 
 from fastmcp import Context, FastMCP
 
-from mind.cognitive_architecture.models import Observation
+from mind.cognitive_architecture.observations import Observation
 from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.state import PipelineState
 

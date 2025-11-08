@@ -3,7 +3,7 @@
 import pytest
 
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory, VectorDBQuery
-from mind.cognitive_architecture.models import Observation, StatusObservation
+from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.nodes.memory_retrieval.node import MemoryRetrievalNode
 from mind.cognitive_architecture.state import PipelineState
 

@@ -5,13 +5,8 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.messages import AIMessage
 
-from mind.cognitive_architecture.models import (
-    Action,
-    ActionType,
-    AvailableAction,
-    Observation,
-    StatusObservation,
-)
+from mind.cognitive_architecture.actions import Action, ActionType, AvailableAction
+from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.nodes.action_selection.node import ActionSelectionNode
 from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.state import PipelineState

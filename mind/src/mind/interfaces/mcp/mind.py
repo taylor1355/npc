@@ -5,7 +5,7 @@ from typing import Self
 
 from mind.apis.langchain_llm import get_llm
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-from mind.cognitive_architecture.models import ConversationMessage
+from mind.cognitive_architecture.observations import ConversationMessage
 from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory, WorkingMemory
 from mind.cognitive_architecture.pipeline import CognitivePipeline
 

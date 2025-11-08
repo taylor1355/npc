@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from ...models import Action, AvailableAction
+from ...actions import Action, AvailableAction
 
 
 class ActionSelectionInput(BaseModel):

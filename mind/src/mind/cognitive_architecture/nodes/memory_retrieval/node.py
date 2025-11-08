@@ -2,8 +2,8 @@
 
 from typing import Protocol
 
+from ...memory import Memory
 from ...memory.vector_db_memory import VectorDBQuery
-from ...models import Memory
 from ...state import PipelineState
 from ..base import Node
 

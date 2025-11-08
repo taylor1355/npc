@@ -4,7 +4,9 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from .models import Action, AvailableAction, ConversationMessage, Memory, Observation
+from .actions import Action, AvailableAction
+from .memory import Memory
+from .observations import ConversationMessage, Observation
 from .nodes.cognitive_update.models import NewMemory, WorkingMemory
 
 

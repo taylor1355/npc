@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
 from ..id_generator import IdGenerator
-from ..models import Memory
+from .models import Memory
 
 
 class VectorDBMetadata(BaseModel):

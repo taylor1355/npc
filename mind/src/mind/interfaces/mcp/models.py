@@ -3,7 +3,8 @@
 from pydantic import BaseModel, Field
 
 from mind.apis.langchain_llm import LangChainModel
-from mind.cognitive_architecture.models import Action, Observation
+from mind.cognitive_architecture.actions import Action
+from mind.cognitive_architecture.observations import Observation
 from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 
 # === Configuration Models ===

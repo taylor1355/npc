@@ -8,7 +8,7 @@ import pytest
 
 from mind.apis.langchain_llm import get_llm
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-from mind.cognitive_architecture.models import ActionType
+from mind.cognitive_architecture.actions import ActionType
 from mind.cognitive_architecture.pipeline import CognitivePipeline
 from mind.cognitive_architecture.state import PipelineState
 from mind.constants import DEFAULT_SMALL_MODEL

@@ -4,7 +4,7 @@ These fixtures mirror real Godot simulation observations that would be
 sent to the Mind server via MCP.
 """
 
-from mind.cognitive_architecture.models import (
+from mind.cognitive_architecture.observations import (
     ConversationMessage,
     ConversationObservation,
     EntityData,
