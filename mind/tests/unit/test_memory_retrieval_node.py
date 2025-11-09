@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mind.cognitive_architecture.memory import Memory, Observation, StatusObservation
+from mind.cognitive_architecture.memory import Memory
+from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.nodes.memory_retrieval.node import MemoryRetrievalNode
 from mind.cognitive_architecture.state import PipelineState
 

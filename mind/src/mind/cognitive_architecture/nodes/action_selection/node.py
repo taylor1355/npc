@@ -1,9 +1,14 @@
 """Action selection node implementation"""
 
-from langchain_core.language_models import BaseChatModel
+from pathlib import Path
 
-from ...state import PipelineState
-from ..base import LLMNode
+from langchain_core.language_models import BaseChatModel
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.prompts import PromptTemplate
+
+from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.state import PipelineState
+
 from .models import ActionSelectionOutput
 
 # Cognitive context keys (shared with cognitive_update)
@@ -16,15 +21,18 @@ class ActionSelectionNode(LLMNode):
     """Models human-like action selection based on cognitive and emotional state"""
 
     step_name = "action_selection"
-    PROMPT_VARS = {"working_memory", "cognitive_context", "personality_traits", "available_actions"}
 
     def __init__(self, llm: BaseChatModel):
-        super().__init__(llm, output_model=ActionSelectionOutput)
+        # Load prompt template
+        prompt_path = Path(__file__).parent / "prompt.md"
+        prompt = PromptTemplate.from_template(prompt_path.read_text())
+
+        super().__init__(llm, prompt, output_model=ActionSelectionOutput, max_retries=2)
 
     async def process(self, state: PipelineState) -> PipelineState:
         """Select an action based on current cognitive and emotional state"""
 
-        # Format available actions using their __str__ methods
+        # Format available actions
         actions_text = "\n".join([f"- {str(action)}" for action in state.available_actions])
 
         # Format cognitive context
@@ -45,16 +53,15 @@ class ActionSelectionNode(LLMNode):
             else "No specific traits"
         )
 
-        # Select action
-        output, tokens = await self.call_llm(
+        # Call LLM with prompt variables
+        output = await self.call_llm(
+            state,
             working_memory=str(state.working_memory),
             cognitive_context=context_text if context_text else "No specific context",
             personality_traits=personality_text,
             available_actions=actions_text,
+            format_instructions=PydanticOutputParser(pydantic_object=ActionSelectionOutput).get_format_instructions()
         )
 
-        # Update state
         state.chosen_action = output.chosen_action
-        self.track_tokens(state, tokens)
-
         return state

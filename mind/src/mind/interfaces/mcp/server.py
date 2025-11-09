@@ -105,6 +105,7 @@ class MCPServer:
 
                 state = PipelineState(
                     observation=obs,
+                    available_actions=obs.get_available_actions(),
                     working_memory=mind.working_memory,
                     personality_traits=mind.traits,
                     conversation_histories=mind.conversation_histories,

@@ -3,10 +3,7 @@
 
 class ActionValidationError(ValueError):
     """Base exception for action validation failures that should trigger retry"""
-
-    def to_llm_feedback(self) -> str:
-        """Format error message for LLM retry feedback"""
-        return str(self)
+    pass
 
 
 class InvalidEntityError(ActionValidationError):

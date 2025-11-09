@@ -84,11 +84,32 @@ class Observation(BaseModel):
             needs_str = ", ".join([f"{k}: {v:.0f}%" for k, v in self.needs.needs.items()])
             parts.append(f"Needs: {needs_str}")
 
-        if self.vision:
-            # TODO: Show entity IDs and interactions - critical for action validation
-            # See actions/validation.py for why this matters
-            entities_str = ", ".join([e.display_name for e in self.vision.visible_entities])
-            parts.append(f"Visible: {entities_str}")
+        if self.vision and self.vision.visible_entities:
+            # Show entity details with IDs and interactions (critical for action selection)
+            parts.append("Visible entities:")
+            for entity in self.vision.visible_entities:
+                entity_parts = [f"  - {entity.display_name} (ID: {entity.entity_id})"]
+
+                if entity.interactions:
+                    interaction_strs = []
+                    for int_name, int_data in entity.interactions.items():
+                        desc = int_data.get("description", int_name)
+                        # Show needs effects if available
+                        needs_filled = int_data.get("needs_filled", [])
+                        needs_drained = int_data.get("needs_drained", [])
+                        if needs_filled or needs_drained:
+                            effects = []
+                            if needs_filled:
+                                effects.append(f"+{','.join(needs_filled)}")
+                            if needs_drained:
+                                effects.append(f"-{','.join(needs_drained)}")
+                            interaction_strs.append(f"{int_name}: {desc} [{', '.join(effects)}]")
+                        else:
+                            interaction_strs.append(f"{int_name}: {desc}")
+
+                    entity_parts.append(f"    Interactions: {'; '.join(interaction_strs)}")
+
+                parts.append("\n".join(entity_parts))
 
         # TODO: Generalize interaction machinery to reduce specialized logic
         # Currently conversations have extensive specialized handling
@@ -99,3 +120,76 @@ class Observation(BaseModel):
             parts.append(f"Conversation:\n{msgs_str}")
 
         return "\n\n".join(parts) if parts else "No observations"
+
+    def get_available_actions(self):
+        """Build list of available actions from this observation."""
+        # Import here to avoid circular dependency (actions imports observations for validation)
+        from ..actions import ActionType, AvailableAction
+
+        actions = []
+
+        # General actions (always available)
+        actions.append(
+            AvailableAction(
+                name=ActionType.MOVE_TO,
+                description="Move to a specific grid position",
+                parameters={"destination": "Grid coordinates as tuple (x, y)"},
+            )
+        )
+
+        actions.append(
+            AvailableAction(
+                name=ActionType.WANDER,
+                description="Wander around aimlessly",
+            )
+        )
+
+        actions.append(
+            AvailableAction(
+                name=ActionType.WAIT,
+                description="Wait and observe surroundings",
+            )
+        )
+
+        # Conditional: cancel_interaction only if currently in an interaction
+        if self.status and self.status.current_interaction:
+            actions.append(
+                AvailableAction(
+                    name=ActionType.CANCEL_INTERACTION,
+                    description="Cancel the current interaction",
+                )
+            )
+
+        # Interaction-based actions from visible entities
+        if self.vision:
+            for entity in self.vision.visible_entities:
+                for interaction_name, interaction_data in entity.interactions.items():
+                    # Extract interaction details
+                    desc = interaction_data.get("description", f"Interact with {entity.display_name}")
+
+                    # Build parameter descriptions
+                    params = {
+                        "entity_id": f"Target entity ID (use: {entity.entity_id})",
+                        "interaction_name": f"Interaction type (use: {interaction_name})",
+                    }
+
+                    # Add needs info if available
+                    needs_filled = interaction_data.get("needs_filled", [])
+                    needs_drained = interaction_data.get("needs_drained", [])
+                    if needs_filled or needs_drained:
+                        effects = []
+                        if needs_filled:
+                            effects.append(f"fills: {', '.join(needs_filled)}")
+                        if needs_drained:
+                            effects.append(f"drains: {', '.join(needs_drained)}")
+                        desc = f"{desc} ({'; '.join(effects)})"
+
+                    actions.append(
+                        AvailableAction(
+                            name=ActionType.INTERACT_WITH,
+                            description=f"{entity.display_name}: {desc}",
+                            parameters=params,
+                        )
+                    )
+
+        return actions

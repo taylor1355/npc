@@ -108,7 +108,7 @@ class TestActionSelectionNode:
             content="""{
                 "chosen_action": {
                     "action": "move_to",
-                    "parameters": {"x": 15, "y": 20}
+                    "parameters": {"destination": [15, 20]}
                 }
             }""",
             usage_metadata={"input_tokens": 200, "output_tokens": 40, "total_tokens": 240},
@@ -117,7 +117,7 @@ class TestActionSelectionNode:
         result = await node.process(basic_state)
 
         assert result.chosen_action.action == ActionType.MOVE_TO
-        assert result.chosen_action.parameters == {"x": 15, "y": 20}
+        assert result.chosen_action.parameters == {"destination": [15, 20]}
 
     async def test_handles_interaction_action(self, node, mock_llm, basic_state):
         """Should handle interaction actions"""
@@ -125,7 +125,7 @@ class TestActionSelectionNode:
             content="""{
                 "chosen_action": {
                     "action": "interact_with",
-                    "parameters": {"entity_id": "anvil_001"}
+                    "parameters": {"entity_id": "anvil_001", "interaction_name": "use"}
                 }
             }""",
             usage_metadata={"input_tokens": 200, "output_tokens": 45, "total_tokens": 245},
@@ -134,7 +134,7 @@ class TestActionSelectionNode:
         result = await node.process(basic_state)
 
         assert result.chosen_action.action == ActionType.INTERACT_WITH
-        assert result.chosen_action.parameters == {"entity_id": "anvil_001"}
+        assert result.chosen_action.parameters == {"entity_id": "anvil_001", "interaction_name": "use"}
 
     async def test_handles_empty_personality_traits(self, node, mock_llm):
         """Should handle state with no personality traits"""

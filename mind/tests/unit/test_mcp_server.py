@@ -1,8 +1,10 @@
 """Unit tests for MCP server"""
 
 import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from mind.interfaces.mcp.server import MCPServer
 
@@ -192,7 +194,10 @@ class TestMCPServerErrorHandling:
 
     @pytest.mark.asyncio
     async def test_decide_action_with_valid_observation(self):
-        """Should return success with valid observation"""
+        """Should return success with valid observation when pipeline succeeds"""
+        from mind.cognitive_architecture.actions import Action
+        from mind.cognitive_architecture.state import PipelineState
+
         server = MCPServer()
 
         await server.mcp.call_tool(
@@ -233,6 +238,16 @@ class TestMCPServerErrorHandling:
             "conversations": [],
         }
 
+        # Mock the pipeline to return a successful action
+        mind = server.minds["test"]
+        original_process = mind.pipeline.process
+
+        async def mock_process(state: PipelineState) -> PipelineState:
+            state.chosen_action = Action.model_construct(action="wait", parameters={})
+            return state
+
+        mind.pipeline.process = mock_process
+
         result = await server.mcp.call_tool(
             "decide_action",
             {
@@ -240,6 +255,9 @@ class TestMCPServerErrorHandling:
                 "observation": observation,
             },
         )
+
+        # Restore original
+        mind.pipeline.process = original_process
 
         response = parse_response(result)
 

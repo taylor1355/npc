@@ -2,7 +2,14 @@
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationInfo, model_validator
+
+from mind.cognitive_architecture.actions.exceptions import (
+    InvalidEntityError,
+    InvalidInteractionError,
+    MissingRequiredParameterError,
+    MovementLockedError,
+)
 
 
 class ActionType(str, Enum):
@@ -35,6 +42,68 @@ class Action(BaseModel):
             else "no parameters"
         )
         return f"{self.action}({params_str})"
+
+    @model_validator(mode='after')
+    def validate_executable(self, info: ValidationInfo):
+        """Validate action can be executed given pipeline state.
+
+        Requires 'state' in validation context.
+        Raises ValidationError (wrapping ActionValidationError) if invalid.
+        """
+        if not info.context:
+            raise ValueError("Action validation requires context with 'state'")
+
+        state = info.context.get('state')
+        if not state:
+            raise ValueError("Action validation requires 'state' in context")
+
+        observation = state.observation
+
+        # Run validation checks
+        self._validate_movement_lock(observation)
+
+        if self.action == ActionType.INTERACT_WITH:
+            self._validate_interact_with(observation)
+        elif self.action == ActionType.MOVE_TO:
+            self._validate_move_to()
+
+        return self
+
+    def _validate_movement_lock(self, observation):
+        """Check if movement-based actions are blocked"""
+        if observation.status and observation.status.movement_locked:
+            if self.action in (ActionType.MOVE_TO, ActionType.MOVE_DIRECTION, ActionType.WANDER):
+                raise MovementLockedError()
+
+    def _validate_interact_with(self, observation):
+        """Validate INTERACT_WITH action against observation"""
+        entity_id = self.parameters.get("entity_id")
+        interaction_name = self.parameters.get("interaction_name")
+
+        if not entity_id:
+            raise MissingRequiredParameterError("entity_id", self.action)
+        if not interaction_name:
+            raise MissingRequiredParameterError("interaction_name", self.action)
+
+        # Check entity visibility
+        if observation.vision:
+            visible_entities = observation.vision.visible_entities
+            visible_ids = [e.entity_id for e in visible_entities]
+
+            if entity_id not in visible_ids:
+                raise InvalidEntityError(entity_id, visible_ids)
+
+            # Check interaction availability
+            entity = next(e for e in visible_entities if e.entity_id == entity_id)
+            if interaction_name not in entity.interactions:
+                raise InvalidInteractionError(
+                    interaction_name, entity_id, list(entity.interactions.keys())
+                )
+
+    def _validate_move_to(self):
+        """Validate MOVE_TO action parameters"""
+        if "destination" not in self.parameters:
+            raise MissingRequiredParameterError("destination", self.action)
 
 
 class AvailableAction(BaseModel):

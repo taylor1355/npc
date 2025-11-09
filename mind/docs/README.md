@@ -42,6 +42,11 @@ The cognitive pipeline (`src/mind/cognitive_architecture/`) processes observatio
 3. **Cognitive Update**: Updates working memory with new context, forms new daily memories
 4. **Action Selection**: Chooses action from available options based on full context
 
+**Node System:**
+- Pipeline nodes extend `Node` (automatic timing) or `LLMNode` (structured output, context-aware validation, retry)
+- All metrics tracked in pipeline state (`tokens_used`, `time_ms`)
+- See [nodes documentation](cognitive_architecture/nodes/README.md)
+
 **Key Models:**
 - `Observation`: Structured observation with status, needs, vision, conversations
 - `WorkingMemory`: Current situational context with flexible schema
