@@ -53,4 +53,5 @@ class CognitivePipeline:
         """Process an observation through the cognitive pipeline"""
         result_dict = await self.chain.ainvoke(state)
         # Convert LangGraph's AddableValuesDict back to our Pydantic model
-        return PipelineState(**result_dict)
+        # Pass original state as validation context for Action validation (needs state.observation)
+        return PipelineState.model_validate(result_dict, context={'state': state})

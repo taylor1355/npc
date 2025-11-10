@@ -27,7 +27,7 @@ class CognitiveUpdateNode(LLMNode):
         prompt_path = Path(__file__).parent / "prompt.md"
         prompt = PromptTemplate.from_template(prompt_path.read_text())
 
-        super().__init__(llm, prompt, output_model=CognitiveUpdateOutput)
+        super().__init__(llm, prompt, output_model=CognitiveUpdateOutput, max_retries=2)
 
     async def process(self, state: PipelineState) -> PipelineState:
         """Update cognitive context with retrieved memories and observations"""
@@ -43,7 +43,7 @@ class CognitiveUpdateNode(LLMNode):
             working_memory=str(state.working_memory),
             retrieved_memories=memories_text,
             observation_text=str(state.observation),
-            format_instructions=PydanticOutputParser(pydantic_object=CognitiveUpdateOutput).get_format_instructions()
+            format_instructions=self.get_format_instructions()
         )
 
         # Update state

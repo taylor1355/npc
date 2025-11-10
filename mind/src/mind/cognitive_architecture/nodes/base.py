@@ -4,6 +4,7 @@ import json
 import time
 from abc import ABC
 
+from json_repair import loads as json_repair_loads
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import PydanticOutputParser
@@ -11,6 +12,7 @@ from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, ValidationError
 
 from mind.cognitive_architecture.state import PipelineState
+
 
 
 class Node(ABC):
@@ -78,6 +80,19 @@ class LLMNode(Node):
         if output_model is not None:
             self.parser = PydanticOutputParser(pydantic_object=output_model)
 
+    def get_format_instructions(self) -> str:
+        """Get format instructions with optional enhancement for JSON-only output"""
+        if not self.parser:
+            return ""
+
+        base_instructions = self.parser.get_format_instructions()
+
+        # Add explicit instruction to output raw JSON without markdown fences
+        return (
+            f"{base_instructions}\n\n"
+            f"IMPORTANT: Output ONLY raw JSON. Do NOT wrap in markdown code fences like ```json."
+        )
+
     async def call_llm(
         self,
         state: PipelineState,
@@ -117,8 +132,8 @@ class LLMNode(Node):
                 # Track tokens from this attempt
                 total_tokens += self._extract_tokens(response)
 
-                # Parse JSON
-                data = json.loads(response.content)
+                # Parse JSON (json_repair handles common formatting issues)
+                data = json_repair_loads(response.content)
 
                 # Validate with state context
                 validated = self.parser.pydantic_object.model_validate(
@@ -133,11 +148,20 @@ class LLMNode(Node):
             except (json.JSONDecodeError, ValidationError) as e:
                 last_error = e
                 if attempt < max_attempts - 1:
-                    # Add error feedback for retry
                     messages.append(AIMessage(content=response.content))
-                    messages.append(HumanMessage(
-                        content=f"Error: {str(e)}\nPlease fix the error and try again."
-                    ))
+
+                    # Format detailed error message
+                    if isinstance(e, json.JSONDecodeError):
+                        # Use JSONDecodeError properties: msg, lineno, colno
+                        error_msg = f"JSON error at line {e.lineno}, column {e.colno}: {e.msg}"
+                    else:  # ValidationError
+                        # Use Pydantic's error formatting
+                        error_msg = f"Validation error:\n{e}"
+
+                    # Add meta-instruction about response format
+                    error_msg += "\n\nRespond with ONLY the corrected JSON. Do not include explanations or markdown fences."
+
+                    messages.append(HumanMessage(content=error_msg))
 
         # All retries exhausted - still track tokens
         if total_tokens:

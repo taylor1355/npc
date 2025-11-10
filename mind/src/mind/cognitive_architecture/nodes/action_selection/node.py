@@ -60,7 +60,7 @@ class ActionSelectionNode(LLMNode):
             cognitive_context=context_text if context_text else "No specific context",
             personality_traits=personality_text,
             available_actions=actions_text,
-            format_instructions=PydanticOutputParser(pydantic_object=ActionSelectionOutput).get_format_instructions()
+            format_instructions=self.get_format_instructions()
         )
 
         state.chosen_action = output.chosen_action

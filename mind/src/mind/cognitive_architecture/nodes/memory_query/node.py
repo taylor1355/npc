@@ -22,7 +22,7 @@ class MemoryQueryNode(LLMNode):
         prompt_path = Path(__file__).parent / "prompt.md"
         prompt = PromptTemplate.from_template(prompt_path.read_text())
 
-        super().__init__(llm, prompt, output_model=MemoryQueryOutput)
+        super().__init__(llm, prompt, output_model=MemoryQueryOutput, max_retries=2)
 
     async def process(self, state: PipelineState) -> PipelineState:
         """Generate memory queries from observation"""
@@ -30,7 +30,7 @@ class MemoryQueryNode(LLMNode):
             state,
             working_memory=str(state.working_memory),
             observation=str(state.observation),
-            format_instructions=PydanticOutputParser(pydantic_object=MemoryQueryOutput).get_format_instructions()
+            format_instructions=self.get_format_instructions()
         )
 
         state.memory_queries = output.queries
