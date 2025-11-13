@@ -10,6 +10,7 @@ from fastmcp import Context, FastMCP
 from mind.cognitive_architecture.observations import Observation
 from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.state import PipelineState
+from mind.logging_config import get_logger
 
 from .mind import Mind
 from .models import (
@@ -19,7 +20,7 @@ from .models import (
     MindStateResponse,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class MCPServer:
@@ -72,7 +73,7 @@ class MCPServer:
                 dict with status, action, error_message, and request_id
             """
             request_id = str(uuid.uuid4())[:8]
-            logger.info(f"[{request_id}] decide_action called for mind_id={mind_id}")
+            logger.debug(f"[{request_id}] decide_action called for mind_id={mind_id}")
 
             try:
                 if mind_id not in self.minds:

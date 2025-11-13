@@ -48,13 +48,8 @@ class CognitiveUpdateInput(BaseModel):
 class CognitiveUpdateOutput(BaseModel):
     """Output from cognitive context update"""
 
-    situation_assessment: str = Field(description="Assessment of the current situation")
-    current_goals: list[str] = Field(
-        default_factory=list, description="Goals currently active based on the situation"
-    )
-    emotional_state: str = Field(description="Current emotional state based on the situation")
     updated_working_memory: WorkingMemory = Field(
-        description="Updated working memory incorporating new information"
+        description="Updated working memory incorporating current situation, goals, emotional state, and events"
     )
     new_memories: list[NewMemory] = Field(
         default_factory=list,

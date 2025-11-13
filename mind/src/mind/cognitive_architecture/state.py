@@ -34,9 +34,6 @@ class PipelineState(BaseModel):
     # Daily memory buffer (cleared during sleep/consolidation)
     daily_memories: list[NewMemory] = Field(default_factory=list)
 
-    # Flexible cognitive context
-    cognitive_context: dict = Field(default_factory=dict)
-
     # Output
     chosen_action: Action | None = None
 

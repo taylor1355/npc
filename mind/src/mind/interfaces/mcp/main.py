@@ -19,11 +19,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+from mind.logging_config import get_logger
 from mind.project_config import OPENROUTER_API_KEY
 
 from .server import MCPServer
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 # Track server start time for uptime calculations
 SERVER_START_TIME = time.time()
@@ -164,9 +165,14 @@ def main():
         raise ValueError("OPENROUTER_API_KEY must be set in project_config.py")
 
     # Configure logging to capture logs in memory
+    # Set root logger to WARNING to suppress noisy dependency logs (OpenAI, uvicorn, etc.)
     root_logger = logging.getLogger()
     root_logger.addHandler(LOG_HANDLER)
-    root_logger.setLevel(logging.DEBUG)
+    root_logger.setLevel(logging.WARNING)
+
+    # Set mind application logger to DEBUG for detailed observability
+    mind_logger = logging.getLogger('mind')
+    mind_logger.setLevel(logging.DEBUG)
 
     # Create the server instance
     server = MCPServer("NPC Mind Server")

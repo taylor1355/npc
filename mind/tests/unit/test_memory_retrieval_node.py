@@ -127,7 +127,6 @@ class TestMemoryRetrievalNode:
             ),
             memory_queries=["test query"],
             personality_traits=["brave", "honest"],
-            cognitive_context={"test": "data"},
         )
 
         mock_memory_store.search.return_value = []
@@ -137,5 +136,4 @@ class TestMemoryRetrievalNode:
 
         # Should preserve other fields
         assert result.personality_traits == ["brave", "honest"]
-        assert result.cognitive_context == {"test": "data"}
         assert result.observation == state.observation

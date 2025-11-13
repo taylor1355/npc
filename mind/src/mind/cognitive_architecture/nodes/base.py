@@ -12,6 +12,9 @@ from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, ValidationError
 
 from mind.cognitive_architecture.state import PipelineState
+from mind.logging_config import get_logger
+
+logger = get_logger()
 
 
 
@@ -48,7 +51,7 @@ class LLMNode(Node):
     - Validation context is always {"state": state}
     """
 
-    step_name: str
+    step_name: str = "llm_node"
 
     def __init__(
         self,
@@ -110,12 +113,17 @@ class LLMNode(Node):
         # Format prompt using template (validates required vars)
         prompt_text = self.prompt.format(**prompt_vars)
 
+        logger.debug(f"[{self.step_name}] Calling LLM")
+
         # Raw string output (no retry needed)
         if self.output_model is None:
+            start_time = time.time()
             response = await self.llm.ainvoke([HumanMessage(content=prompt_text)])
+            elapsed_ms = int((time.time() - start_time) * 1000)
             tokens = self._extract_tokens(response)
             if tokens:
                 state.tokens_used[self.step_name] = tokens
+            logger.debug(f"[{self.step_name}] Completed in {elapsed_ms}ms, {tokens} tokens")
             return response.content
 
         # Structured output with retry
@@ -123,6 +131,7 @@ class LLMNode(Node):
         last_error = None
         max_attempts = self.max_retries + 1
         total_tokens = 0
+        start_time = time.time()
 
         for attempt in range(max_attempts):
             try:
@@ -141,13 +150,19 @@ class LLMNode(Node):
                 )
 
                 # Success! Track total tokens and return
+                elapsed_ms = int((time.time() - start_time) * 1000)
                 if total_tokens:
                     state.tokens_used[self.step_name] = total_tokens
+                logger.debug(f"[{self.step_name}] Completed in {elapsed_ms}ms, {total_tokens} tokens")
                 return validated
 
             except (json.JSONDecodeError, ValidationError) as e:
                 last_error = e
                 if attempt < max_attempts - 1:
+                    # Log retry
+                    error_type = "JSONDecodeError" if isinstance(e, json.JSONDecodeError) else "ValidationError"
+                    logger.debug(f"[{self.step_name}] Retry {attempt + 1}/{self.max_retries}: {error_type}")
+
                     messages.append(AIMessage(content=response.content))
 
                     # Format detailed error message

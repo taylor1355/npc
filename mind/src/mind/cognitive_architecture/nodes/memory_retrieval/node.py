@@ -2,10 +2,14 @@
 
 from typing import Protocol
 
+from mind.logging_config import get_logger
+
 from ...memory import Memory
 from ...memory.vector_db_memory import VectorDBQuery
 from ...state import PipelineState
 from ..base import Node
+
+logger = get_logger()
 
 # Default memories to retrieve per query
 DEFAULT_MEMORIES_PER_QUERY = 2
@@ -56,5 +60,11 @@ class MemoryRetrievalNode(Node):
 
         # Update state
         state.retrieved_memories = deduplicated_memories
+
+        # Log retrieved memories
+        logger.debug(f"Retrieved {len(deduplicated_memories)} memories")
+        for i, mem in enumerate(deduplicated_memories[:3]):  # Show top 3
+            content_preview = mem.content[:100] + "..." if len(mem.content) > 100 else mem.content
+            logger.debug(f"  [{i+1}] {content_preview}")
 
         return state

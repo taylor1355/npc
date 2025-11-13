@@ -27,9 +27,6 @@ You are modeling human action selection based on psychological principles. Consi
 ### Working Memory
 {working_memory}
 
-### Cognitive Context
-{cognitive_context}
-
 ### Personality Traits
 {personality_traits}
 

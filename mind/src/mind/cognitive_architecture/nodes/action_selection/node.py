@@ -8,13 +8,11 @@ from langchain_core.prompts import PromptTemplate
 
 from mind.cognitive_architecture.nodes.base import LLMNode
 from mind.cognitive_architecture.state import PipelineState
+from mind.logging_config import get_logger
 
 from .models import ActionSelectionOutput
 
-# Cognitive context keys (shared with cognitive_update)
-KEY_SITUATION = "situation_assessment"
-KEY_GOALS = "current_goals"
-KEY_EMOTIONAL = "emotional_state"
+logger = get_logger()
 
 
 class ActionSelectionNode(LLMNode):
@@ -35,18 +33,7 @@ class ActionSelectionNode(LLMNode):
         # Format available actions
         actions_text = "\n".join([f"- {str(action)}" for action in state.available_actions])
 
-        # Format cognitive context
-        context_text = ""
-        if state.cognitive_context:
-            if KEY_SITUATION in state.cognitive_context:
-                context_text += f"Situation: {state.cognitive_context[KEY_SITUATION]}\n"
-            if KEY_GOALS in state.cognitive_context:
-                goals = state.cognitive_context[KEY_GOALS]
-                if goals:
-                    context_text += f"Current Goals: {', '.join(goals)}\n"
-            if KEY_EMOTIONAL in state.cognitive_context:
-                context_text += f"Emotional State: {state.cognitive_context[KEY_EMOTIONAL]}"
-
+        # Format personality traits
         personality_text = (
             ", ".join(state.personality_traits)
             if state.personality_traits
@@ -57,11 +44,15 @@ class ActionSelectionNode(LLMNode):
         output = await self.call_llm(
             state,
             working_memory=str(state.working_memory),
-            cognitive_context=context_text if context_text else "No specific context",
             personality_traits=personality_text,
             available_actions=actions_text,
             format_instructions=self.get_format_instructions()
         )
 
         state.chosen_action = output.chosen_action
+
+        # Log action selection
+        logger.debug(f"Evaluated {len(state.available_actions)} available actions")
+        logger.debug(f"Selected: {output.chosen_action}")
+
         return state

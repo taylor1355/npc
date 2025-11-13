@@ -8,8 +8,11 @@ from langchain_core.prompts import PromptTemplate
 
 from mind.cognitive_architecture.nodes.base import LLMNode
 from mind.cognitive_architecture.state import PipelineState
+from mind.logging_config import get_logger
 
 from .models import MemoryQueryOutput
+
+logger = get_logger()
 
 
 class MemoryQueryNode(LLMNode):
@@ -34,4 +37,5 @@ class MemoryQueryNode(LLMNode):
         )
 
         state.memory_queries = output.queries
+        logger.debug(f"Generated {len(output.queries)} memory queries: {output.queries}")
         return state

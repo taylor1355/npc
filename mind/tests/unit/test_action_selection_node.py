@@ -182,7 +182,6 @@ class TestActionSelectionNode:
         assert result.retrieved_memories == original_memories
         assert result.working_memory == original_working_memory
         assert result.personality_traits == basic_state.personality_traits
-        assert result.cognitive_context == basic_state.cognitive_context
 
     async def test_llm_called_once_per_process(self, node, mock_llm, basic_state):
         """Should call LLM exactly once per process call"""

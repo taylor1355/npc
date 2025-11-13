@@ -3,12 +3,16 @@
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, StateGraph
 
+from mind.logging_config import get_logger
+
 from .memory.vector_db_memory import VectorDBMemory
 from .nodes.action_selection.node import ActionSelectionNode
 from .nodes.cognitive_update.node import CognitiveUpdateNode
 from .nodes.memory_query.node import MemoryQueryNode
 from .nodes.memory_retrieval.node import MemoryRetrievalNode
 from .state import PipelineState
+
+logger = get_logger()
 
 
 class CognitivePipeline:
@@ -51,7 +55,16 @@ class CognitivePipeline:
 
     async def process(self, state: PipelineState) -> PipelineState:
         """Process an observation through the cognitive pipeline"""
+        logger.debug(f"Pipeline starting for entity_id={state.observation.entity_id}")
+
         result_dict = await self.chain.ainvoke(state)
         # Convert LangGraph's AddableValuesDict back to our Pydantic model
         # Pass original state as validation context for Action validation (needs state.observation)
-        return PipelineState.model_validate(result_dict, context={'state': state})
+        result = PipelineState.model_validate(result_dict, context={'state': state})
+
+        # Log pipeline completion summary
+        total_time = sum(result.time_ms.values())
+        total_tokens = sum(result.tokens_used.values())
+        logger.debug(f"Pipeline completed in {total_time}ms, {total_tokens} tokens")
+
+        return result

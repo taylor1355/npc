@@ -68,26 +68,15 @@ class TestCognitiveUpdateNode:
         )
 
     async def test_updates_working_memory(self, node, mock_llm, basic_state):
-        """Should update working memory based on LLM output"""
+        """Should update working memory with situation, goals, and emotional state"""
         result = await node.process(basic_state)
 
-        # Should have updated working memory
+        # Should have updated working memory with all cognitive state
         assert result.working_memory is not None
         assert isinstance(result.working_memory, WorkingMemory)
         assert result.working_memory.situation_assessment == "Working on sword commission"
-
-    async def test_updates_cognitive_context(self, node, mock_llm, basic_state):
-        """Should populate cognitive_context dict with situation, goals, emotional state"""
-        result = await node.process(basic_state)
-
-        # Should have cognitive context populated
-        assert "situation_assessment" in result.cognitive_context
-        assert "current_goals" in result.cognitive_context
-        assert "emotional_state" in result.cognitive_context
-
-        assert result.cognitive_context["situation_assessment"] == "Currently at the forge"
-        assert result.cognitive_context["current_goals"] == ["Complete sword order"]
-        assert result.cognitive_context["emotional_state"] == "Focused"
+        assert result.working_memory.active_goals == ["Finish blade", "Heat treatment"]
+        assert result.working_memory.emotional_state == "Determined"
 
     async def test_adds_new_memories_to_daily_buffer(self, node, mock_llm, basic_state):
         """Should extend daily_memories with new memories from LLM"""

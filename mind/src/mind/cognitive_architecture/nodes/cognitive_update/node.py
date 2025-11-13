@@ -8,13 +8,11 @@ from langchain_core.prompts import PromptTemplate
 
 from mind.cognitive_architecture.nodes.base import LLMNode
 from mind.cognitive_architecture.state import PipelineState
+from mind.logging_config import get_logger
 
 from .models import CognitiveUpdateOutput
 
-# Cognitive context dict keys
-KEY_SITUATION = "situation_assessment"
-KEY_GOALS = "current_goals"
-KEY_EMOTIONAL = "emotional_state"
+logger = get_logger()
 
 
 class CognitiveUpdateNode(LLMNode):
@@ -46,15 +44,23 @@ class CognitiveUpdateNode(LLMNode):
             format_instructions=self.get_format_instructions()
         )
 
-        # Update state
+        # Update state with new working memory
         state.working_memory = output.updated_working_memory
-        state.cognitive_context = {
-            KEY_SITUATION: output.situation_assessment,
-            KEY_GOALS: output.current_goals,
-            KEY_EMOTIONAL: output.emotional_state,
-        }
 
         # Add new memories to daily buffer
         state.daily_memories.extend(output.new_memories)
+
+        # Log updated working memory
+        wm = output.updated_working_memory
+        logger.debug("Updated working memory:")
+        logger.debug(f"  Situation: {wm.situation_assessment}")
+        logger.debug(f"  Active goals: {wm.active_goals}")
+        logger.debug(f"  Current plan: {wm.current_plan}")
+        logger.debug(f"  Emotional state: {wm.emotional_state}")
+
+        # Log new memories
+        logger.debug(f"Storing {len(output.new_memories)} new memories")
+        for mem in output.new_memories:
+            logger.debug(f"  [importance={mem.importance}] {mem.content}")
 
         return state

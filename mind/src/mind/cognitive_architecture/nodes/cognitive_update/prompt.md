@@ -12,7 +12,7 @@ Your task is to update the person's cognitive state based on their memories and 
 
 ## Task
 
-Given the person's current state, memories, and observation, update their cognitive context.
+Given the person's current state, memories, and observation, update their working memory and identify new memories to store.
 
 ### Current Working Memory
 {working_memory}
@@ -23,12 +23,14 @@ Given the person's current state, memories, and observation, update their cognit
 ### Current Observation
 {observation_text}
 
-Analyze this information to:
-1. Assess the current situation
-2. Identify current goals based on the context
-3. Determine emotional state
-4. Update working memory with key information
-5. **Identify new memories to store** from this experience
+Update the working memory with:
+1. **Situation assessment** - Your understanding of what's currently happening
+2. **Active goals** - What they're trying to accomplish right now based on their needs and situation
+3. **Recent events** - Notable things that just happened (update from previous, keep relevant context)
+4. **Current plan** - Their intended next steps to achieve goals
+5. **Emotional state** - How they're feeling based on the situation
+
+Also **identify new memories to store** from this experience.
 
 ## Memory Formation Guidelines
 
