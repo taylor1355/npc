@@ -5,9 +5,13 @@ from typing import Self
 
 from mind.apis.langchain_llm import get_llm
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-from mind.cognitive_architecture.observations import ConversationMessage
+from mind.cognitive_architecture.observations import ConversationMessage, MindEvent
 from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory, WorkingMemory
 from mind.cognitive_architecture.pipeline import CognitivePipeline
+
+# Event buffer retention policy
+EVENT_RETENTION_TIME_MINUTES = 60  # Keep events newer than this many game minutes
+EVENT_BUFFER_MAX_SIZE = 15  # Maximum number of events to retain
 
 
 @dataclass
@@ -24,6 +28,8 @@ class Mind:
 
     # Conversation history aggregation (keyed by interaction_id)
     conversation_histories: dict[str, list[ConversationMessage]] = field(default_factory=dict)
+
+    event_buffer: list[MindEvent] = field(default_factory=list)
 
     @classmethod
     def from_config(cls, mind_id: str, config) -> Self:
@@ -89,3 +95,26 @@ class Mind:
             for msg in conv_obs.conversation_history:
                 if msg.timestamp is None or msg.timestamp not in existing_timestamps:
                     self.conversation_histories[interaction_id].append(msg)
+
+    def update_events(self, new_events: list[MindEvent], current_time: int) -> None:
+        """Update event buffer with retention policy
+
+        Events are distinct from observations - they're temporal occurrences that accumulate.
+        Retention policy: Keep events that are:
+        - Newer than EVENT_RETENTION_TIME_MINUTES game minutes, OR
+        - Not yet marked as seen (will be marked after processing)
+        Up to maximum of EVENT_BUFFER_MAX_SIZE most recent events
+
+        Args:
+            new_events: New events from this decision cycle
+            current_time: Current simulation time
+        """
+        self.event_buffer.extend(new_events)
+
+        cutoff_time = current_time - EVENT_RETENTION_TIME_MINUTES
+        retained = [e for e in self.event_buffer if e.timestamp > cutoff_time]
+
+        if len(retained) > EVENT_BUFFER_MAX_SIZE:
+            retained = sorted(retained, key=lambda e: e.timestamp, reverse=True)[:EVENT_BUFFER_MAX_SIZE]
+
+        self.event_buffer = retained

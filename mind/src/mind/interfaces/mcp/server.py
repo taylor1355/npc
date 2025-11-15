@@ -2,12 +2,12 @@
 
 import json
 import logging
-import traceback
 import uuid
 
 from fastmcp import Context, FastMCP
+from pydantic import ValidationError
 
-from mind.cognitive_architecture.observations import Observation
+from mind.cognitive_architecture.observations import MindEvent, Observation
 from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.state import PipelineState
 from mind.logging_config import get_logger
@@ -21,6 +21,29 @@ from .models import (
 )
 
 logger = get_logger()
+
+
+def _error_response(request_id: str, error_message: str, details: str = None) -> dict:
+    """Helper to construct error response dict"""
+    response = {
+        "status": "error",
+        "action": None,
+        "error_message": error_message,
+        "request_id": request_id,
+    }
+    if details:
+        response["details"] = details
+    return response
+
+
+def _success_response(request_id: str, action: dict) -> dict:
+    """Helper to construct success response dict"""
+    return {
+        "status": "success",
+        "action": action,
+        "error_message": None,
+        "request_id": request_id,
+    }
 
 
 class MCPServer:
@@ -61,6 +84,7 @@ class MCPServer:
         async def decide_action(
             mind_id: str,
             observation: dict,
+            events: list = None,
             ctx: Context = None,
         ) -> dict:
             """Process observation from simulation and decide on an action
@@ -68,6 +92,7 @@ class MCPServer:
             Args:
                 mind_id: Unique identifier for the mind
                 observation: Structured observation dict (will be validated to Observation model)
+                events: List of mind events
 
             Returns:
                 dict with status, action, error_message, and request_id
@@ -78,31 +103,36 @@ class MCPServer:
             try:
                 if mind_id not in self.minds:
                     logger.warning(f"[{request_id}] Mind {mind_id} not found")
-                    return {
-                        "status": "error",
-                        "action": None,
-                        "error_message": f"Mind {mind_id} not found",
-                        "request_id": request_id,
-                    }
+                    return _error_response(request_id, f"Mind {mind_id} not found")
 
                 mind = self.minds[mind_id]
 
+                # Validate observation
                 try:
                     obs = Observation.model_validate(observation)
-                except Exception as e:
-                    validation_error = traceback.format_exc()
-                    logger.error(
-                        f"[{request_id}] Observation validation failed for {mind_id}: {validation_error}"
+                except ValidationError as e:
+                    logger.exception(f"[{request_id}] Observation validation failed for {mind_id}")
+                    return _error_response(
+                        request_id,
+                        f"Invalid observation format: {str(e)}",
+                        details=str(e)
                     )
-                    return {
-                        "status": "error",
-                        "action": None,
-                        "error_message": f"Invalid observation format: {type(e).__name__}: {str(e)}",
-                        "details": validation_error,
-                        "request_id": request_id,
-                    }
+
+                # Deserialize and validate events if provided
+                mind_events = []
+                if events is not None:
+                    try:
+                        mind_events = [MindEvent.model_validate(e) for e in events]
+                    except ValidationError as e:
+                        logger.exception(f"[{request_id}] Event validation failed for {mind_id}")
+                        return _error_response(
+                            request_id,
+                            f"Invalid event format: {str(e)}",
+                            details=str(e)
+                        )
 
                 mind.update_conversations(obs.conversations)
+                mind.update_events(mind_events, obs.current_simulation_time)
 
                 state = PipelineState(
                     observation=obs,
@@ -110,58 +140,28 @@ class MCPServer:
                     working_memory=mind.working_memory,
                     personality_traits=mind.traits,
                     conversation_histories=mind.conversation_histories,
+                    recent_events=mind.event_buffer,
                 )
 
-                try:
-                    logger.debug(f"[{request_id}] Running cognitive pipeline for {mind_id}")
-                    result = await mind.pipeline.process(state)
-                except Exception as e:
-                    pipeline_error = traceback.format_exc()
-                    logger.error(
-                        f"[{request_id}] Pipeline processing failed for {mind_id}: {pipeline_error}"
-                    )
-                    return {
-                        "status": "error",
-                        "action": None,
-                        "error_message": f"Pipeline processing failed: {type(e).__name__}: {str(e)}",
-                        "details": pipeline_error,
-                        "request_id": request_id,
-                    }
+                # Run cognitive pipeline
+                logger.debug(f"[{request_id}] Running cognitive pipeline for {mind_id}")
+                result = await mind.pipeline.process(state)
 
                 mind.working_memory = result.working_memory
                 mind.daily_memories.extend(result.daily_memories)
 
                 if result.chosen_action is None:
                     logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")
-                    return {
-                        "status": "error",
-                        "action": None,
-                        "error_message": "Pipeline did not select an action",
-                        "request_id": request_id,
-                    }
+                    return _error_response(request_id, "Pipeline did not select an action")
 
                 logger.info(
                     f"[{request_id}] Successfully processed decision for {mind_id}: {result.chosen_action.action}"
                 )
-                return {
-                    "status": "success",
-                    "action": result.chosen_action.model_dump(),
-                    "error_message": None,
-                    "request_id": request_id,
-                }
+                return _success_response(request_id, result.chosen_action.model_dump())
 
-            except Exception as e:
-                unexpected_error = traceback.format_exc()
-                logger.error(
-                    f"[{request_id}] Unexpected error in decide_action for {mind_id}: {unexpected_error}"
-                )
-                return {
-                    "status": "error",
-                    "action": None,
-                    "error_message": f"Unexpected server error: {type(e).__name__}: {str(e)}",
-                    "details": unexpected_error,
-                    "request_id": request_id,
-                }
+            except Exception:
+                logger.exception(f"[{request_id}] Unexpected error in decide_action for {mind_id}")
+                return _error_response(request_id, "Unexpected server error")
 
         @self.mcp.tool()
         async def consolidate_memories(

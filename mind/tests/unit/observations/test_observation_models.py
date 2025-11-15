@@ -4,6 +4,8 @@ from mind.cognitive_architecture.observations import (
     ConversationMessage,
     ConversationObservation,
     EntityData,
+    MindEvent,
+    MindEventType,
     NeedsObservation,
     Observation,
     StatusObservation,
@@ -101,3 +103,76 @@ class TestObservationModels:
         assert obs.needs is None
         assert obs.vision is None
         assert obs.conversations == []
+
+
+class TestMindEvent:
+    """Test MindEvent model and formatting"""
+
+    def test_create_mind_event(self):
+        """Should create MindEvent with event_type field"""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_REJECTED,
+            payload={"interaction_name": "sit", "reason": "Too far away"},
+        )
+
+        assert event.timestamp == 100
+        assert event.event_type == MindEventType.INTERACTION_BID_REJECTED
+        assert event.payload["interaction_name"] == "sit"
+        assert event.payload["reason"] == "Too far away"
+
+    def test_format_rejection_event_with_reason(self):
+        """Should format rejection event with reason in natural language"""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_REJECTED,
+            payload={"interaction_name": "sit", "reason": "Too far away"},
+        )
+
+        formatted = str(event)
+        assert "Interaction bid rejected: sit" in formatted
+        assert "Too far away" in formatted
+
+    def test_format_rejection_event_without_reason(self):
+        """Should format rejection event without reason"""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_REJECTED,
+            payload={"interaction_name": "sit"},
+        )
+
+        formatted = str(event)
+        assert formatted == "Interaction bid rejected: sit"
+
+    def test_format_interaction_started_event(self):
+        """Should format interaction started event"""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_STARTED,
+            payload={"interaction_name": "conversation"},
+        )
+
+        formatted = str(event)
+        assert formatted == "Interaction started: conversation"
+
+    def test_format_interaction_finished_event(self):
+        """Should format interaction finished event"""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_FINISHED,
+            payload={"interaction_name": "conversation"},
+        )
+
+        formatted = str(event)
+        assert formatted == "Interaction finished: conversation"
+
+    def test_format_error_event(self):
+        """Should format error event"""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.ERROR,
+            payload={"message": "Something went wrong"},
+        )
+
+        formatted = str(event)
+        assert formatted == "Error: Something went wrong"

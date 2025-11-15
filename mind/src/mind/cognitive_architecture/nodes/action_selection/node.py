@@ -1,6 +1,7 @@
 """Action selection node implementation"""
 
 from pathlib import Path
+from pprint import pformat
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import PydanticOutputParser
@@ -46,6 +47,7 @@ class ActionSelectionNode(LLMNode):
             working_memory=str(state.working_memory),
             personality_traits=personality_text,
             available_actions=actions_text,
+            recent_events=pformat(state.recent_events),
             format_instructions=self.get_format_instructions()
         )
 

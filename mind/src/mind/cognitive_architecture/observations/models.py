@@ -1,6 +1,74 @@
 """Observation models for the cognitive architecture"""
 
+from enum import StrEnum
+
 from pydantic import BaseModel, Field
+
+
+class MindEventType(StrEnum):
+    """Event types matching Godot MindEvent.Type enum"""
+
+    INTERACTION_BID_PENDING = "INTERACTION_BID_PENDING"
+    INTERACTION_BID_REJECTED = "INTERACTION_BID_REJECTED"
+    INTERACTION_BID_RECEIVED = "INTERACTION_BID_RECEIVED"
+    INTERACTION_STARTED = "INTERACTION_STARTED"
+    INTERACTION_CANCELED = "INTERACTION_CANCELED"
+    INTERACTION_FINISHED = "INTERACTION_FINISHED"
+    INTERACTION_OBSERVATION = "INTERACTION_OBSERVATION"
+    ERROR = "ERROR"
+    # OBSERVATION not included - handled separately as main observation field
+
+
+class MindEvent(BaseModel):
+    """Mind event with typed payload matching Godot MindEvent structure"""
+
+    timestamp: int
+    event_type: MindEventType
+    payload: dict  # Serialized observation data from Godot
+
+    def __str__(self) -> str:
+        """Format event as natural language for LLM"""
+        event_type = self.event_type
+        payload = self.payload
+
+        if event_type == MindEventType.INTERACTION_BID_REJECTED:
+            interaction_name = payload.get("interaction_name", "unknown")
+            reason = payload.get("reason", "")
+            if reason:
+                return f"Interaction bid rejected: {interaction_name} (Reason: {reason})"
+            else:
+                return f"Interaction bid rejected: {interaction_name}"
+
+        elif event_type == MindEventType.INTERACTION_STARTED:
+            interaction_name = payload.get("interaction_name", "unknown")
+            return f"Interaction started: {interaction_name}"
+
+        elif event_type == MindEventType.INTERACTION_FINISHED:
+            interaction_name = payload.get("interaction_name", "unknown")
+            return f"Interaction finished: {interaction_name}"
+
+        elif event_type == MindEventType.INTERACTION_CANCELED:
+            interaction_name = payload.get("interaction_name", "unknown")
+            return f"Interaction canceled: {interaction_name}"
+
+        elif event_type == MindEventType.ERROR:
+            message = payload.get("message", "Unknown error")
+            return f"Error: {message}"
+
+        elif event_type == MindEventType.INTERACTION_BID_PENDING:
+            interaction_name = payload.get("interaction_name", "unknown")
+            return f"Interaction bid pending: {interaction_name}"
+
+        elif event_type == MindEventType.INTERACTION_BID_RECEIVED:
+            interaction_name = payload.get("interaction_name", "unknown")
+            return f"Interaction bid received: {interaction_name}"
+
+        elif event_type == MindEventType.INTERACTION_OBSERVATION:
+            # Interaction update - format based on payload
+            return f"Interaction update: {payload}"
+
+        else:
+            return f"Unknown event type: {event_type}"
 
 
 class StatusObservation(BaseModel):
@@ -88,7 +156,7 @@ class Observation(BaseModel):
             # Show entity details with IDs and interactions (critical for action selection)
             parts.append("Visible entities:")
             for entity in self.vision.visible_entities:
-                entity_parts = [f"  - {entity.display_name} (ID: {entity.entity_id})"]
+                entity_parts = [f"  - {entity.display_name} (ID: {entity.entity_id}, Position: {entity.position})"]
 
                 if entity.interactions:
                     interaction_strs = []
@@ -150,6 +218,17 @@ class Observation(BaseModel):
                 description="Wait and observe surroundings",
             )
         )
+
+        # Conditional: continue action when movement or interaction is in progress
+        if self.status and self.status.controller_state:
+            state_name = self.status.controller_state.get('state_name', '')
+            if state_name in ('moving', 'interacting'):
+                actions.append(
+                    AvailableAction(
+                        name=ActionType.CONTINUE,
+                        description="Continue current action (movement or interaction)",
+                    )
+                )
 
         # Conditional: cancel_interaction only if currently in an interaction
         if self.status and self.status.current_interaction:

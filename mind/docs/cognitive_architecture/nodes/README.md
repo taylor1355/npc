@@ -62,6 +62,8 @@ Node (automatic timing)
 - `observation: Observation` - Current sensory input
 - `working_memory: WorkingMemory` - Situational context
 - `retrieved_memories: list[Memory]` - Fetched long-term memories
+- `recent_events: list[MindEvent]` - Temporal occurrences (managed by Mind, passed for node access)
+- `conversation_histories: dict[str, list[ConversationMessage]]` - Full conversation state per interaction
 - `daily_memories: list[NewMemory]` - Unconsolidated experiences
 - `chosen_action: Action | None` - Selected action
 - `tokens_used: dict[str, int]` - Token counts per node

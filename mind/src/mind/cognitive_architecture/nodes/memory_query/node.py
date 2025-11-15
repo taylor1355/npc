@@ -1,6 +1,7 @@
 """Memory query generation node"""
 
 from pathlib import Path
+from pprint import pformat
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import PydanticOutputParser

@@ -20,6 +20,9 @@ Given the person's current state, memories, and observation, update their workin
 ### Retrieved Memories
 {retrieved_memories}
 
+### Recent Events
+{recent_events}
+
 ### Current Observation
 {observation_text}
 

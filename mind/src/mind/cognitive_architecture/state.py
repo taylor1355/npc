@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from .actions import Action, AvailableAction
 from .memory import Memory
-from .observations import ConversationMessage, Observation
+from .observations import ConversationMessage, MindEvent, Observation
 from .nodes.cognitive_update.models import NewMemory, WorkingMemory
 
 
@@ -30,6 +30,10 @@ class PipelineState(BaseModel):
 
     # Conversation histories aggregated by interaction_id
     conversation_histories: dict[str, list[ConversationMessage]] = Field(default_factory=dict)
+
+    # Event buffer (managed by Mind, passed for node access)
+    # Events are distinct from observations - they're temporal occurrences that accumulate
+    recent_events: list[MindEvent] = Field(default_factory=list)
 
     # Daily memory buffer (cleared during sleep/consolidation)
     daily_memories: list[NewMemory] = Field(default_factory=list)

@@ -36,6 +36,7 @@ Encapsulates a single mind's state and cognitive pipeline.
 - Maintains working memory (current situational awareness)
 - Buffers daily memories before consolidation to long-term storage
 - Tracks conversation histories per interaction
+- Manages event buffer with retention policy (60 game minutes OR max 15 events)
 
 **Configuration:** Initialized via `Mind.from_config(mind_id, config)` with `MindConfig` specifying entity ID, personality traits, LLM model, and memory storage path.
 
@@ -49,7 +50,21 @@ Creates a new mind instance with specified configuration. Takes `mind_id` and `M
 
 ### decide_action
 
-Processes a structured observation through the cognitive pipeline and returns an action. Takes `mind_id` and `observation` dict containing entity status, needs, vision, and conversations. Validates observation structure, runs cognitive pipeline (query memories → retrieve → update working memory → select action), and returns action dict or error.
+Processes a structured observation and recent events through the cognitive pipeline and returns an action. Takes `mind_id`, `observation` dict containing entity status, needs, vision, and conversations, and optional `events` list of temporal occurrences since last decision.
+
+**Parameters:**
+- `mind_id`: Unique identifier for the mind
+- `observation`: Structured observation dict with entity status, needs, vision, and conversations
+- `events` (optional): List of MindEvent dicts with `timestamp`, `event_type`, and `payload` fields
+
+**Processing Flow:**
+1. Validates observation structure
+2. Deserializes and validates events (if provided)
+3. Updates conversation histories and event buffer
+4. Runs cognitive pipeline: query memories → retrieve → update working memory → select action
+5. Returns action dict or error
+
+**Event Types:** `INTERACTION_BID_REJECTED`, `INTERACTION_BID_RECEIVED`, `INTERACTION_STARTED`, `INTERACTION_FINISHED`, `INTERACTION_CANCELED`, `INTERACTION_OBSERVATION`, `ERROR`
 
 ### consolidate_memories
 
