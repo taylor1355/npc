@@ -7,6 +7,7 @@ import uuid
 from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
+from mind.cognitive_architecture.actions import ActionType
 from mind.cognitive_architecture.observations import MindEvent, Observation
 from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.state import PipelineState
@@ -136,11 +137,12 @@ class MCPServer:
 
                 state = PipelineState(
                     observation=obs,
-                    available_actions=obs.get_available_actions(),
+                    available_actions=obs.get_available_actions(pending_incoming_bids=mind.pending_incoming_bids),
                     working_memory=mind.working_memory,
                     personality_traits=mind.traits,
                     conversation_histories=mind.conversation_histories,
                     recent_events=mind.event_buffer,
+                    pending_incoming_bids=mind.pending_incoming_bids,
                 )
 
                 # Run cognitive pipeline
@@ -149,6 +151,13 @@ class MCPServer:
 
                 mind.working_memory = result.working_memory
                 mind.daily_memories.extend(result.daily_memories)
+
+                # Clean up bid after responding to it
+                if result.chosen_action and result.chosen_action.action == ActionType.RESPOND_TO_INTERACTION_BID:
+                    bid_id = result.chosen_action.parameters.get("bid_id")
+                    if bid_id and bid_id in mind.pending_incoming_bids:
+                        mind.pending_incoming_bids.pop(bid_id)
+                        logger.debug(f"[{request_id}] Removed bid {bid_id} from pending bids after response")
 
                 if result.chosen_action is None:
                     logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")

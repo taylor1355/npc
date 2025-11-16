@@ -66,6 +66,8 @@ class Action(BaseModel):
             self._validate_interact_with(observation)
         elif self.action == ActionType.MOVE_TO:
             self._validate_move_to()
+        elif self.action == ActionType.RESPOND_TO_INTERACTION_BID:
+            self._validate_respond_to_bid(state)
 
         return self
 
@@ -104,6 +106,26 @@ class Action(BaseModel):
         """Validate MOVE_TO action parameters"""
         if "destination" not in self.parameters:
             raise MissingRequiredParameterError("destination", self.action)
+
+    def _validate_respond_to_bid(self, state):
+        """Validate RESPOND_TO_INTERACTION_BID action against pending bids"""
+        bid_id = self.parameters.get("bid_id")
+        accept = self.parameters.get("accept")
+
+        if not bid_id:
+            raise MissingRequiredParameterError("bid_id", self.action)
+        if accept is None:
+            raise MissingRequiredParameterError("accept", self.action)
+
+        # Check bid exists in pending bids
+        if bid_id not in state.pending_incoming_bids:
+            raise ValueError(
+                f"Invalid bid_id '{bid_id}'. Available bids: {list(state.pending_incoming_bids.keys())}"
+            )
+
+        # If rejecting, reason is required
+        if not accept and not self.parameters.get("reason"):
+            raise MissingRequiredParameterError("reason", self.action)
 
 
 class AvailableAction(BaseModel):

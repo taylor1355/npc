@@ -22,6 +22,11 @@ You are modeling human action selection based on psychological principles. Consi
 - `destination`: Grid coordinates as "(x, y)" format (e.g., "(5, 10)")
 - `duration`: Time in seconds as string (e.g., "3")
 
+**Interaction Bids (Social Requests):**
+- When someone sends you an interaction bid, **respond promptly** (accept or reject) rather than leaving them waiting
+- You can only accept one bid at a time - accepting means entering that interaction immediately
+- **Always provide a reason when rejecting** (e.g., "Currently busy eating", "Need to rest first")
+
 ## Current Mental State
 
 ### Working Memory

@@ -33,6 +33,10 @@ Update the working memory with:
 4. **Current plan** - Their intended next steps to achieve goals
 5. **Emotional state** - How they're feeling based on the situation
 
+**Handle interaction lifecycle events:**
+- **"Interaction finished / canceled: X"** → Clear any goals/plans related to X, acknowledge completion, assess what to do next
+- **"Interaction started: X"** → Update plan to reflect the new activity
+
 Also **identify new memories to store** from this experience.
 
 ## Memory Formation Guidelines

@@ -15,6 +15,7 @@ class MindEventType(StrEnum):
     INTERACTION_CANCELED = "INTERACTION_CANCELED"
     INTERACTION_FINISHED = "INTERACTION_FINISHED"
     INTERACTION_OBSERVATION = "INTERACTION_OBSERVATION"
+    MOVEMENT_COMPLETED = "MOVEMENT_COMPLETED"
     ERROR = "ERROR"
     # OBSERVATION not included - handled separately as main observation field
 
@@ -66,6 +67,20 @@ class MindEvent(BaseModel):
         elif event_type == MindEventType.INTERACTION_OBSERVATION:
             # Interaction update - format based on payload
             return f"Interaction update: {payload}"
+
+        elif event_type == MindEventType.MOVEMENT_COMPLETED:
+            status = payload.get("status", "UNKNOWN")
+            actual_dest = payload.get("actual_destination")
+            intended_dest = payload.get("intended_destination")
+
+            if status == "ARRIVED":
+                return f"Arrived at ({actual_dest[0]}, {actual_dest[1]})"
+            elif status == "STOPPED_SHORT":
+                return f"Moved to ({actual_dest[0]}, {actual_dest[1]}), intended destination ({intended_dest[0]}, {intended_dest[1]}) was blocked"
+            elif status == "BLOCKED":
+                return f"Could not move to ({intended_dest[0]}, {intended_dest[1]}), no valid path"
+            else:
+                return f"Movement completed with status {status}"
 
         else:
             return f"Unknown event type: {event_type}"
@@ -189,12 +204,49 @@ class Observation(BaseModel):
 
         return "\n\n".join(parts) if parts else "No observations"
 
-    def get_available_actions(self):
-        """Build list of available actions from this observation."""
+    def get_available_actions(self, pending_incoming_bids: dict[str, "MindEvent"] = None):
+        """Build list of available actions from this observation.
+
+        Args:
+            pending_incoming_bids: Optional dict of pending interaction bids (keyed by bid_id)
+        """
         # Import here to avoid circular dependency (actions imports observations for validation)
         from ..actions import ActionType, AvailableAction
 
         actions = []
+
+        # Bid response actions (highest priority - check first)
+        if pending_incoming_bids:
+            for bid_id, bid_event in pending_incoming_bids.items():
+                bidder_id = bid_event.payload.get("bidder_id", "unknown")
+                bidder_name = bid_event.payload.get("bidder_name", bidder_id)
+                interaction_name = bid_event.payload.get("interaction_name", "unknown")
+
+                # Accept action
+                actions.append(
+                    AvailableAction(
+                        name=ActionType.RESPOND_TO_INTERACTION_BID,
+                        description=f"Accept {interaction_name} bid from {bidder_name}",
+                        parameters={
+                            "bid_id": f"Bid identifier (use: {bid_id})",
+                            "accept": "Accept the bid (use: true)",
+                            "reason": "Optional reason (leave empty when accepting)",
+                        },
+                    )
+                )
+
+                # Reject action
+                actions.append(
+                    AvailableAction(
+                        name=ActionType.RESPOND_TO_INTERACTION_BID,
+                        description=f"Reject {interaction_name} bid from {bidder_name}",
+                        parameters={
+                            "bid_id": f"Bid identifier (use: {bid_id})",
+                            "accept": "Reject the bid (use: false)",
+                            "reason": "Reason for rejection (e.g., 'Currently busy', 'Not interested')",
+                        },
+                    )
+                )
 
         # General actions (always available)
         actions.append(

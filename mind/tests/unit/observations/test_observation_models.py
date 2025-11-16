@@ -176,3 +176,112 @@ class TestMindEvent:
 
         formatted = str(event)
         assert formatted == "Error: Something went wrong"
+
+    def test_format_movement_completed_arrived(self):
+        """Should format movement completion event when arrived"""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.MOVEMENT_COMPLETED,
+            payload={
+                "status": "ARRIVED",
+                "intended_destination": [10, 20],
+                "actual_destination": [10, 20],
+            },
+        )
+
+        formatted = str(event)
+        assert formatted == "Arrived at (10, 20)"
+
+    def test_format_movement_completed_stopped_short(self):
+        """Should format movement completion event when stopped short"""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.MOVEMENT_COMPLETED,
+            payload={
+                "status": "STOPPED_SHORT",
+                "intended_destination": [10, 20],
+                "actual_destination": [9, 20],
+            },
+        )
+
+        formatted = str(event)
+        assert formatted == "Moved to (9, 20), intended destination (10, 20) was blocked"
+
+    def test_format_movement_completed_blocked(self):
+        """Should format movement completion event when completely blocked"""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.MOVEMENT_COMPLETED,
+            payload={
+                "status": "BLOCKED",
+                "intended_destination": [10, 20],
+                "actual_destination": [5, 5],
+            },
+        )
+
+        formatted = str(event)
+        assert formatted == "Could not move to (10, 20), no valid path"
+
+
+class TestBidActionGeneration:
+    """Test generation of bid response actions"""
+
+    def test_generate_bid_response_actions(self):
+        """Should generate accept/reject actions for each pending bid"""
+        from mind.cognitive_architecture.actions import ActionType
+
+        obs = Observation(
+            entity_id="test_npc",
+            current_simulation_time=100,
+            status=StatusObservation(position=(0, 0), movement_locked=False),
+        )
+
+        # Create pending bid
+        bid_event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={
+                "bid_id": "bid_456",
+                "bidder_id": "bob_001",
+                "bidder_name": "Bob",
+                "interaction_name": "trade",
+            },
+        )
+        pending_bids = {"bid_456": bid_event}
+
+        # Get available actions
+        actions = obs.get_available_actions(pending_incoming_bids=pending_bids)
+
+        # Find bid response actions
+        bid_actions = [a for a in actions if a.name == ActionType.RESPOND_TO_INTERACTION_BID]
+
+        # Should have 2 actions: accept and reject
+        assert len(bid_actions) == 2
+
+        # Check accept action
+        accept_action = next(a for a in bid_actions if "Accept" in a.description)
+        assert "Bob" in accept_action.description
+        assert "trade" in accept_action.description
+        assert "bid_id" in accept_action.parameters
+
+        # Check reject action
+        reject_action = next(a for a in bid_actions if "Reject" in a.description)
+        assert "Bob" in reject_action.description
+        assert "trade" in reject_action.description
+
+    def test_no_bid_actions_when_no_pending_bids(self):
+        """Should not generate bid response actions when no bids pending"""
+        from mind.cognitive_architecture.actions import ActionType
+
+        obs = Observation(
+            entity_id="test_npc",
+            current_simulation_time=100,
+            status=StatusObservation(position=(0, 0), movement_locked=False),
+        )
+
+        # Get available actions without pending bids
+        actions = obs.get_available_actions()
+
+        # Should have no bid response actions
+        bid_actions = [a for a in actions if a.name == ActionType.RESPOND_TO_INTERACTION_BID]
+        assert len(bid_actions) == 0

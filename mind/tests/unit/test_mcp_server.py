@@ -271,3 +271,164 @@ class TestMCPServerErrorHandling:
             assert isinstance(response["action"], dict)
             assert "action" in response["action"]
             assert "parameters" in response["action"]
+
+    @pytest.mark.asyncio
+    async def test_bid_cleanup_after_response(self):
+        """Should remove bid from pending_incoming_bids after responding"""
+        from mind.cognitive_architecture.actions import Action, ActionType
+        from mind.cognitive_architecture.observations import MindEvent, MindEventType
+        from mind.cognitive_architecture.state import PipelineState
+
+        server = MCPServer()
+
+        await server.mcp.call_tool(
+            "create_mind",
+            {
+                "mind_id": "test",
+                "config": {
+                    "entity_id": "test",
+                    "traits": ["friendly"],
+                    "initial_long_term_memories": [],
+                },
+            },
+        )
+
+        observation = {
+            "entity_id": "test",
+            "current_simulation_time": 100,
+            "status": {
+                "position": [5, 5],
+                "movement_locked": False,
+                "current_interaction": {},
+                "controller_state": {},
+            },
+        }
+
+        # Create bid event
+        bid_event = {
+            "timestamp": 100,
+            "event_type": MindEventType.INTERACTION_BID_RECEIVED,
+            "payload": {
+                "bid_id": "bid_test_123",
+                "bidder_id": "npc_other",
+                "bidder_name": "Bob",
+                "interaction_name": "conversation",
+            },
+        }
+
+        # Mock the pipeline to return a bid response action
+        mind = server.minds["test"]
+        original_process = mind.pipeline.process
+
+        async def mock_process(state: PipelineState) -> PipelineState:
+            state.chosen_action = Action.model_construct(
+                action=ActionType.RESPOND_TO_INTERACTION_BID,
+                parameters={
+                    "bid_id": "bid_test_123",
+                    "accept": True,
+                    "reason": "",
+                },
+            )
+            return state
+
+        mind.pipeline.process = mock_process
+
+        # Verify bid is stored before response
+        result = await server.mcp.call_tool(
+            "decide_action",
+            {
+                "mind_id": "test",
+                "observation": observation,
+                "events": [bid_event],
+            },
+        )
+
+        # Restore original
+        mind.pipeline.process = original_process
+
+        response = parse_response(result)
+
+        # Verify response is successful
+        assert response["status"] == "success"
+        assert response["action"]["action"] == ActionType.RESPOND_TO_INTERACTION_BID
+
+        # Verify bid was removed from pending_incoming_bids
+        assert "bid_test_123" not in mind.pending_incoming_bids
+
+    @pytest.mark.asyncio
+    async def test_bid_cleanup_only_for_bid_response_actions(self):
+        """Should not affect pending_incoming_bids for non-bid actions"""
+        from mind.cognitive_architecture.actions import Action, ActionType
+        from mind.cognitive_architecture.observations import MindEventType
+        from mind.cognitive_architecture.state import PipelineState
+
+        server = MCPServer()
+
+        await server.mcp.call_tool(
+            "create_mind",
+            {
+                "mind_id": "test",
+                "config": {
+                    "entity_id": "test",
+                    "traits": ["friendly"],
+                    "initial_long_term_memories": [],
+                },
+            },
+        )
+
+        observation = {
+            "entity_id": "test",
+            "current_simulation_time": 100,
+            "status": {
+                "position": [5, 5],
+                "movement_locked": False,
+                "current_interaction": {},
+                "controller_state": {},
+            },
+        }
+
+        # Create bid event
+        bid_event = {
+            "timestamp": 100,
+            "event_type": MindEventType.INTERACTION_BID_RECEIVED,
+            "payload": {
+                "bid_id": "bid_test_456",
+                "bidder_id": "npc_other",
+                "bidder_name": "Alice",
+                "interaction_name": "trade",
+            },
+        }
+
+        # Mock the pipeline to return a non-bid action (e.g., wait)
+        mind = server.minds["test"]
+        original_process = mind.pipeline.process
+
+        async def mock_process(state: PipelineState) -> PipelineState:
+            state.chosen_action = Action.model_construct(
+                action=ActionType.WAIT,
+                parameters={},
+            )
+            return state
+
+        mind.pipeline.process = mock_process
+
+        result = await server.mcp.call_tool(
+            "decide_action",
+            {
+                "mind_id": "test",
+                "observation": observation,
+                "events": [bid_event],
+            },
+        )
+
+        # Restore original
+        mind.pipeline.process = original_process
+
+        response = parse_response(result)
+
+        # Verify response is successful
+        assert response["status"] == "success"
+        assert response["action"]["action"] == ActionType.WAIT
+
+        # Verify bid was NOT removed (only removed when responding)
+        assert "bid_test_456" in mind.pending_incoming_bids

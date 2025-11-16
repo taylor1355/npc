@@ -35,6 +35,9 @@ class PipelineState(BaseModel):
     # Events are distinct from observations - they're temporal occurrences that accumulate
     recent_events: list[MindEvent] = Field(default_factory=list)
 
+    # Pending incoming interaction bids (managed by Mind, passed for action generation)
+    pending_incoming_bids: dict[str, MindEvent] = Field(default_factory=dict)
+
     # Daily memory buffer (cleared during sleep/consolidation)
     daily_memories: list[NewMemory] = Field(default_factory=list)
 

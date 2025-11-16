@@ -288,3 +288,139 @@ class TestActionValidation:
         )
 
         assert action.action == "interact_with"
+
+
+class TestBidResponseValidation:
+    """Test validation of RESPOND_TO_INTERACTION_BID actions"""
+
+    def _create_mock_state_with_bids(self, pending_bids: dict):
+        """Helper to create mock pipeline state with pending bids"""
+        from mind.cognitive_architecture.observations import Observation
+
+        observation = Observation(entity_id="npc_001", current_simulation_time=100)
+        state = Mock()
+        state.observation = observation
+        state.pending_incoming_bids = pending_bids
+        return state
+
+    def test_validate_accept_bid_with_valid_bid_id(self):
+        """Should validate accept action when bid_id exists"""
+        from mind.cognitive_architecture.observations import MindEvent, MindEventType
+
+        bid_event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={
+                "bid_id": "bid_789",
+                "bidder_id": "charlie_001",
+                "bidder_name": "Charlie",
+                "interaction_name": "conversation",
+            },
+        )
+
+        state = self._create_mock_state_with_bids({"bid_789": bid_event})
+
+        action = Action.model_validate(
+            {"action": "respond_to_interaction_bid", "parameters": {"bid_id": "bid_789", "accept": True}},
+            context={"state": state},
+        )
+
+        assert action.action == "respond_to_interaction_bid"
+        assert action.parameters["bid_id"] == "bid_789"
+        assert action.parameters["accept"] is True
+
+    def test_validate_reject_bid_with_reason(self):
+        """Should validate reject action when reason is provided"""
+        from mind.cognitive_architecture.observations import MindEvent, MindEventType
+
+        bid_event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={
+                "bid_id": "bid_999",
+                "bidder_id": "dave_001",
+                "bidder_name": "Dave",
+                "interaction_name": "craft",
+            },
+        )
+
+        state = self._create_mock_state_with_bids({"bid_999": bid_event})
+
+        action = Action.model_validate(
+            {
+                "action": "respond_to_interaction_bid",
+                "parameters": {"bid_id": "bid_999", "accept": False, "reason": "Currently busy"},
+            },
+            context={"state": state},
+        )
+
+        assert action.action == "respond_to_interaction_bid"
+        assert action.parameters["accept"] is False
+        assert action.parameters["reason"] == "Currently busy"
+
+    def test_reject_bid_without_reason_fails(self):
+        """Should fail validation when rejecting without reason"""
+        from mind.cognitive_architecture.observations import MindEvent, MindEventType
+
+        bid_event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={"bid_id": "bid_111", "bidder_id": "eve_001", "bidder_name": "Eve", "interaction_name": "trade"},
+        )
+
+        state = self._create_mock_state_with_bids({"bid_111": bid_event})
+
+        with pytest.raises(ValidationError) as exc_info:
+            Action.model_validate(
+                {"action": "respond_to_interaction_bid", "parameters": {"bid_id": "bid_111", "accept": False}},
+                context={"state": state},
+            )
+
+        assert "reason" in str(exc_info.value).lower()
+
+    def test_invalid_bid_id_fails(self):
+        """Should fail validation when bid_id doesn't exist"""
+        state = self._create_mock_state_with_bids({})  # No pending bids
+
+        with pytest.raises(ValidationError) as exc_info:
+            Action.model_validate(
+                {
+                    "action": "respond_to_interaction_bid",
+                    "parameters": {"bid_id": "nonexistent_bid", "accept": True},
+                },
+                context={"state": state},
+            )
+
+        assert "nonexistent_bid" in str(exc_info.value)
+
+    def test_missing_bid_id_fails(self):
+        """Should fail validation when bid_id parameter is missing"""
+        state = self._create_mock_state_with_bids({})
+
+        with pytest.raises(ValidationError) as exc_info:
+            Action.model_validate(
+                {"action": "respond_to_interaction_bid", "parameters": {"accept": True}},
+                context={"state": state},
+            )
+
+        assert "bid_id" in str(exc_info.value).lower()
+
+    def test_missing_accept_parameter_fails(self):
+        """Should fail validation when accept parameter is missing"""
+        from mind.cognitive_architecture.observations import MindEvent, MindEventType
+
+        bid_event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={"bid_id": "bid_222", "bidder_id": "frank_001", "bidder_name": "Frank", "interaction_name": "sit"},
+        )
+
+        state = self._create_mock_state_with_bids({"bid_222": bid_event})
+
+        with pytest.raises(ValidationError) as exc_info:
+            Action.model_validate(
+                {"action": "respond_to_interaction_bid", "parameters": {"bid_id": "bid_222"}},
+                context={"state": state},
+            )
+
+        assert "accept" in str(exc_info.value).lower()

@@ -5,7 +5,7 @@ from typing import Self
 
 from mind.apis.langchain_llm import get_llm
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-from mind.cognitive_architecture.observations import ConversationMessage, MindEvent
+from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
 from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory, WorkingMemory
 from mind.cognitive_architecture.pipeline import CognitivePipeline
 
@@ -30,6 +30,9 @@ class Mind:
     conversation_histories: dict[str, list[ConversationMessage]] = field(default_factory=dict)
 
     event_buffer: list[MindEvent] = field(default_factory=list)
+
+    # Pending incoming interaction bids (keyed by bid_id from payload)
+    pending_incoming_bids: dict[str, MindEvent] = field(default_factory=dict)
 
     @classmethod
     def from_config(cls, mind_id: str, config) -> Self:
@@ -105,10 +108,20 @@ class Mind:
         - Not yet marked as seen (will be marked after processing)
         Up to maximum of EVENT_BUFFER_MAX_SIZE most recent events
 
+        Also extracts INTERACTION_BID_RECEIVED events and stores them separately
+        in pending_incoming_bids for action generation.
+
         Args:
             new_events: New events from this decision cycle
             current_time: Current simulation time
         """
+        # Extract and store incoming interaction bids separately
+        for event in new_events:
+            if event.event_type == MindEventType.INTERACTION_BID_RECEIVED:
+                bid_id = event.payload.get("bid_id")
+                if bid_id:
+                    self.pending_incoming_bids[bid_id] = event
+
         self.event_buffer.extend(new_events)
 
         cutoff_time = current_time - EVENT_RETENTION_TIME_MINUTES
