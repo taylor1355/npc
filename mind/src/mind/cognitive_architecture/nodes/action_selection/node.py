@@ -8,6 +8,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 
 from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
 from mind.logging_config import get_logger
 
@@ -52,6 +53,17 @@ class ActionSelectionNode(LLMNode):
         )
 
         state.chosen_action = output.chosen_action
+
+        # Create ACTION_CHOSEN event
+        action_event = MindEvent(
+            timestamp=state.observation.current_simulation_time,
+            event_type=MindEventType.ACTION_CHOSEN,
+            payload={
+                "action": output.chosen_action.action,
+                "parameters": output.chosen_action.parameters,
+            }
+        )
+        state.recent_events.append(action_event)
 
         # Log action selection
         logger.debug(f"Evaluated {len(state.available_actions)} available actions")

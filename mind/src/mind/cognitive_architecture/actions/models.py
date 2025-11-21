@@ -24,6 +24,7 @@ class ActionType(str, Enum):
     CANCEL_INTERACTION = "cancel_interaction"
     ACT_IN_INTERACTION = "act_in_interaction"
     RESPOND_TO_INTERACTION_BID = "respond_to_interaction_bid"
+    BATCH_REJECT_INTERACTION_BIDS = "batch_reject_interaction_bids"
 
 
 class Action(BaseModel):
@@ -32,7 +33,10 @@ class Action(BaseModel):
     model_config = {"use_enum_values": True}
 
     action: ActionType
-    parameters: dict = Field(default_factory=dict)
+    parameters: dict = Field(
+        default_factory=dict,
+        description="Action parameters as key-value pairs. Use exact parameter names from the action description."
+    )
 
     def __str__(self) -> str:
         """Format action for LLM consumption"""
@@ -68,6 +72,10 @@ class Action(BaseModel):
             self._validate_move_to()
         elif self.action == ActionType.RESPOND_TO_INTERACTION_BID:
             self._validate_respond_to_bid(state)
+        elif self.action == ActionType.BATCH_REJECT_INTERACTION_BIDS:
+            self._validate_batch_reject_bids(state)
+        elif self.action == ActionType.ACT_IN_INTERACTION:
+            self._validate_act_in_interaction(observation)
 
         return self
 
@@ -126,6 +134,50 @@ class Action(BaseModel):
         # If rejecting, reason is required
         if not accept and not self.parameters.get("reason"):
             raise MissingRequiredParameterError("reason", self.action)
+
+    def _validate_batch_reject_bids(self, state):
+        """Validate BATCH_REJECT_INTERACTION_BIDS action against pending bids"""
+        ids = self.parameters.get("ids")
+        reason = self.parameters.get("reason")
+
+        if not ids:
+            raise MissingRequiredParameterError("ids", self.action)
+        if not reason:
+            raise MissingRequiredParameterError("reason", self.action)
+
+        # If not wildcard, validate the specified IDs exist
+        if ids != "*":
+            if not isinstance(ids, list):
+                raise ValueError(f"Parameter 'ids' must be '*' or a list, got: {type(ids)}")
+
+            # Check if these are bid IDs or entity IDs
+            pending_bid_ids = set(state.pending_incoming_bids.keys())
+            pending_entity_ids = {
+                event.payload.get("bidder_id")
+                for event in state.pending_incoming_bids.values()
+            }
+
+            # Validate each item is either a valid bid_id or entity_id
+            for item in ids:
+                if item not in pending_bid_ids and item not in pending_entity_ids:
+                    raise ValueError(
+                        f"'{item}' is not a valid bid_id or entity_id. "
+                        f"Available bid_ids: {list(pending_bid_ids)}, "
+                        f"Available entity_ids: {list(pending_entity_ids)}"
+                    )
+
+    def _validate_act_in_interaction(self, observation):
+        """Validate ACT_IN_INTERACTION action requires appropriate parameters"""
+        if not observation.status or not observation.status.current_interaction:
+            raise ValueError("ACT_IN_INTERACTION requires an active interaction")
+
+        interaction_name = observation.status.current_interaction.get('interaction_name', '')
+
+        # For conversations, message parameter is required
+        if interaction_name == 'conversation':
+            message = self.parameters.get("message")
+            if not message:
+                raise MissingRequiredParameterError("message", self.action)
 
 
 class AvailableAction(BaseModel):

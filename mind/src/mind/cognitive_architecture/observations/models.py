@@ -16,6 +16,7 @@ class MindEventType(StrEnum):
     INTERACTION_FINISHED = "INTERACTION_FINISHED"
     INTERACTION_OBSERVATION = "INTERACTION_OBSERVATION"
     MOVEMENT_COMPLETED = "MOVEMENT_COMPLETED"
+    ACTION_CHOSEN = "ACTION_CHOSEN"
     ERROR = "ERROR"
     # OBSERVATION not included - handled separately as main observation field
 
@@ -81,6 +82,15 @@ class MindEvent(BaseModel):
                 return f"Could not move to ({intended_dest[0]}, {intended_dest[1]}), no valid path"
             else:
                 return f"Movement completed with status {status}"
+
+        elif event_type == MindEventType.ACTION_CHOSEN:
+            action_name = payload.get("action", "unknown")
+            params = payload.get("parameters", {})
+            if params:
+                params_str = ", ".join([f"{k}={v}" for k, v in params.items()])
+                return f"Chose action: {action_name}({params_str})"
+            else:
+                return f"Chose action: {action_name}"
 
         else:
             return f"Unknown event type: {event_type}"
@@ -164,8 +174,17 @@ class Observation(BaseModel):
                 parts.append(f"Controller state: {state_name}")
 
         if self.needs:
-            needs_str = ", ".join([f"{k}: {v:.0f}%" for k, v in self.needs.needs.items()])
-            parts.append(f"Needs: {needs_str}")
+            # Format needs with interpretive context (100 = fully satisfied, 0 = depleted)
+            needs_parts = []
+            for k, v in self.needs.needs.items():
+                if v >= 70:
+                    status = "satisfied"
+                elif v >= 30:
+                    status = "declining"
+                else:
+                    status = "critical"
+                needs_parts.append(f"{k}: {v:.0f}% ({status})")
+            parts.append(f"Needs: {', '.join(needs_parts)}")
 
         if self.vision and self.vision.visible_entities:
             # Show entity details with IDs and interactions (critical for action selection)
@@ -199,8 +218,16 @@ class Observation(BaseModel):
         # while other interactions are generic. Need to find abstraction that handles
         # conversation complexity without requiring special cases everywhere.
         for conv in self.conversations:
-            msgs_str = "\n".join([f"{m.speaker_name}: {m.message}" for m in conv.conversation_history])
-            parts.append(f"Conversation:\n{msgs_str}")
+            messages = []
+            for m in conv.conversation_history:
+                if m.speaker_id == self.entity_id:
+                    # Mark own messages clearly to prevent self-responding
+                    messages.append(f"[YOU] {m.speaker_name}: {m.message}")
+                else:
+                    messages.append(f"{m.speaker_name}: {m.message}")
+            if messages:
+                msgs_str = "\n".join(messages)
+                parts.append(f"Conversation:\n{msgs_str}")
 
         return "\n\n".join(parts) if parts else "No observations"
 
@@ -217,33 +244,37 @@ class Observation(BaseModel):
 
         # Bid response actions (highest priority - check first)
         if pending_incoming_bids:
+            # Add batch reject action when there are multiple bids
+            if len(pending_incoming_bids) >= 2:
+                bid_list = ", ".join([f"{bid_id[:8]} from {event.payload.get('bidder_name', 'unknown')}"
+                                      for bid_id, event in pending_incoming_bids.items()])
+                actions.append(
+                    AvailableAction(
+                        name=ActionType.BATCH_REJECT_INTERACTION_BIDS,
+                        description=f"Reject multiple interaction bids at once ({len(pending_incoming_bids)} pending: {bid_list})",
+                        parameters={
+                            "ids": "'*' to reject all, or list of bid IDs like ['bid_xxx', 'bid_yyy'], or list of entity IDs to reject all bids from those entities",
+                            "reason": "Reason for rejecting these bids",
+                        },
+                    )
+                )
+
+            # Individual bid response actions
             for bid_id, bid_event in pending_incoming_bids.items():
                 bidder_id = bid_event.payload.get("bidder_id", "unknown")
                 bidder_name = bid_event.payload.get("bidder_name", bidder_id)
                 interaction_name = bid_event.payload.get("interaction_name", "unknown")
 
-                # Accept action
+                # Single action that can accept or reject based on the accept parameter
+                # Include bid_id in description to prevent confusion when multiple bids are present
                 actions.append(
                     AvailableAction(
                         name=ActionType.RESPOND_TO_INTERACTION_BID,
-                        description=f"Accept {interaction_name} bid from {bidder_name}",
+                        description=f"Respond to {interaction_name} bid {bid_id} from {bidder_name}",
                         parameters={
-                            "bid_id": f"Bid identifier (use: {bid_id})",
-                            "accept": "Accept the bid (use: true)",
-                            "reason": "Optional reason (leave empty when accepting)",
-                        },
-                    )
-                )
-
-                # Reject action
-                actions.append(
-                    AvailableAction(
-                        name=ActionType.RESPOND_TO_INTERACTION_BID,
-                        description=f"Reject {interaction_name} bid from {bidder_name}",
-                        parameters={
-                            "bid_id": f"Bid identifier (use: {bid_id})",
-                            "accept": "Reject the bid (use: false)",
-                            "reason": "Reason for rejection (e.g., 'Currently busy', 'Not interested')",
+                            "bid_id": f"{bid_id}",
+                            "accept": "Boolean - true to accept the bid, false to reject the bid",
+                            "reason": "Optional string - reason for accepting/rejecting (required when rejecting)",
                         },
                     )
                 )
@@ -274,16 +305,41 @@ class Observation(BaseModel):
         # Conditional: continue action when movement or interaction is in progress
         if self.status and self.status.controller_state:
             state_name = self.status.controller_state.get('state_name', '')
-            if state_name in ('moving', 'interacting'):
+            if state_name == 'moving':
                 actions.append(
                     AvailableAction(
                         name=ActionType.CONTINUE,
-                        description="Continue current action (movement or interaction)",
+                        description="Continue current movement without changes",
+                    )
+                )
+            elif state_name == 'interacting' and self.status.current_interaction:
+                interaction_name = self.status.current_interaction.get('interaction_name', 'interaction')
+                actions.append(
+                    AvailableAction(
+                        name=ActionType.CONTINUE,
+                        description=f"Wait/pause in the current {interaction_name} for a short moment.",
                     )
                 )
 
-        # Conditional: cancel_interaction only if currently in an interaction
+        # Conditional: interaction actions only if currently in an interaction
         if self.status and self.status.current_interaction:
+            interaction_name = self.status.current_interaction.get('interaction_name', 'interaction')
+
+            # Add action to participate in the interaction (e.g., send message in conversation)
+            params = {}
+            if interaction_name == 'conversation':
+                params = {
+                    "message": "The message to send in the conversation"
+                }
+
+            actions.append(
+                AvailableAction(
+                    name=ActionType.ACT_IN_INTERACTION,
+                    description=f"Participate in the current {interaction_name}",
+                    parameters=params,
+                )
+            )
+
             actions.append(
                 AvailableAction(
                     name=ActionType.CANCEL_INTERACTION,

@@ -8,7 +8,12 @@ from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import ActionType
-from mind.cognitive_architecture.observations import MindEvent, Observation
+from mind.cognitive_architecture.observations import (
+    ConversationObservation,
+    MindEvent,
+    MindEventType,
+    Observation,
+)
 from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.state import PipelineState
 from mind.logging_config import get_logger
@@ -45,6 +50,77 @@ def _success_response(request_id: str, action: dict) -> dict:
         "error_message": None,
         "request_id": request_id,
     }
+
+
+def _extract_conversation_observations(events: list[MindEvent]) -> list[ConversationObservation]:
+    """Extract conversation observations from INTERACTION_OBSERVATION events.
+
+    Args:
+        events: List of MindEvent objects
+
+    Returns:
+        List of ConversationObservation objects parsed from interaction observation events
+    """
+    conversations = []
+    for event in events:
+        if event.event_type == MindEventType.INTERACTION_OBSERVATION:
+            try:
+                # Parse the payload as ConversationObservation
+                conv_obs = ConversationObservation.model_validate(event.payload)
+                conversations.append(conv_obs)
+            except ValidationError as e:
+                # Not a conversation observation or malformed - skip it
+                logger.debug(f"Skipping non-conversation interaction observation: {e}")
+                continue
+    return conversations
+
+
+def _cleanup_responded_bids(action, pending_bids: dict, request_id: str) -> None:
+    """Remove bids from pending list after responding to them.
+
+    Args:
+        action: The chosen action (Action model)
+        pending_bids: Dict of pending incoming bids (modified in place)
+        request_id: Request ID for logging
+    """
+    if not action:
+        return
+
+    if action.action == ActionType.RESPOND_TO_INTERACTION_BID:
+        # Single bid response
+        bid_id = action.parameters.get("bid_id")
+        if bid_id and bid_id in pending_bids:
+            pending_bids.pop(bid_id)
+            logger.debug(f"[{request_id}] Removed bid {bid_id} from pending bids after response")
+
+    elif action.action == ActionType.BATCH_REJECT_INTERACTION_BIDS:
+        # Batch bid rejection
+        ids_param = action.parameters.get("ids")
+        if not ids_param:
+            return
+
+        bid_ids_to_remove = []
+
+        if ids_param == "*":
+            # Reject all pending bids
+            bid_ids_to_remove = list(pending_bids.keys())
+        elif isinstance(ids_param, list):
+            # Check if these are bid IDs or entity IDs
+            for item in ids_param:
+                if item in pending_bids:
+                    # Direct bid ID
+                    bid_ids_to_remove.append(item)
+                else:
+                    # Entity ID - find all bids from this entity
+                    for bid_id, event in pending_bids.items():
+                        if event.payload.get("bidder_id") == item:
+                            bid_ids_to_remove.append(bid_id)
+
+        # Remove the bids
+        for bid_id in bid_ids_to_remove:
+            pending_bids.pop(bid_id, None)
+
+        logger.debug(f"[{request_id}] Batch rejected {len(bid_ids_to_remove)} bids: {bid_ids_to_remove}")
 
 
 class MCPServer:
@@ -132,7 +208,9 @@ class MCPServer:
                             details=str(e)
                         )
 
-                mind.update_conversations(obs.conversations)
+                # Extract conversation observations from INTERACTION_OBSERVATION events
+                conversation_obs = _extract_conversation_observations(mind_events)
+                mind.update_conversations(conversation_obs)
                 mind.update_events(mind_events, obs.current_simulation_time)
 
                 state = PipelineState(
@@ -152,12 +230,8 @@ class MCPServer:
                 mind.working_memory = result.working_memory
                 mind.daily_memories.extend(result.daily_memories)
 
-                # Clean up bid after responding to it
-                if result.chosen_action and result.chosen_action.action == ActionType.RESPOND_TO_INTERACTION_BID:
-                    bid_id = result.chosen_action.parameters.get("bid_id")
-                    if bid_id and bid_id in mind.pending_incoming_bids:
-                        mind.pending_incoming_bids.pop(bid_id)
-                        logger.debug(f"[{request_id}] Removed bid {bid_id} from pending bids after response")
+                # Clean up any bids that were responded to
+                _cleanup_responded_bids(result.chosen_action, mind.pending_incoming_bids, request_id)
 
                 if result.chosen_action is None:
                     logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")
@@ -168,6 +242,9 @@ class MCPServer:
                 )
                 return _success_response(request_id, result.chosen_action.model_dump())
 
+            except ValidationError as e:
+                logger.warning(f"[{request_id}] Validation failed in decide_action for {mind_id}: {str(e)}")
+                return _error_response(request_id, "Action validation failed", details=str(e))
             except Exception:
                 logger.exception(f"[{request_id}] Unexpected error in decide_action for {mind_id}")
                 return _error_response(request_id, "Unexpected server error")
