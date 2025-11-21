@@ -142,6 +142,7 @@ class ConversationObservation(BaseModel):
     interaction_id: str  # Identifies which conversation
     interaction_name: str
     participants: list[str]
+    initiator_id: str = ""  # Entity who initiated this conversation
     conversation_history: list[ConversationMessage]  # Last K messages from simulation
 
 
@@ -225,9 +226,14 @@ class Observation(BaseModel):
                     messages.append(f"[YOU] {m.speaker_name}: {m.message}")
                 else:
                     messages.append(f"{m.speaker_name}: {m.message}")
+
             if messages:
                 msgs_str = "\n".join(messages)
                 parts.append(f"Conversation:\n{msgs_str}")
+            elif conv.initiator_id:
+                # No messages yet - show who initiated to provide context
+                initiator_context = "you" if conv.initiator_id == self.entity_id else conv.initiator_id
+                parts.append(f"Conversation: (just started by {initiator_context}, no messages yet)")
 
         return "\n\n".join(parts) if parts else "No observations"
 
@@ -295,12 +301,15 @@ class Observation(BaseModel):
             )
         )
 
-        actions.append(
-            AvailableAction(
-                name=ActionType.WAIT,
-                description="Wait and observe surroundings",
+        # Wait action only available when NOT in an active interaction
+        # (wait exits interactions, use cancel_interaction to explicitly end one)
+        if not (self.status and self.status.current_interaction):
+            actions.append(
+                AvailableAction(
+                    name=ActionType.WAIT,
+                    description="Wait and observe surroundings",
+                )
             )
-        )
 
         # Conditional: continue action when movement or interaction is in progress
         if self.status and self.status.controller_state:
