@@ -112,8 +112,6 @@ class LLMNode(Node):
         # Format prompt using template (validates required vars)
         prompt_text = self.prompt.format(**prompt_vars)
 
-        logger.debug(f"[{self.step_name}] Calling LLM")
-
         # Raw string output (no retry needed)
         if self.output_model is None:
             start_time = time.time()

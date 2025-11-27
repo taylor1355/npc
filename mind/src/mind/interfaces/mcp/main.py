@@ -65,9 +65,10 @@ class InMemoryLogHandler(logging.Handler):
         all_logs = list(self.logs)
         all_logs.reverse()
 
-        # Filter by timestamp if provided
+        # Filter by timestamp if provided (compare at millisecond precision to avoid float issues)
         if since is not None:
-            all_logs = [log for log in all_logs if log["timestamp"] > since]
+            since_ms = int(since * 1000)
+            all_logs = [log for log in all_logs if int(log["timestamp"] * 1000) > since_ms]
 
         # Apply limit
         return all_logs[:limit]
@@ -167,7 +168,9 @@ def main():
     # Configure logging to capture logs in memory
     # Set root logger to WARNING to suppress noisy dependency logs (OpenAI, uvicorn, etc.)
     root_logger = logging.getLogger()
-    root_logger.addHandler(LOG_HANDLER)
+    # Prevent duplicate handlers if main() is called multiple times
+    if LOG_HANDLER not in root_logger.handlers:
+        root_logger.addHandler(LOG_HANDLER)
     root_logger.setLevel(logging.WARNING)
 
     # Set mind application logger to DEBUG for detailed observability
