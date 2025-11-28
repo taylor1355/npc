@@ -10,6 +10,7 @@ from langchain_core.prompts import PromptTemplate
 from mind.cognitive_architecture.nodes.base import LLMNode
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
+from mind.knowledge import KnowledgeBase, KnowledgeFile
 from mind.logging_config import get_logger
 
 from .models import ActionSelectionOutput
@@ -42,6 +43,14 @@ class ActionSelectionNode(LLMNode):
             else "No specific traits"
         )
 
+        # Build world knowledge from centralized knowledge files
+        world_knowledge = KnowledgeBase.get([
+            KnowledgeFile.NEEDS,
+            KnowledgeFile.INTERACTIONS,
+            KnowledgeFile.MOVEMENT,
+            KnowledgeFile.ACTIVITY,
+        ])
+
         # Call LLM with prompt variables
         output = await self.call_llm(
             state,
@@ -49,6 +58,7 @@ class ActionSelectionNode(LLMNode):
             personality_traits=personality_text,
             available_actions=actions_text,
             recent_events=pformat(state.recent_events),
+            world_knowledge=world_knowledge,
             format_instructions=self.get_format_instructions()
         )
 

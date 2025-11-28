@@ -9,6 +9,7 @@ from langchain_core.prompts import PromptTemplate
 
 from mind.cognitive_architecture.nodes.base import LLMNode
 from mind.cognitive_architecture.state import PipelineState
+from mind.knowledge import KnowledgeBase, KnowledgeFile
 from mind.logging_config import get_logger
 
 from .models import CognitiveUpdateOutput
@@ -36,6 +37,14 @@ class CognitiveUpdateNode(LLMNode):
         if not memories_text:
             memories_text = "No relevant memories found."
 
+        # Build world knowledge from centralized knowledge files
+        world_knowledge = KnowledgeBase.get([
+            KnowledgeFile.NEEDS,
+            KnowledgeFile.INTERACTIONS,
+            KnowledgeFile.MOVEMENT,
+            KnowledgeFile.ACTIVITY,
+        ])
+
         # Generate cognitive update
         output = await self.call_llm(
             state,
@@ -43,6 +52,7 @@ class CognitiveUpdateNode(LLMNode):
             retrieved_memories=memories_text,
             observation_text=str(state.observation),
             recent_events=pformat(state.recent_events),
+            world_knowledge=world_knowledge,
             format_instructions=self.get_format_instructions()
         )
 

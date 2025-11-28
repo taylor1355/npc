@@ -97,12 +97,12 @@ class MindEvent(BaseModel):
 
 
 class StatusObservation(BaseModel):
-    """Physical and controller state"""
+    """Physical and activity state"""
 
     position: tuple[int, int]
     movement_locked: bool = False
     current_interaction: dict = Field(default_factory=dict)
-    controller_state: dict = Field(default_factory=dict)
+    activity_state: dict = Field(default_factory=dict)
 
 
 class NeedsObservation(BaseModel):
@@ -169,22 +169,13 @@ class Observation(BaseModel):
             if self.status.current_interaction:
                 parts.append(f"Current interaction: {self.status.current_interaction}")
 
-            # Show controller state
-            if self.status.controller_state:
-                state_name = self.status.controller_state.get('state_name', 'unknown')
-                parts.append(f"Controller state: {state_name}")
+            # Show activity state
+            if self.status.activity_state:
+                state_name = self.status.activity_state.get('state_name', 'unknown')
+                parts.append(f"Currently: {state_name}")
 
         if self.needs:
-            # Format needs with interpretive context (100 = fully satisfied, 0 = depleted)
-            needs_parts = []
-            for k, v in self.needs.needs.items():
-                if v >= 70:
-                    status = "satisfied"
-                elif v >= 30:
-                    status = "declining"
-                else:
-                    status = "critical"
-                needs_parts.append(f"{k}: {v:.0f}% ({status})")
+            needs_parts = [f"{k}: {v:.0f}%" for k, v in self.needs.needs.items()]
             parts.append(f"Needs: {', '.join(needs_parts)}")
 
         if self.vision and self.vision.visible_entities:
@@ -312,8 +303,8 @@ class Observation(BaseModel):
             )
 
         # Conditional: continue action when movement or interaction is in progress
-        if self.status and self.status.controller_state:
-            state_name = self.status.controller_state.get('state_name', '')
+        if self.status and self.status.activity_state:
+            state_name = self.status.activity_state.get('state_name', '')
             if state_name == 'moving':
                 actions.append(
                     AvailableAction(
