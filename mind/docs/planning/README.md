@@ -2,6 +2,28 @@
 
 This directory organizes planning documents for the NPC cognitive architecture project.
 
+## Structure
+
+```
+docs/planning/
+├── 1_immediate/     # Active work (tasks in progress)
+│   └── INDEX.md
+├── 2_roadmap/       # Near-term priorities and architecture reference
+│   └── INDEX.md
+├── 3_backlog/       # Future feature designs (categorized)
+│   └── INDEX.md
+└── README.md        # This file (prioritization principles)
+```
+
+**Navigation:** Start at [2_roadmap/INDEX.md](2_roadmap/INDEX.md) for current state and priorities.
+
+## Maintenance
+
+- **Items exist in ONE tier only** - Don't duplicate across immediate/roadmap/backlog
+- **Delete completed work** - Planning docs are for future work, not history
+- **Promote by moving** - When a backlog item becomes active, move the file
+- **Update roadmap date** - When making significant changes
+
 ## Prioritization Heuristics
 
 When deciding what to work on next, consider these principles:
