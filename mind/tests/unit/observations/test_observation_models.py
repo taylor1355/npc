@@ -227,7 +227,7 @@ class TestBidActionGeneration:
     """Test generation of bid response actions"""
 
     def test_generate_bid_response_actions(self):
-        """Should generate accept/reject actions for each pending bid"""
+        """Should generate a unified respond action for each pending bid"""
         from mind.cognitive_architecture.actions import ActionType
 
         obs = Observation(
@@ -255,19 +255,17 @@ class TestBidActionGeneration:
         # Find bid response actions
         bid_actions = [a for a in actions if a.name == ActionType.RESPOND_TO_INTERACTION_BID]
 
-        # Should have 2 actions: accept and reject
-        assert len(bid_actions) == 2
+        # Should have 1 unified action per bid (with accept boolean parameter)
+        assert len(bid_actions) == 1
 
-        # Check accept action
-        accept_action = next(a for a in bid_actions if "Accept" in a.description)
-        assert "Bob" in accept_action.description
-        assert "trade" in accept_action.description
-        assert "bid_id" in accept_action.parameters
-
-        # Check reject action
-        reject_action = next(a for a in bid_actions if "Reject" in a.description)
-        assert "Bob" in reject_action.description
-        assert "trade" in reject_action.description
+        # Check the unified respond action
+        respond_action = bid_actions[0]
+        assert "Bob" in respond_action.description
+        assert "trade" in respond_action.description
+        assert "bid_456" in respond_action.description
+        assert "bid_id" in respond_action.parameters
+        assert "accept" in respond_action.parameters
+        assert "reason" in respond_action.parameters
 
     def test_no_bid_actions_when_no_pending_bids(self):
         """Should not generate bid response actions when no bids pending"""

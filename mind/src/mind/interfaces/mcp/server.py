@@ -229,6 +229,7 @@ class MCPServer:
 
                 mind.working_memory = result.working_memory
                 mind.daily_memories.extend(result.daily_memories)
+                mind.event_buffer = result.recent_events
 
                 # Clean up any bids that were responded to
                 _cleanup_responded_bids(result.chosen_action, mind.pending_incoming_bids, request_id)

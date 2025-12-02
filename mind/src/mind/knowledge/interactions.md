@@ -18,6 +18,10 @@ When you receive bids from others:
 - Accepting enters that interaction immediately
 - Rejecting requires providing a reason (e.g., "Currently busy", "Need to rest first", "Not interested")
 
+Once you respond to a bid (accept or reject), it is no longer pending.
+- If accepted: You enter the interaction immediately
+- If rejected: The bidder receives your reason, and you continue with other activities
+
 **Interaction Types:**
 - **Streaming interactions**: You can send actions and receive updates over time (active participation)
 - **Non-streaming interactions**: They run to completion without additional input from you

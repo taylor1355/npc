@@ -1,12 +1,15 @@
 """Action selection node implementation"""
 
+import json
 from pathlib import Path
 from pprint import pformat
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
+from pydantic import ValidationError
 
+from mind.cognitive_architecture.actions import Action, ActionType
 from mind.cognitive_architecture.nodes.base import LLMNode
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
@@ -52,15 +55,21 @@ class ActionSelectionNode(LLMNode):
         ])
 
         # Call LLM with prompt variables
-        output = await self.call_llm(
-            state,
-            working_memory=str(state.working_memory),
-            personality_traits=personality_text,
-            available_actions=actions_text,
-            recent_events=pformat(state.recent_events),
-            world_knowledge=world_knowledge,
-            format_instructions=self.get_format_instructions()
-        )
+        try:
+            output = await self.call_llm(
+                state,
+                working_memory=str(state.working_memory),
+                personality_traits=personality_text,
+                available_actions=actions_text,
+                recent_events=pformat(state.recent_events),
+                world_knowledge=world_knowledge,
+                format_instructions=self.get_format_instructions()
+            )
+        except (ValidationError, json.JSONDecodeError) as e:
+            logger.warning(f"Action selection failed after retries, falling back to wait: {e}")
+            # Use model_construct to bypass validation - WAIT is always safe
+            fallback_action = Action.model_construct(action=ActionType.WAIT, parameters={})
+            output = ActionSelectionOutput.model_construct(chosen_action=fallback_action)
 
         state.chosen_action = output.chosen_action
 

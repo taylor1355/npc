@@ -34,6 +34,11 @@ Update the working memory with:
 - **"Interaction finished / canceled: X"** → Clear any goals/plans related to X, acknowledge completion, assess what to do next
 - **"Interaction started: X"** → Update plan to reflect the new activity
 
+**Keeping working memory current:**
+- Recent events show actions you just took - update working memory to reflect their outcomes
+- If previous working memory mentions something you've now acted upon, acknowledge it's done rather than continuing to plan for it
+- Ground your assessment in what's currently observable, not what was previously assumed
+
 Also **identify new memories to store** from this experience.
 
 ## Memory Formation Guidelines

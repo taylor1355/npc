@@ -191,6 +191,12 @@ class TestActionSelectionNode:
 
     async def test_handles_complex_action_parameters(self, node, mock_llm, basic_state):
         """Should handle actions with multiple complex parameters"""
+        # Set up an active interaction so act_in_interaction is valid
+        basic_state.observation.status.current_interaction = {
+            "interaction_id": "conversation_123",
+            "interaction_name": "chat",
+        }
+
         mock_llm.ainvoke.return_value = AIMessage(
             content="""{
                 "chosen_action": {
