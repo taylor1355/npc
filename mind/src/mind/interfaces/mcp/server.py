@@ -280,7 +280,7 @@ class MCPServer:
             consolidation_node = MemoryConsolidationNode(mind.memory_store)
             await consolidation_node.process(dummy_state)
 
-            # Clear daily buffer
+            # Clear daily buffer and return count
             count = len(mind.daily_memories)
             mind.daily_memories.clear()
 

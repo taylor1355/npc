@@ -8,6 +8,9 @@ from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
 from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
 from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory, WorkingMemory
 from mind.cognitive_architecture.pipeline import CognitivePipeline
+from mind.logging_config import get_logger
+
+logger = get_logger()
 
 # Event buffer retention policy
 EVENT_RETENTION_TIME_MINUTES = 60  # Keep events newer than this many game minutes
@@ -115,12 +118,31 @@ class Mind:
             new_events: New events from this decision cycle
             current_time: Current simulation time
         """
-        # Extract and store incoming interaction bids separately
         for event in new_events:
             if event.event_type == MindEventType.INTERACTION_BID_RECEIVED:
+                # Store incoming interaction bids for action generation
                 bid_id = event.payload.get("bid_id")
                 if bid_id:
                     self.pending_incoming_bids[bid_id] = event
+
+            elif event.event_type == MindEventType.ERROR:
+                # Log error events for debugging
+                message = event.payload.get("message", "Unknown error")
+                logger.warning(f"[{self.mind_id}] Received error event: {message}")
+
+            elif event.event_type == MindEventType.INTERACTION_BID_CANCELED:
+                # Remove canceled bid from pending list
+                bid_id = event.payload.get("bid_id")
+                if bid_id and bid_id in self.pending_incoming_bids:
+                    del self.pending_incoming_bids[bid_id]
+                    logger.debug(f"[{self.mind_id}] Removed canceled bid {bid_id} from pending bids")
+
+            elif event.event_type in (MindEventType.INTERACTION_FINISHED, MindEventType.INTERACTION_CANCELED):
+                # Clean up conversation history for ended interactions
+                interaction_id = event.payload.get("interaction_id")
+                if interaction_id and interaction_id in self.conversation_histories:
+                    del self.conversation_histories[interaction_id]
+                    logger.debug(f"[{self.mind_id}] Cleaned up conversation history for {interaction_id}")
 
         self.event_buffer.extend(new_events)
 

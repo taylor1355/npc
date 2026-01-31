@@ -11,6 +11,7 @@ class MindEventType(StrEnum):
     INTERACTION_BID_PENDING = "INTERACTION_BID_PENDING"
     INTERACTION_BID_REJECTED = "INTERACTION_BID_REJECTED"
     INTERACTION_BID_RECEIVED = "INTERACTION_BID_RECEIVED"
+    INTERACTION_BID_CANCELED = "INTERACTION_BID_CANCELED"
     INTERACTION_STARTED = "INTERACTION_STARTED"
     INTERACTION_CANCELED = "INTERACTION_CANCELED"
     INTERACTION_FINISHED = "INTERACTION_FINISHED"
@@ -64,6 +65,10 @@ class MindEvent(BaseModel):
         elif event_type == MindEventType.INTERACTION_BID_RECEIVED:
             interaction_name = payload.get("interaction_name", "unknown")
             return f"Interaction bid received: {interaction_name}"
+
+        elif event_type == MindEventType.INTERACTION_BID_CANCELED:
+            interaction_name = payload.get("interaction_name", "unknown")
+            return f"Interaction bid canceled: {interaction_name}"
 
         elif event_type == MindEventType.INTERACTION_OBSERVATION:
             # Interaction update - format based on payload
