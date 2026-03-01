@@ -12,8 +12,8 @@ from mind.cognitive_architecture.observations import (
     VisionObservation,
 )
 from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
-from mind.interfaces.mcp.models import MindConfig
-from mind.interfaces.mcp.server import MCPServer
+from mind.domains.npc_simulation.models import MindConfig
+from mind.domains.npc_simulation.server import MCPServer
 
 
 @pytest.fixture

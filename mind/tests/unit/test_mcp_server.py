@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from mind.interfaces.mcp.server import MCPServer
+from mind.domains.npc_simulation.server import MCPServer
 
 
 def parse_response(result):

@@ -6,8 +6,8 @@ import time
 import pytest
 from starlette.testclient import TestClient
 
-from mind.interfaces.mcp.main import LOG_HANDLER, create_starlette_app
-from mind.interfaces.mcp.server import MCPServer
+from mind.domains.npc_simulation.main import LOG_HANDLER, create_starlette_app
+from mind.domains.npc_simulation.server import MCPServer
 
 
 @pytest.fixture

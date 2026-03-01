@@ -15,7 +15,7 @@ from mind.cognitive_architecture.observations import (
 )
 from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_SMALL_MODEL
-from mind.interfaces.mcp.models import MindConfig
+from mind.domains.npc_simulation.models import MindConfig
 
 
 def create_blacksmith_observation(simulation_time: int = 100) -> Observation:
