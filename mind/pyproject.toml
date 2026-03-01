@@ -48,6 +48,10 @@ mypy = "^1.18.2"
 pre-commit = "^4.3.0"
 pytest-cov = "^7.0.0"
 
+[tool.poetry.scripts]
+mind-server = "mind.domains.npc_simulation.main:main"
+dev-agent-server = "mind.domains.dev_agent.main:main"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
