@@ -12,6 +12,7 @@ class Memory(BaseModel):
     importance: float = Field(default=1.0, ge=0.0, le=10.0)
     embedding: list[float] | None = None
     location: tuple[int, int] | None = None  # Grid coordinates (x, y)
+    tags: list[str] = Field(default_factory=list)
 
     def __str__(self) -> str:
         """Format memory for LLM consumption"""
@@ -22,6 +23,9 @@ class Memory(BaseModel):
 
         if self.location is not None:
             parts.append(f"L:{self.location}")
+
+        if self.tags:
+            parts.append(f"tags:{','.join(self.tags)}")
 
         header = " | ".join(parts) + "]"
         return f"{header} {self.content}"

@@ -176,3 +176,69 @@ class TestVectorDBMemory:
 
         assert len(results) == 1
         assert results[0].id == original_id
+
+    async def test_add_memory_with_tags(self, memory_store):
+        """Should store and retrieve tags via round-trip"""
+        memory = memory_store.add_memory(
+            content="Architecture insight about pathfinding",
+            importance=7.0,
+            tags=["architecture", "pathfinding"],
+        )
+        assert memory.tags == ["architecture", "pathfinding"]
+
+        query = VectorDBQuery(query="pathfinding", top_k=1)
+        results = await memory_store.search(query)
+        assert set(results[0].tags) == {"architecture", "pathfinding"}
+
+    async def test_tag_filtered_search(self, memory_store):
+        """Should filter results by tags when provided"""
+        memory_store.add_memory(content="Social interaction at market", tags=["social"])
+        memory_store.add_memory(content="Architecture of the castle", tags=["architecture"])
+        memory_store.add_memory(content="Routine patrol route", tags=["routine"])
+
+        query = VectorDBQuery(query="activity", top_k=10, tags=["social"])
+        results = await memory_store.search(query)
+
+        assert len(results) >= 1
+        assert all("social" in m.tags for m in results)
+
+    async def test_search_without_tags_returns_all(self, memory_store):
+        """No tag filter = all results returned"""
+        memory_store.add_memory(content="Tagged memory", tags=["test"])
+        memory_store.add_memory(content="Untagged memory")
+
+        query = VectorDBQuery(query="memory", top_k=10)
+        results = await memory_store.search(query)
+        assert len(results) == 2
+
+    async def test_add_memory_without_tags(self, memory_store):
+        """Backward compatible - no tags = empty list"""
+        memory = memory_store.add_memory(content="No tags here")
+        assert memory.tags == []
+
+    async def test_multi_tag_or_filter(self, memory_store):
+        """Should match memories with ANY of the requested tags"""
+        memory_store.add_memory(
+            content="Social debugging session", tags=["social", "debugging"]
+        )
+        memory_store.add_memory(content="Architecture review", tags=["architecture"])
+        memory_store.add_memory(content="Routine task", tags=["routine"])
+
+        query = VectorDBQuery(query="work", top_k=10, tags=["social", "architecture"])
+        results = await memory_store.search(query)
+
+        result_tag_sets = [set(m.tags) for m in results]
+        assert any("social" in ts for ts in result_tag_sets)
+        assert any("architecture" in ts for ts in result_tag_sets)
+        assert not any(ts == {"routine"} for ts in result_tag_sets)
+
+    async def test_untagged_memories_excluded_by_tag_filter(self, memory_store):
+        """Tag filter should exclude memories with no tags"""
+        memory_store.add_memory(content="Has tags", tags=["important"])
+        memory_store.add_memory(content="No tags at all")
+
+        query = VectorDBQuery(query="memory", top_k=10, tags=["important"])
+        results = await memory_store.search(query)
+
+        assert len(results) == 1
+        assert results[0].tags == ["important"]

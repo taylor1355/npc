@@ -1,7 +1,7 @@
 """Simple memory store using ChromaDB for vector storage"""
 
 import chromadb
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
 
 from ..id_generator import IdGenerator
@@ -15,6 +15,7 @@ class VectorDBMetadata(BaseModel):
     timestamp: int | None = None
     location_x: int | None = None
     location_y: int | None = None
+    tags: list[str] = Field(default_factory=list)
 
     def get_location(self) -> tuple[int, int] | None:
         """Extract location tuple if both coordinates present"""
@@ -31,6 +32,7 @@ class VectorDBQuery(BaseModel):
     importance_weight: float = 0.3
     recency_weight: float = 0.2
     current_simulation_time: int | None = None
+    tags: list[str] | None = None  # Filter to memories with ANY of these tags
 
 
 class ChromaQueryResult(BaseModel):
@@ -104,6 +106,7 @@ class VectorDBMemory:
         importance: float = 1.0,
         timestamp: int | None = None,
         location: tuple[int, int] | None = None,
+        tags: list[str] | None = None,
     ) -> Memory:
         """Add a memory to the store
 
@@ -112,7 +115,9 @@ class VectorDBMemory:
             importance: Importance score (0.0-10.0)
             timestamp: Simulation timestamp (game ticks/frames)
             location: Grid coordinates (x, y)
+            tags: Categorical tags for filtering
         """
+        tag_list = tags or []
 
         # Generate memory ID
         memory_id = IdGenerator.generate_memory_id()
@@ -124,6 +129,7 @@ class VectorDBMemory:
             timestamp=timestamp,
             importance=importance,
             location=location,
+            tags=tag_list,
         )
 
         # Generate embedding
@@ -135,14 +141,19 @@ class VectorDBMemory:
             timestamp=timestamp,
             location_x=location[0] if location else None,
             location_y=location[1] if location else None,
+            tags=tag_list,
         )
 
-        # Store in ChromaDB
+        # Store in ChromaDB (empty arrays not allowed in metadata, so exclude them)
+        metadata_dict = metadata.model_dump(exclude_none=True)
+        if not metadata_dict.get("tags"):
+            metadata_dict.pop("tags", None)
+
         self.collection.add(
             ids=[memory_id],
             embeddings=[embedding],
             documents=[content],
-            metadatas=[metadata.model_dump(exclude_none=True)],
+            metadatas=[metadata_dict],
         )
 
         return memory
@@ -158,8 +169,18 @@ class VectorDBMemory:
         if collection_count == 0:
             return []
 
+        # Build tag filter using ChromaDB's native $contains operator
+        where_clause = None
+        if query.tags:
+            if len(query.tags) == 1:
+                where_clause = {"tags": {"$contains": query.tags[0]}}
+            else:
+                where_clause = {"$or": [{"tags": {"$contains": t}} for t in query.tags]}
+
         raw_results = self.collection.query(
-            query_embeddings=[query_embedding], n_results=min(query.top_k, collection_count)
+            query_embeddings=[query_embedding],
+            n_results=min(query.top_k, collection_count),
+            where=where_clause,
         )
 
         # Parse into typed model
@@ -199,6 +220,7 @@ class VectorDBMemory:
                 timestamp=metadata.timestamp,
                 importance=metadata.importance,
                 location=metadata.get_location(),
+                tags=metadata.tags,
             )
             memories.append((combined_score, memory))
 
