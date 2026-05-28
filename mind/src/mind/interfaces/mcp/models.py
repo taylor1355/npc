@@ -27,6 +27,9 @@ class MindConfig(BaseModel):
     initial_working_memory: WorkingMemory | None = None
     initial_long_term_memories: list[str] = Field(default_factory=list)
 
+    # Personality dimensions (numeric trait dimensions from substrate, 0.0-1.0)
+    personality_dimensions: dict[str, float] = Field(default_factory=dict)
+
 
 # === Protocol: Simulation → Mind ===
 

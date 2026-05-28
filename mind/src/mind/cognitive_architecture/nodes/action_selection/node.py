@@ -46,6 +46,14 @@ class ActionSelectionNode(LLMNode):
             else "No specific traits"
         )
 
+        # Format personality dimensions (sorted for deterministic prompts)
+        if state.personality_dimensions:
+            dims_text = ", ".join(
+                f"{name}: {value:.2f}" for name, value in sorted(state.personality_dimensions.items())
+            )
+        else:
+            dims_text = "No personality dimensions provided"
+
         # Build world knowledge from centralized knowledge files
         world_knowledge = KnowledgeBase.get([
             KnowledgeFile.NEEDS,
@@ -60,6 +68,7 @@ class ActionSelectionNode(LLMNode):
                 state,
                 working_memory=str(state.working_memory),
                 personality_traits=personality_text,
+                personality_dimensions=dims_text,
                 available_actions=actions_text,
                 recent_events=pformat(state.recent_events),
                 world_knowledge=world_knowledge,

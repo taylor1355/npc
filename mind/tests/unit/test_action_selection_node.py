@@ -154,6 +154,51 @@ class TestActionSelectionNode:
         assert result.chosen_action is not None
         assert isinstance(result.chosen_action, Action)
 
+    async def test_renders_personality_dimensions_in_prompt(self, node, mock_llm):
+        """Personality dimensions should be rendered into the LLM prompt with sorted keys"""
+        state = PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(5, 10), movement_locked=False),
+            ),
+            working_memory=WorkingMemory(),
+            personality_traits=["curious"],
+            personality_dimensions={"extroversion": 0.85, "curiosity": 0.2},
+            available_actions=[AvailableAction(name="wait", description="Wait")],
+        )
+
+        await node.process(state)
+
+        # The rendered prompt is passed as a HumanMessage to ainvoke
+        call_args = mock_llm.ainvoke.call_args
+        rendered = call_args[0][0][0].content
+        # Sorted alphabetically: curiosity before extroversion
+        assert "curiosity: 0.20" in rendered
+        assert "extroversion: 0.85" in rendered
+        assert rendered.index("curiosity: 0.20") < rendered.index("extroversion: 0.85")
+
+    async def test_handles_empty_personality_dimensions(self, node, mock_llm):
+        """Empty personality_dimensions should render a sentinel string, not crash"""
+        state = PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(5, 10), movement_locked=False),
+            ),
+            working_memory=WorkingMemory(),
+            personality_traits=["curious"],
+            personality_dimensions={},
+            available_actions=[AvailableAction(name="wait", description="Wait")],
+        )
+
+        result = await node.process(state)
+
+        assert result.chosen_action is not None
+        call_args = mock_llm.ainvoke.call_args
+        rendered = call_args[0][0][0].content
+        assert "No personality dimensions provided" in rendered
+
     async def test_handles_empty_cognitive_context(self, node, mock_llm):
         """Should handle state with no cognitive context"""
         state = PipelineState(

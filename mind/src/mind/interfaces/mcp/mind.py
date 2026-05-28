@@ -27,6 +27,7 @@ class Mind:
     pipeline: CognitivePipeline
     memory_store: VectorDBMemory
     working_memory: WorkingMemory
+    personality_dimensions: dict[str, float] = field(default_factory=dict)
     daily_memories: list[NewMemory] = field(default_factory=list)
 
     # Conversation history aggregation (keyed by interaction_id)
@@ -73,6 +74,7 @@ class Mind:
             mind_id=mind_id,
             entity_id=config.entity_id,
             traits=config.traits,
+            personality_dimensions=config.personality_dimensions,
             pipeline=pipeline,
             memory_store=memory_store,
             working_memory=working_memory,
