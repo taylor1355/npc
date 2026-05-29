@@ -10,7 +10,7 @@ from langchain_core.prompts import PromptTemplate
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action, ActionType
-from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.nodes.base import LLMNode, format_personality
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
 from mind.knowledge import KnowledgeBase, KnowledgeFile
@@ -39,18 +39,11 @@ class ActionSelectionNode(LLMNode):
         # Format available actions
         actions_text = "\n".join([f"- {str(action)}" for action in state.available_actions])
 
-        # Format personality traits
-        personality_text = (
-            ", ".join(state.personality_traits)
-            if state.personality_traits
-            else "No specific traits"
+        # Format personality for the prompt (shared helper keeps the rendered
+        # representation identical to cognitive_update across the pipeline)
+        personality_text, dims_text = format_personality(
+            state.personality_traits, state.personality_dimensions
         )
-
-        # Format personality dimensions (sorted for deterministic prompts)
-        if state.personality_dimensions:
-            dims_text = "\n".join(f"{name}: {value:.2f}" for name, value in sorted(state.personality_dimensions.items()))
-        else:
-            dims_text = "No personality dimensions provided"
 
         # Build world knowledge from centralized knowledge files
         world_knowledge = KnowledgeBase.get([

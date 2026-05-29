@@ -14,6 +14,12 @@ Given the person's current state, memories, and observation, update their workin
 ### Current Working Memory
 {working_memory}
 
+### Personality Traits
+{personality_traits}
+
+### Personality Dimensions (0.0 = low, 1.0 = high)
+{personality_dimensions}
+
 ### Retrieved Memories
 {retrieved_memories}
 
@@ -29,6 +35,8 @@ Update the working memory with:
 3. **Recent events** - Notable things that just happened (update from previous, keep relevant context)
 4. **Current plan** - Their intended next steps to achieve goals
 5. **Emotional state** - How they're feeling based on the situation
+
+**Let personality shape the reasoning.** Personality (traits + dimensions) should color the situation read, which goals feel salient, how the plan is approached, and the emotional tone. A high-curiosity NPC notices different things than a low-curiosity one; an "idiotic" NPC reasons differently than a "meticulous" one. Make the personality legible in the assessment, goals, plan, and emotional state rather than producing generic, trait-agnostic reasoning.
 
 **Handle interaction lifecycle events:**
 - **"Interaction finished / canceled: X"** → Clear any goals/plans related to X, acknowledge completion, assess what to do next

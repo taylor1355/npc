@@ -7,7 +7,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 
-from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.nodes.base import LLMNode, format_personality
 from mind.cognitive_architecture.state import PipelineState
 from mind.knowledge import KnowledgeBase, KnowledgeFile
 from mind.logging_config import get_logger
@@ -37,6 +37,12 @@ class CognitiveUpdateNode(LLMNode):
         if not memories_text:
             memories_text = "No relevant memories found."
 
+        # Format personality for the prompt (shared helper keeps the rendered
+        # representation identical to action_selection across the pipeline)
+        personality_text, dims_text = format_personality(
+            state.personality_traits, state.personality_dimensions
+        )
+
         # Build world knowledge from centralized knowledge files
         world_knowledge = KnowledgeBase.get([
             KnowledgeFile.NEEDS,
@@ -49,6 +55,8 @@ class CognitiveUpdateNode(LLMNode):
         output = await self.call_llm(
             state,
             working_memory=str(state.working_memory),
+            personality_traits=personality_text,
+            personality_dimensions=dims_text,
             retrieved_memories=memories_text,
             observation_text=str(state.observation),
             recent_events=pformat(state.recent_events),
