@@ -14,6 +14,9 @@ You are modeling a person making moment-to-moment decisions in a simulated world
 ### Personality Traits
 {personality_traits}
 
+### Personality Dimensions (0.0 = low, 1.0 = high)
+{personality_dimensions}
+
 ### Recent Events
 {recent_events}
 

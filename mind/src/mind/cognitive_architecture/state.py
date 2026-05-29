@@ -22,6 +22,7 @@ class PipelineState(BaseModel):
     observation: Observation
     available_actions: list[AvailableAction] = Field(default_factory=list)
     personality_traits: list[str] = Field(default_factory=list)
+    personality_dimensions: dict[str, float] = Field(default_factory=dict)
 
     # Working state
     working_memory: WorkingMemory = Field(default_factory=WorkingMemory)

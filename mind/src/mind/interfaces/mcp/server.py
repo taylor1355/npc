@@ -218,6 +218,7 @@ class MCPServer:
                     available_actions=obs.get_available_actions(pending_incoming_bids=mind.pending_incoming_bids),
                     working_memory=mind.working_memory,
                     personality_traits=mind.traits,
+                    personality_dimensions=mind.personality_dimensions,
                     conversation_histories=mind.conversation_histories,
                     recent_events=mind.event_buffer,
                     pending_incoming_bids=mind.pending_incoming_bids,

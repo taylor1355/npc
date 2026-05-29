@@ -1,5 +1,7 @@
 """MCP protocol models - requests, responses, configuration"""
 
+from typing import Annotated
+
 from pydantic import BaseModel, Field
 
 from mind.apis.langchain_llm import LangChainModel
@@ -26,6 +28,9 @@ class MindConfig(BaseModel):
     # Initial state
     initial_working_memory: WorkingMemory | None = None
     initial_long_term_memories: list[str] = Field(default_factory=list)
+
+    # Personality dimensions (numeric trait dimensions from substrate, 0.0-1.0)
+    personality_dimensions: dict[str, Annotated[float, Field(ge=0.0, le=1.0)]] = Field(default_factory=dict)
 
 
 # === Protocol: Simulation → Mind ===

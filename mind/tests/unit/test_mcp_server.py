@@ -432,3 +432,42 @@ class TestMCPServerErrorHandling:
 
         # Verify bid was NOT removed (only removed when responding)
         assert "bid_test_456" in mind.pending_incoming_bids
+
+
+class TestMindConfigValidation:
+    """Pydantic range validation on MindConfig.personality_dimensions (NPC-672)"""
+
+    def test_rejects_value_above_one(self):
+        from pydantic import ValidationError
+        from mind.interfaces.mcp.models import MindConfig
+        with pytest.raises(ValidationError):
+            MindConfig(
+                entity_id="npc_test",
+                traits=["curious"],
+                personality_dimensions={"extroversion": 1.5},
+            )
+
+    def test_rejects_negative_value(self):
+        from pydantic import ValidationError
+        from mind.interfaces.mcp.models import MindConfig
+        with pytest.raises(ValidationError):
+            MindConfig(
+                entity_id="npc_test",
+                traits=["curious"],
+                personality_dimensions={"curiosity": -0.1},
+            )
+
+    def test_accepts_in_range_values(self):
+        from mind.interfaces.mcp.models import MindConfig
+        config = MindConfig(
+            entity_id="npc_test",
+            traits=["curious"],
+            personality_dimensions={
+                "extroversion": 0.0,
+                "curiosity": 0.5,
+                "sensitivity": 1.0,
+            },
+        )
+        assert config.personality_dimensions["extroversion"] == 0.0
+        assert config.personality_dimensions["curiosity"] == 0.5
+        assert config.personality_dimensions["sensitivity"] == 1.0

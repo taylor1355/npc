@@ -28,6 +28,12 @@ def test_mind_config():
     return MindConfig(
         entity_id="test_npc_001",
         traits=["curious", "brave"],
+        personality_dimensions={
+            "extroversion": 0.7,
+            "curiosity": 0.9,
+            "sensitivity": 0.4,
+            "conscientiousness": 0.6,
+        },
         llm_model="google/gemini-2.0-flash-lite-001",
         embedding_model="all-MiniLM-L6-v2",
         memory_storage_path="./tmp/test_chroma_db",
@@ -99,6 +105,38 @@ async def test_create_mind(mcp_server, test_mind_config):
     assert response["status"] == "created"
     assert response["mind_id"] == "test_mind_001"
     assert "test_mind_001" in mcp_server.minds
+
+
+@pytest.mark.asyncio
+async def test_create_mind_stores_personality_dimensions(mcp_server, test_mind_config):
+    """Personality dimensions in config should round-trip into the stored Mind"""
+    await mcp_server.mcp.call_tool(
+        "create_mind", {"mind_id": "test_mind_dims", "config": test_mind_config.model_dump()}
+    )
+
+    mind = mcp_server.minds["test_mind_dims"]
+    assert mind.personality_dimensions == {
+        "extroversion": 0.7,
+        "curiosity": 0.9,
+        "sensitivity": 0.4,
+        "conscientiousness": 0.6,
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_mind_without_personality_dimensions_defaults_to_empty(mcp_server):
+    """Configs that omit personality_dimensions should default to an empty dict"""
+    minimal_config = MindConfig(
+        entity_id="minimal_npc",
+        traits=["plain"],
+    )
+
+    await mcp_server.mcp.call_tool(
+        "create_mind", {"mind_id": "test_mind_minimal", "config": minimal_config.model_dump()}
+    )
+
+    mind = mcp_server.minds["test_mind_minimal"]
+    assert mind.personality_dimensions == {}
 
 
 @pytest.mark.asyncio
