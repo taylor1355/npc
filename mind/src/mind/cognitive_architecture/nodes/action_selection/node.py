@@ -48,9 +48,7 @@ class ActionSelectionNode(LLMNode):
 
         # Format personality dimensions (sorted for deterministic prompts)
         if state.personality_dimensions:
-            dims_text = ", ".join(
-                f"{name}: {value:.2f}" for name, value in sorted(state.personality_dimensions.items())
-            )
+            dims_text = "\n".join(f"{name}: {value:.2f}" for name, value in sorted(state.personality_dimensions.items()))
         else:
             dims_text = "No personality dimensions provided"
 

@@ -177,6 +177,10 @@ class TestActionSelectionNode:
         assert "curiosity: 0.20" in rendered
         assert "extroversion: 0.85" in rendered
         assert rendered.index("curiosity: 0.20") < rendered.index("extroversion: 0.85")
+        # Dimensions must render on separate lines (multi-line convention matches
+        # other prompt sections like personality_traits / available_actions)
+        assert "curiosity: 0.20\nextroversion: 0.85" in rendered
+        assert "curiosity: 0.20, extroversion: 0.85" not in rendered
 
     async def test_handles_empty_personality_dimensions(self, node, mock_llm):
         """Empty personality_dimensions should render a sentinel string, not crash"""
