@@ -10,7 +10,8 @@ from langchain_core.prompts import PromptTemplate
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action, ActionType
-from mind.cognitive_architecture.nodes.base import LLMNode, format_personality
+from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.nodes.formatting import format_personality
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
 from mind.knowledge import KnowledgeBase, KnowledgeFile

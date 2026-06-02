@@ -7,7 +7,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 
-from mind.cognitive_architecture.nodes.base import LLMNode, format_personality
+from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.nodes.formatting import format_personality
 from mind.cognitive_architecture.state import PipelineState
 from mind.knowledge import KnowledgeBase, KnowledgeFile
 from mind.logging_config import get_logger
