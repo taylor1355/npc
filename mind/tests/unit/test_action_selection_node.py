@@ -240,11 +240,14 @@ class TestActionSelectionNode:
 
     async def test_handles_complex_action_parameters(self, node, mock_llm, basic_state):
         """Should handle actions with multiple complex parameters"""
-        # Set up an active interaction so act_in_interaction is valid
+        # Set up an active interaction so act_in_interaction is valid.
+        # NPC-688: validity is grounded in BOTH current_interaction AND
+        # activity_state == interacting, so set both authoritative signals.
         basic_state.observation.status.current_interaction = {
             "interaction_id": "conversation_123",
             "interaction_name": "chat",
         }
+        basic_state.observation.status.activity_state = {"state_name": "interacting"}
 
         mock_llm.ainvoke.return_value = AIMessage(
             content="""{

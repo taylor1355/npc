@@ -31,3 +31,28 @@ def format_personality(
         dims_text = "No personality dimensions provided"
 
     return traits_text, dims_text
+
+
+def format_interaction_status(observation) -> str:
+    """Render the observation's authoritative interaction status for prompts.
+
+    Grounds the LLM's "am I interacting?" belief in the current observation
+    (current_interaction + activity_state), so a stale working-memory belief
+    can be corrected each cycle rather than driving the NPC-688 desync loop.
+    Shared by cognitive_update and action_selection so both nodes see an
+    identical, single-source-of-truth rendering.
+
+    Defaults to "NOT currently in any interaction" when status is absent or
+    partial — a missing field never reads as "interacting".
+    """
+    status = getattr(observation, "status", None)
+    if status is not None and status.is_interacting():
+        interaction_name = status.current_interaction.get("interaction_name", "interaction")
+        return (
+            f"You ARE currently in an interaction ({interaction_name}). "
+            "Interaction-participation actions are valid."
+        )
+    return (
+        "You are NOT currently in any interaction. Do not attempt to act in or "
+        "continue an interaction; any belief that you are mid-interaction is stale."
+    )

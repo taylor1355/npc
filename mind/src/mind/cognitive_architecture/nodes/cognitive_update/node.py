@@ -4,11 +4,15 @@ from pathlib import Path
 from pprint import pformat
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 
 from mind.cognitive_architecture.nodes.base import LLMNode
-from mind.cognitive_architecture.nodes.formatting import format_personality
+from mind.cognitive_architecture.nodes.formatting import (
+    format_interaction_status as _format_interaction_status,
+)
+from mind.cognitive_architecture.nodes.formatting import (
+    format_personality,
+)
 from mind.cognitive_architecture.state import PipelineState
 from mind.knowledge import KnowledgeBase, KnowledgeFile
 from mind.logging_config import get_logger
@@ -52,6 +56,11 @@ class CognitiveUpdateNode(LLMNode):
             KnowledgeFile.ACTIVITY,
         ])
 
+        # Ground the "am I interacting?" belief in the fresh observation so a
+        # stale working-memory belief ("I'm in a conversation") gets corrected
+        # this cycle rather than persisting after teardown (NPC-688).
+        interaction_status = _format_interaction_status(state.observation)
+
         # Generate cognitive update
         output = await self.call_llm(
             state,
@@ -60,6 +69,7 @@ class CognitiveUpdateNode(LLMNode):
             personality_dimensions=dims_text,
             retrieved_memories=memories_text,
             observation_text=str(state.observation),
+            interaction_status=interaction_status,
             recent_events=pformat(state.recent_events),
             world_knowledge=world_knowledge,
             format_instructions=self.get_format_instructions()

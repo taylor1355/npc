@@ -29,6 +29,11 @@ Given the person's current state, memories, and observation, update their workin
 ### Current Observation
 {observation_text}
 
+### Authoritative Interaction Status
+{interaction_status}
+
+This status is the ground truth from the simulation. If it says you are NOT in an interaction, then any prior belief or plan about being mid-interaction (e.g. "in a conversation") is stale — update the situation assessment, goals, and plan to reflect that the interaction has ended.
+
 Update the working memory with:
 1. **Situation assessment** - Your understanding of what's currently happening
 2. **Active goals** - What they're trying to accomplish right now based on their needs and situation

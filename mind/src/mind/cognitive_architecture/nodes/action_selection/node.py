@@ -5,13 +5,17 @@ from pathlib import Path
 from pprint import pformat
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action, ActionType
 from mind.cognitive_architecture.nodes.base import LLMNode
-from mind.cognitive_architecture.nodes.formatting import format_personality
+from mind.cognitive_architecture.nodes.formatting import (
+    format_interaction_status as _format_interaction_status,
+)
+from mind.cognitive_architecture.nodes.formatting import (
+    format_personality,
+)
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
 from mind.knowledge import KnowledgeBase, KnowledgeFile
@@ -62,6 +66,7 @@ class ActionSelectionNode(LLMNode):
                 personality_traits=personality_text,
                 personality_dimensions=dims_text,
                 available_actions=actions_text,
+                interaction_status=_format_interaction_status(state.observation),
                 recent_events=pformat(state.recent_events),
                 world_knowledge=world_knowledge,
                 format_instructions=self.get_format_instructions()
