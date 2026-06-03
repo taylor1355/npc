@@ -45,9 +45,8 @@ def format_interaction_status(observation) -> str:
     Defaults to "NOT currently in any interaction" when status is absent or
     partial — a missing field never reads as "interacting".
     """
-    status = getattr(observation, "status", None)
-    if status is not None and status.is_interacting():
-        interaction_name = status.current_interaction.get("interaction_name", "interaction")
+    if observation is not None and observation.is_interacting():
+        interaction_name = observation.status.current_interaction.get("interaction_name", "interaction")
         return (
             f"You ARE currently in an interaction ({interaction_name}). "
             "Interaction-participation actions are valid."

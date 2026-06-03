@@ -127,7 +127,7 @@ class StatusObservation(BaseModel):
         """
         if not self.current_interaction:
             return False
-        state_name = self.activity_state.get("state_name", "") if self.activity_state else ""
+        state_name = (self.activity_state or {}).get("state_name", "")
         return state_name == "interacting"
 
 
@@ -348,7 +348,7 @@ class Observation(BaseModel):
                         description="Continue current movement without changes",
                     )
                 )
-            elif state_name == 'interacting' and self.is_interacting():
+            elif self.is_interacting():
                 interaction_name = self.status.current_interaction.get('interaction_name', 'interaction')
                 actions.append(
                     AvailableAction(

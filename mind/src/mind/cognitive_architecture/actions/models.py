@@ -175,7 +175,7 @@ class Action(BaseModel):
         validation once the observation says the interaction has ended
         (NPC-688). Missing status defaults to rejected.
         """
-        if not (observation.status and observation.status.is_interacting()):
+        if not observation.is_interacting():
             raise ValueError("ACT_IN_INTERACTION requires an active interaction")
 
         interaction_name = observation.status.current_interaction.get('interaction_name', '')
