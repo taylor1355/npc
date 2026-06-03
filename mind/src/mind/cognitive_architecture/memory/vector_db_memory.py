@@ -56,9 +56,21 @@ class ChromaQueryResult(BaseModel):
         """Get metadatas from first query result"""
         return self.metadatas[0] if self.metadatas else []
 
+    @property
+    def first_query_distances(self) -> list[float | None]:
+        """Get cosine distances from first query result, or Nones when absent"""
+        if self.distances and self.distances[0]:
+            return list(self.distances[0])
+        return [None] * len(self.first_query_ids)
+
     def iter_first_query(self):
-        """Iterate over (id, document, metadata) tuples for first query"""
-        return zip(self.first_query_ids, self.first_query_documents, self.first_query_metadatas)
+        """Iterate over (id, document, metadata, distance) tuples for first query"""
+        return zip(
+            self.first_query_ids,
+            self.first_query_documents,
+            self.first_query_metadatas,
+            self.first_query_distances,
+        )
 
 
 class VectorDBMemory:
@@ -159,7 +171,9 @@ class VectorDBMemory:
             return []
 
         raw_results = self.collection.query(
-            query_embeddings=[query_embedding], n_results=min(query.top_k, collection_count)
+            query_embeddings=[query_embedding],
+            n_results=min(query.top_k, collection_count),
+            include=["documents", "metadatas", "distances"],
         )
 
         # Parse into typed model
@@ -171,12 +185,18 @@ class VectorDBMemory:
         # Convert results to Memory objects with combined scoring
         memories = []
 
-        for memory_id, content, metadata_dict in results.iter_first_query():
+        for memory_id, content, metadata_dict, distance in results.iter_first_query():
             # Parse metadata with type safety
             metadata = VectorDBMetadata.model_validate(metadata_dict)
 
-            # Calculate combined score
-            similarity_score = 1.0  # ChromaDB returns sorted by similarity
+            # Calculate combined score. The collection uses cosine space, so the
+            # ChromaDB distance is (1 - cosine_similarity). Convert back to a
+            # similarity in [0, 1] (clamped); fall back to 1.0 when a backend
+            # omits distances so older/partial results still rank deterministically.
+            if distance is None:
+                similarity_score = 1.0
+            else:
+                similarity_score = max(0.0, min(1.0, 1.0 - distance))
             importance_score = metadata.importance / 10.0
 
             # Calculate recency score if we have timestamps
