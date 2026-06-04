@@ -176,3 +176,38 @@ class TestVectorDBMemory:
 
         assert len(results) == 1
         assert results[0].id == original_id
+
+    async def test_similarity_influences_ranking(self, memory_store):
+        """High-similarity/low-importance should outrank low-similarity/high-importance.
+
+        Regression for the bug where similarity_score was hardcoded to 1.0,
+        making the combined score depend only on importance + recency. With a
+        modest importance_weight, real semantic similarity must be able to flip
+        the ranking in favor of the more relevant (but less important) memory.
+        """
+        # On-topic but low importance.
+        memory_store.add_memory(
+            content="The blacksmith forged a gleaming steel sword at the forge",
+            importance=1.0,
+        )
+        # Off-topic but high importance.
+        memory_store.add_memory(
+            content="A gentle rain fell over the quiet meadow at dawn",
+            importance=10.0,
+        )
+
+        # Modest importance weight: similarity should dominate.
+        query = VectorDBQuery(
+            query="forging a sword at the blacksmith forge",
+            top_k=2,
+            importance_weight=0.2,
+            recency_weight=0.0,
+        )
+        results = await memory_store.search(query)
+
+        assert len(results) == 2
+        # The semantically relevant (low-importance) memory must rank first,
+        # which is only possible once real similarity feeds the combined score.
+        assert "sword" in results[0].content.lower()
+        assert results[0].importance < results[1].importance
+
