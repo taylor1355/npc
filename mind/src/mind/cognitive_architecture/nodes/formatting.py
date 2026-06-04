@@ -5,6 +5,13 @@ rendering logic. Imported by any node that surfaces personality to the LLM
 (cognitive_update, action_selection) so the representation stays identical.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mind.cognitive_architecture.observations import Observation
+
 
 def format_personality(
     traits: list[str],
@@ -33,7 +40,7 @@ def format_personality(
     return traits_text, dims_text
 
 
-def format_interaction_status(observation) -> str:
+def format_interaction_status(observation: Observation | None) -> str:
     """Render the observation's authoritative interaction status for prompts.
 
     Grounds the LLM's "am I interacting?" belief in the current observation
