@@ -17,6 +17,17 @@ from mind.logging_config import get_logger
 logger = get_logger()
 
 
+def entity_tag(state: PipelineState) -> str:
+    """Bracketed entity id for per-NPC log attribution.
+
+    The simulation forwards /logs lines to an NPC's Events tab by matching the
+    entity id in the message text, so every per-entity log line must carry it.
+    """
+    if state.observation is not None and state.observation.entity_id:
+        return f"[{state.observation.entity_id}]"
+    return "[unknown]"
+
+
 class Node(ABC):
     """Base class for all pipeline nodes - adds automatic timing"""
 
@@ -120,7 +131,7 @@ class LLMNode(Node):
             tokens = self._extract_tokens(response)
             if tokens:
                 state.tokens_used[self.step_name] = tokens
-            logger.debug(f"[{self.step_name}] Completed in {elapsed_ms}ms, {tokens} tokens")
+            logger.debug(f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, {tokens} tokens")
             return response.content
 
         # Structured output with retry
@@ -150,7 +161,7 @@ class LLMNode(Node):
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 if total_tokens:
                     state.tokens_used[self.step_name] = total_tokens
-                logger.debug(f"[{self.step_name}] Completed in {elapsed_ms}ms, {total_tokens} tokens")
+                logger.debug(f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, {total_tokens} tokens")
                 return validated
 
             except (json.JSONDecodeError, ValidationError) as e:
@@ -158,7 +169,7 @@ class LLMNode(Node):
                 if attempt < max_attempts - 1:
                     # Log retry
                     error_type = "JSONDecodeError" if isinstance(e, json.JSONDecodeError) else "ValidationError"
-                    logger.debug(f"[{self.step_name}] Retry {attempt + 1}/{self.max_retries}: {error_type}")
+                    logger.debug(f"{entity_tag(state)} [{self.step_name}] Retry {attempt + 1}/{self.max_retries}: {error_type}")
 
                     messages.append(AIMessage(content=response.content))
 

@@ -52,11 +52,14 @@ def _success_response(request_id: str, action: dict) -> dict:
     }
 
 
-def _extract_conversation_observations(events: list[MindEvent]) -> list[ConversationObservation]:
+def _extract_conversation_observations(
+    events: list[MindEvent], mind_id: str
+) -> list[ConversationObservation]:
     """Extract conversation observations from INTERACTION_OBSERVATION events.
 
     Args:
         events: List of MindEvent objects
+        mind_id: Mind these events belong to (for per-NPC log attribution)
 
     Returns:
         List of ConversationObservation objects parsed from interaction observation events
@@ -70,18 +73,19 @@ def _extract_conversation_observations(events: list[MindEvent]) -> list[Conversa
                 conversations.append(conv_obs)
             except ValidationError as e:
                 # Not a conversation observation or malformed - skip it
-                logger.debug(f"Skipping non-conversation interaction observation: {e}")
+                logger.debug(f"[{mind_id}] Skipping non-conversation interaction observation: {e}")
                 continue
     return conversations
 
 
-def _cleanup_responded_bids(action, pending_bids: dict, request_id: str) -> None:
+def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, mind_id: str) -> None:
     """Remove bids from pending list after responding to them.
 
     Args:
         action: The chosen action (Action model)
         pending_bids: Dict of pending incoming bids (modified in place)
         request_id: Request ID for logging
+        mind_id: Mind the bids belong to (for per-NPC log attribution)
     """
     if not action:
         return
@@ -91,7 +95,7 @@ def _cleanup_responded_bids(action, pending_bids: dict, request_id: str) -> None
         bid_id = action.parameters.get("bid_id")
         if bid_id and bid_id in pending_bids:
             pending_bids.pop(bid_id)
-            logger.debug(f"[{request_id}] Removed bid {bid_id} from pending bids after response")
+            logger.debug(f"[{request_id}] [{mind_id}] Removed bid {bid_id} from pending bids after response")
 
     elif action.action == ActionType.BATCH_REJECT_INTERACTION_BIDS:
         # Batch bid rejection
@@ -120,7 +124,7 @@ def _cleanup_responded_bids(action, pending_bids: dict, request_id: str) -> None
         for bid_id in bid_ids_to_remove:
             pending_bids.pop(bid_id, None)
 
-        logger.debug(f"[{request_id}] Batch rejected {len(bid_ids_to_remove)} bids: {bid_ids_to_remove}")
+        logger.debug(f"[{request_id}] [{mind_id}] Batch rejected {len(bid_ids_to_remove)} bids: {bid_ids_to_remove}")
 
 
 class MCPServer:
@@ -209,7 +213,7 @@ class MCPServer:
                         )
 
                 # Extract conversation observations from INTERACTION_OBSERVATION events
-                conversation_obs = _extract_conversation_observations(mind_events)
+                conversation_obs = _extract_conversation_observations(mind_events, mind_id)
                 mind.update_conversations(conversation_obs)
                 mind.update_events(mind_events, obs.current_simulation_time)
 
@@ -233,7 +237,7 @@ class MCPServer:
                 mind.event_buffer = result.recent_events
 
                 # Clean up any bids that were responded to
-                _cleanup_responded_bids(result.chosen_action, mind.pending_incoming_bids, request_id)
+                _cleanup_responded_bids(result.chosen_action, mind.pending_incoming_bids, request_id, mind_id)
 
                 if result.chosen_action is None:
                     logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")

@@ -1,5 +1,6 @@
 """Unit tests for ActionSelectionNode"""
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -269,3 +270,32 @@ class TestActionSelectionNode:
         assert result.chosen_action.parameters["interaction_id"] == "conversation_123"
         assert result.chosen_action.parameters["response"] == "I agree to help"
         assert result.chosen_action.parameters["intensity"] == 0.8
+
+    async def test_all_log_records_carry_entity_id(self, node, mock_llm, basic_state, caplog):
+        """Every record from process() must carry the entity id so the simulation's
+        log forwarder can attribute it to the NPC's Events tab (NPC-789)"""
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        assert caplog.records, "process() should emit log records"
+        for record in caplog.records:
+            assert "test_npc" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )
+
+    async def test_fallback_log_records_carry_entity_id(self, node, mock_llm, basic_state, caplog):
+        """Retry and fallback-warning records must also carry the entity id (NPC-789)"""
+        mock_llm.ainvoke.return_value = AIMessage(
+            content="not valid json",
+            usage_metadata={"input_tokens": 10, "output_tokens": 3, "total_tokens": 13},
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            result = await node.process(basic_state)
+
+        assert result.chosen_action.action == ActionType.WAIT
+        assert caplog.records, "fallback path should emit log records"
+        for record in caplog.records:
+            assert "test_npc" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )

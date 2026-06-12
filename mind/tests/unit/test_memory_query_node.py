@@ -1,5 +1,6 @@
 """Unit tests for MemoryQueryNode"""
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -146,3 +147,15 @@ class TestMemoryQueryNode:
         assert len(result.memory_queries) == 3
         assert "old query 1" not in result.memory_queries
         assert "blacksmithing techniques I learned" in result.memory_queries
+
+    async def test_all_log_records_carry_entity_id(self, node, mock_llm, basic_state, caplog):
+        """Every record from process() must carry the entity id so the simulation's
+        log forwarder can attribute it to the NPC's Events tab (NPC-789)"""
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        assert caplog.records, "process() should emit log records"
+        for record in caplog.records:
+            assert "test_npc" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )

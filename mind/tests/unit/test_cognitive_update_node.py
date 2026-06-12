@@ -1,5 +1,6 @@
 """Unit tests for CognitiveUpdateNode"""
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -244,3 +245,36 @@ class TestCognitiveUpdateNode:
         rendered = call_args[0][0][0].content
         assert "No specific traits" in rendered
         assert "No personality dimensions provided" in rendered
+
+    async def test_all_log_records_carry_entity_id(self, node, mock_llm, basic_state, caplog):
+        """Every record from process() must carry the entity id so the simulation's
+        log forwarder can attribute it to the NPC's Events tab (NPC-789)"""
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        assert caplog.records, "process() should emit log records"
+        for record in caplog.records:
+            assert "test_npc" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )
+
+    async def test_working_memory_logged_as_single_record(self, node, mock_llm, basic_state, caplog):
+        """Working-memory fields land in one record: one Events-tab entry per thought"""
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        wm_records = [r for r in caplog.records if "Updated working memory" in r.getMessage()]
+        assert len(wm_records) == 1
+        message = wm_records[0].getMessage()
+        assert "Situation:" in message
+        assert "Active goals:" in message
+        assert "Emotional state:" in message
+
+    async def test_new_memories_logged_as_single_record(self, node, mock_llm, basic_state, caplog):
+        """Memory-storage lines land in one record, not one per memory"""
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        storing_records = [r for r in caplog.records if "Storing" in r.getMessage()]
+        assert len(storing_records) == 1
+        assert "Started sword commission" in storing_records[0].getMessage()
