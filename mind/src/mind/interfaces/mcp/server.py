@@ -59,7 +59,9 @@ def _extract_conversation_observations(
 
     Args:
         events: List of MindEvent objects
-        mind_id: Mind these events belong to (for per-NPC log attribution)
+        mind_id: Mind these events belong to (for per-NPC log attribution; must carry the
+            entity-id shape the sim /logs forwarder matches — it does,
+            mind_id == entity_id per models.py)
 
     Returns:
         List of ConversationObservation objects parsed from interaction observation events
@@ -85,7 +87,9 @@ def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, mind_id
         action: The chosen action (Action model)
         pending_bids: Dict of pending incoming bids (modified in place)
         request_id: Request ID for logging
-        mind_id: Mind the bids belong to (for per-NPC log attribution)
+        mind_id: Mind the bids belong to (for per-NPC log attribution; must carry the
+            entity-id shape the sim /logs forwarder matches — it does,
+            mind_id == entity_id per models.py)
     """
     if not action:
         return

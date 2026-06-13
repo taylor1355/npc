@@ -23,7 +23,7 @@ def entity_tag(state: PipelineState) -> str:
     The simulation forwards /logs lines to an NPC's Events tab by matching the
     entity id in the message text, so every per-entity log line must carry it.
     """
-    if state.observation is not None and state.observation.entity_id:
+    if state is not None and state.observation is not None and state.observation.entity_id:
         return f"[{state.observation.entity_id}]"
     return "[unknown]"
 

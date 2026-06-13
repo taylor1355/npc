@@ -1,5 +1,6 @@
 """Unit tests for MemoryRetrievalNode"""
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -137,3 +138,20 @@ class TestMemoryRetrievalNode:
         # Should preserve other fields
         assert result.personality_traits == ["brave", "honest"]
         assert result.observation == state.observation
+
+
+    async def test_all_log_records_carry_entity_id(self, node, mock_memory_store, basic_state, caplog):
+        """Every record from process() must carry the entity id so the simulation's
+        log forwarder can attribute it to the NPC's Events tab (NPC-789)"""
+        mock_memory_store.search.return_value = [
+            Memory(id="mem_1", content="Yesterday I worked on a sword", importance=7.0),
+        ]
+
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        assert caplog.records, "process() should emit log records"
+        for record in caplog.records:
+            assert "test_npc" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )
