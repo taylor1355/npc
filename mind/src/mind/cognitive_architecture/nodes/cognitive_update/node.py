@@ -6,7 +6,7 @@ from pprint import pformat
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import PromptTemplate
 
-from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.nodes.base import LLMNode, entity_tag
 from mind.cognitive_architecture.nodes.formatting import (
     format_interaction_status as _format_interaction_status,
 )
@@ -81,17 +81,23 @@ class CognitiveUpdateNode(LLMNode):
         # Add new memories to daily buffer
         state.daily_memories.extend(output.new_memories)
 
-        # Log updated working memory
+        # Log updated working memory as a single record so the simulation's
+        # Events tab shows one entry per thought instead of one per field
+        tag = entity_tag(state)
         wm = output.updated_working_memory
-        logger.debug("Updated working memory:")
-        logger.debug(f"  Situation: {wm.situation_assessment}")
-        logger.debug(f"  Active goals: {wm.active_goals}")
-        logger.debug(f"  Current plan: {wm.current_plan}")
-        logger.debug(f"  Emotional state: {wm.emotional_state}")
+        logger.debug(
+            f"{tag} Updated working memory:\n"
+            f"  Situation: {wm.situation_assessment}\n"
+            f"  Active goals: {wm.active_goals}\n"
+            f"  Current plan: {wm.current_plan}\n"
+            f"  Emotional state: {wm.emotional_state}"
+        )
 
-        # Log new memories
-        logger.debug(f"Storing {len(output.new_memories)} new memories")
-        for mem in output.new_memories:
-            logger.debug(f"  [importance={mem.importance}] {mem.content}")
+        # Log new memories as a single record for the same reason
+        memory_lines = "".join(
+            f"\n  [importance={mem.importance}] {mem.content}"
+            for mem in output.new_memories
+        )
+        logger.debug(f"{tag} Storing {len(output.new_memories)} new memories{memory_lines}")
 
         return state

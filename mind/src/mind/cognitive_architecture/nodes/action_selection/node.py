@@ -9,7 +9,7 @@ from langchain_core.prompts import PromptTemplate
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action, ActionType
-from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.nodes.base import LLMNode, entity_tag
 from mind.cognitive_architecture.nodes.formatting import (
     format_interaction_status as _format_interaction_status,
 )
@@ -72,7 +72,7 @@ class ActionSelectionNode(LLMNode):
                 format_instructions=self.get_format_instructions()
             )
         except (ValidationError, json.JSONDecodeError) as e:
-            logger.warning(f"Action selection failed after retries, falling back to wait: {e}")
+            logger.warning(f"{entity_tag(state)} Action selection failed after retries, falling back to wait: {e}")
             # Use model_construct to bypass validation - WAIT is always safe
             fallback_action = Action.model_construct(action=ActionType.WAIT, parameters={})
             output = ActionSelectionOutput.model_construct(chosen_action=fallback_action)
@@ -91,7 +91,8 @@ class ActionSelectionNode(LLMNode):
         state.recent_events.append(action_event)
 
         # Log action selection
-        logger.debug(f"Evaluated {len(state.available_actions)} available actions")
-        logger.debug(f"Selected: {output.chosen_action}")
+        tag = entity_tag(state)
+        logger.debug(f"{tag} Evaluated {len(state.available_actions)} available actions")
+        logger.debug(f"{tag} Selected: {output.chosen_action}")
 
         return state
