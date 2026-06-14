@@ -38,7 +38,7 @@ Encapsulates a single mind's state and cognitive pipeline.
 - Tracks conversation histories per interaction
 - Manages event buffer with retention policy (60 game minutes OR max 15 events)
 
-**Configuration:** Initialized via `Mind.from_config(mind_id, config)` with `MindConfig` specifying entity ID, personality traits, LLM model, and memory storage path.
+**Configuration:** Initialized via `Mind.from_config(mind_id, entity_id, config)`. `mind_id` (PK) keys the mind and its memory collection; `entity_id` (FK) names the simulation entity the mind drives; `MindConfig` carries the cognition-only settings (personality traits, LLM model, memory storage path). `entity_id` is no longer a `MindConfig` field.
 
 ## MCP Tools
 
@@ -46,7 +46,7 @@ The server exposes four RPC methods for mind lifecycle and decision-making.
 
 ### create_mind
 
-Creates a new mind instance with specified configuration. Takes `mind_id` and `MindConfig` (entity ID, traits, LLM model, memory storage path, optional seed memories).
+Creates a new mind instance. Takes `mind_id` (PK), `entity_id` (FK), and `MindConfig` as separate arguments. `mind_id` keys the mind and its memory collection; `entity_id` names the simulation entity the mind drives; `MindConfig` holds cognition-only settings (traits, LLM model, memory storage path, optional seed memories). `entity_id` is no longer a `MindConfig` field.
 
 ### decide_action
 

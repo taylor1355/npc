@@ -182,9 +182,18 @@ class MCPServer:
         ) -> dict:
             """Process observation from simulation and decide on an action
 
+            mind_id is the routing primary key: it selects which mind in self.minds
+            handles this request and keys that mind's memory collection. It is distinct
+            from the entity_id foreign key carried inside the observation, which names
+            the simulation entity the mind drives. In correct operation the two agree
+            (the routed mind drives that entity); a divergence is logged as a possible
+            misrouting (see the mismatch warning below) but does not reject the request.
+
             Args:
-                mind_id: Unique identifier for the mind
-                observation: Structured observation dict (will be validated to Observation model)
+                mind_id: Routing primary key (PK) selecting the mind; distinct from the
+                    observation entity_id foreign key (FK).
+                observation: Structured observation dict (will be validated to Observation
+                    model); carries the entity_id FK the pipeline attributes work to.
                 events: List of mind events
 
             Returns:
@@ -223,6 +232,18 @@ class MCPServer:
                             f"Invalid event format: {str(e)}",
                             details=str(e)
                         )
+
+                # Defensive misrouting check: mind_id (PK) routes the request while the
+                # observation carries its own entity_id (FK). In correct operation these
+                # agree (the mind drives that entity); a divergence means the observation
+                # was routed to the wrong mind. Warn (with both ids) so it is diagnosable,
+                # but do not reject - the pipeline keeps using the observation's entity_id.
+                if obs.entity_id != mind.entity_id:
+                    logger.warning(
+                        f"[{request_id}] entity_id mismatch for mind {mind_id}: "
+                        f"observation entity_id={obs.entity_id} but mind entity_id={mind.entity_id} "
+                        f"(possible misrouting; using observation entity_id for the pipeline)"
+                    )
 
                 # Extract conversation observations from INTERACTION_OBSERVATION events.
                 # Pass the entity FK so per-NPC log lines attribute to the NPC's Events tab.
@@ -317,10 +338,15 @@ class MCPServer:
             Args:
                 mind_id: Mind to remove
             """
+            # The mind is still registered here, so its entity_id (FK) is available;
+            # surface it in the response so cleanup is symmetric with create_mind.
+            # (The Godot client ignores this optional field, so this is non-breaking.)
+            entity_id = None
             if mind_id in self.minds:
+                entity_id = self.minds[mind_id].entity_id
                 del self.minds[mind_id]
 
-            return MindInfoResponse(status="removed", mind_id=mind_id)
+            return MindInfoResponse(status="removed", mind_id=mind_id, entity_id=entity_id)
 
         # === Resources ===
 

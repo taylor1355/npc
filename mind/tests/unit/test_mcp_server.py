@@ -27,7 +27,7 @@ class TestMCPServerErrorHandling:
             {
                 "mind_id": "nonexistent",
                 "observation": {
-                    "entity_id": "test",
+                    "entity_id": "entity_test",
                     "current_simulation_time": 0,
                 },
             },
@@ -62,7 +62,7 @@ class TestMCPServerErrorHandling:
             "decide_action",
             {
                 "mind_id": "mind_test",
-                "observation": {"entity_id": "test"},
+                "observation": {"entity_id": "entity_test"},
             },
         )
 
@@ -100,7 +100,7 @@ class TestMCPServerErrorHandling:
             {
                 "mind_id": "mind_test",
                 "observation": {
-                    "entity_id": "test",
+                    "entity_id": "entity_test",
                     "current_simulation_time": "not_an_int",
                 },
             },
@@ -139,7 +139,7 @@ class TestMCPServerErrorHandling:
             {
                 "mind_id": "mind_test",
                 "observation": {
-                    "entity_id": "test",
+                    "entity_id": "entity_test",
                     "current_simulation_time": 100,
                     "vision": {},
                 },
@@ -179,7 +179,7 @@ class TestMCPServerErrorHandling:
             {
                 "mind_id": "mind_test",
                 "observation": {
-                    "entity_id": "test",
+                    "entity_id": "entity_test",
                     "current_simulation_time": "invalid",
                 },
             },
@@ -213,7 +213,7 @@ class TestMCPServerErrorHandling:
         )
 
         observation = {
-            "entity_id": "test",
+            "entity_id": "entity_test",
             "current_simulation_time": 100,
             "status": {
                 "position": [5, 5],
@@ -301,7 +301,7 @@ class TestMCPServerErrorHandling:
         )
 
         observation = {
-            "entity_id": "test",
+            "entity_id": "entity_test",
             "current_simulation_time": 100,
             "status": {
                 "position": [5, 5],
@@ -395,7 +395,7 @@ class TestMCPServerErrorHandling:
         )
 
         observation = {
-            "entity_id": "test",
+            "entity_id": "entity_test",
             "current_simulation_time": 100,
             "status": {
                 "position": [5, 5],
@@ -523,3 +523,85 @@ class TestCreateMindDecouplesIds:
         assert mind.entity_id == "entity_xyz"
         # Memory collection keyed by the mind PK
         assert mind.memory_store.collection.name == "mind_mind_abc"
+
+
+class TestDecideActionEntityIdMismatch:
+    """decide_action warns (does not reject) when the observation entity_id (FK)
+    diverges from the routed mind entity_id, so misrouting is diagnosable (NPC-795)."""
+
+    @staticmethod
+    async def _run_decide(server, observation):
+        """Create a mind (entity_test) with a stubbed pipeline, run decide_action."""
+        from mind.cognitive_architecture.actions import Action
+        from mind.cognitive_architecture.state import PipelineState
+
+        await server.mcp.call_tool(
+            "create_mind",
+            {
+                "mind_id": "mind_test",
+                "entity_id": "entity_test",
+                "config": {
+                    "traits": [],
+                    "initial_long_term_memories": [],
+                },
+            },
+        )
+
+        mind = server.minds["mind_test"]
+
+        async def mock_process(state: PipelineState) -> PipelineState:
+            state.chosen_action = Action.model_construct(action="wait", parameters={})
+            return state
+
+        mind.pipeline.process = mock_process
+
+        return await server.mcp.call_tool(
+            "decide_action",
+            {
+                "mind_id": "mind_test",
+                "observation": observation,
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_warns_when_observation_entity_id_differs_from_mind(self, caplog):
+        import logging
+
+        server = MCPServer()
+        observation = {
+            "entity_id": "entity_other",
+            "current_simulation_time": 100,
+        }
+
+        with caplog.at_level(logging.WARNING):
+            result = await self._run_decide(server, observation)
+
+        response = parse_response(result)
+        assert response["status"] == "success"
+
+        mismatch_lines = [
+            r.getMessage() for r in caplog.records if "entity_id mismatch" in r.getMessage()
+        ]
+        assert mismatch_lines, "expected an entity_id mismatch warning"
+        assert any("entity_other" in line and "entity_test" in line for line in mismatch_lines)
+
+    @pytest.mark.asyncio
+    async def test_silent_when_observation_entity_id_matches_mind(self, caplog):
+        import logging
+
+        server = MCPServer()
+        observation = {
+            "entity_id": "entity_test",
+            "current_simulation_time": 100,
+        }
+
+        with caplog.at_level(logging.WARNING):
+            result = await self._run_decide(server, observation)
+
+        response = parse_response(result)
+        assert response["status"] == "success"
+
+        mismatch_lines = [
+            r.getMessage() for r in caplog.records if "entity_id mismatch" in r.getMessage()
+        ]
+        assert not mismatch_lines, "no mismatch warning expected when ids agree"
