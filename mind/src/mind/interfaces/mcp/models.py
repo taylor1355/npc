@@ -15,7 +15,6 @@ from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMem
 class MindConfig(BaseModel):
     """Configuration for creating a new mind - everything should be configurable"""
 
-    entity_id: str  # Mind's entity ID in simulation
     traits: list[str]
 
     # LLM configuration

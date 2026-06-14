@@ -442,7 +442,6 @@ class TestMindConfigValidation:
         from mind.interfaces.mcp.models import MindConfig
         with pytest.raises(ValidationError):
             MindConfig(
-                entity_id="npc_test",
                 traits=["curious"],
                 personality_dimensions={"extroversion": 1.5},
             )
@@ -452,7 +451,6 @@ class TestMindConfigValidation:
         from mind.interfaces.mcp.models import MindConfig
         with pytest.raises(ValidationError):
             MindConfig(
-                entity_id="npc_test",
                 traits=["curious"],
                 personality_dimensions={"curiosity": -0.1},
             )
@@ -460,7 +458,6 @@ class TestMindConfigValidation:
     def test_accepts_in_range_values(self):
         from mind.interfaces.mcp.models import MindConfig
         config = MindConfig(
-            entity_id="npc_test",
             traits=["curious"],
             personality_dimensions={
                 "extroversion": 0.0,

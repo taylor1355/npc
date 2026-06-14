@@ -26,7 +26,6 @@ def mcp_server():
 def test_mind_config():
     """Create a test mind configuration"""
     return MindConfig(
-        entity_id="test_npc_001",
         traits=["curious", "brave"],
         personality_dimensions={
             "extroversion": 0.7,
@@ -127,7 +126,6 @@ async def test_create_mind_stores_personality_dimensions(mcp_server, test_mind_c
 async def test_create_mind_without_personality_dimensions_defaults_to_empty(mcp_server):
     """Configs that omit personality_dimensions should default to an empty dict"""
     minimal_config = MindConfig(
-        entity_id="minimal_npc",
         traits=["plain"],
     )
 
