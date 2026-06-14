@@ -25,7 +25,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "nonexistent",
+                "entity_id": "nonexistent",
                 "observation": {
                     "entity_id": "test",
                     "current_simulation_time": 0,
@@ -49,7 +49,7 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "config": {
                     "entity_id": "test",
                     "traits": [],
@@ -61,7 +61,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "observation": {"entity_id": "test"},
             },
         )
@@ -86,7 +86,7 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "config": {
                     "entity_id": "test",
                     "traits": [],
@@ -98,7 +98,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "observation": {
                     "entity_id": "test",
                     "current_simulation_time": "not_an_int",
@@ -125,7 +125,7 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "config": {
                     "entity_id": "test",
                     "traits": [],
@@ -137,7 +137,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "observation": {
                     "entity_id": "test",
                     "current_simulation_time": 100,
@@ -165,7 +165,7 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "config": {
                     "entity_id": "test",
                     "traits": [],
@@ -177,7 +177,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "observation": {
                     "entity_id": "test",
                     "current_simulation_time": "invalid",
@@ -203,7 +203,7 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "config": {
                     "entity_id": "test",
                     "traits": ["curious"],
@@ -251,7 +251,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "observation": observation,
             },
         )
@@ -284,7 +284,7 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "config": {
                     "entity_id": "test",
                     "traits": ["friendly"],
@@ -337,7 +337,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "observation": observation,
                 "events": [bid_event],
             },
@@ -367,7 +367,7 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "config": {
                     "entity_id": "test",
                     "traits": ["friendly"],
@@ -415,7 +415,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "entity_id": "test",
                 "observation": observation,
                 "events": [bid_event],
             },

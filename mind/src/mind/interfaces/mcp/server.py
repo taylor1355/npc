@@ -53,15 +53,13 @@ def _success_response(request_id: str, action: dict) -> dict:
 
 
 def _extract_conversation_observations(
-    events: list[MindEvent], mind_id: str
+    events: list[MindEvent], entity_id: str
 ) -> list[ConversationObservation]:
     """Extract conversation observations from INTERACTION_OBSERVATION events.
 
     Args:
         events: List of MindEvent objects
-        mind_id: Mind these events belong to (for per-NPC log attribution; must carry the
-            entity-id shape the sim /logs forwarder matches — it does,
-            mind_id == entity_id per models.py)
+        entity_id: The entity these events belong to (used for per-NPC log attribution)
 
     Returns:
         List of ConversationObservation objects parsed from interaction observation events
@@ -75,21 +73,19 @@ def _extract_conversation_observations(
                 conversations.append(conv_obs)
             except ValidationError as e:
                 # Not a conversation observation or malformed - skip it
-                logger.debug(f"[{mind_id}] Skipping non-conversation interaction observation: {e}")
+                logger.debug(f"[{entity_id}] Skipping non-conversation interaction observation: {e}")
                 continue
     return conversations
 
 
-def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, mind_id: str) -> None:
+def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, entity_id: str) -> None:
     """Remove bids from pending list after responding to them.
 
     Args:
         action: The chosen action (Action model)
         pending_bids: Dict of pending incoming bids (modified in place)
         request_id: Request ID for logging
-        mind_id: Mind the bids belong to (for per-NPC log attribution; must carry the
-            entity-id shape the sim /logs forwarder matches — it does,
-            mind_id == entity_id per models.py)
+        entity_id: The entity these bids belong to (used for per-NPC log attribution)
     """
     if not action:
         return
@@ -99,7 +95,7 @@ def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, mind_id
         bid_id = action.parameters.get("bid_id")
         if bid_id and bid_id in pending_bids:
             pending_bids.pop(bid_id)
-            logger.debug(f"[{request_id}] [{mind_id}] Removed bid {bid_id} from pending bids after response")
+            logger.debug(f"[{request_id}] [{entity_id}] Removed bid {bid_id} from pending bids after response")
 
     elif action.action == ActionType.BATCH_REJECT_INTERACTION_BIDS:
         # Batch bid rejection
@@ -128,7 +124,7 @@ def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, mind_id
         for bid_id in bid_ids_to_remove:
             pending_bids.pop(bid_id, None)
 
-        logger.debug(f"[{request_id}] [{mind_id}] Batch rejected {len(bid_ids_to_remove)} bids: {bid_ids_to_remove}")
+        logger.debug(f"[{request_id}] [{entity_id}] Batch rejected {len(bid_ids_to_remove)} bids: {bid_ids_to_remove}")
 
 
 class MCPServer:
@@ -150,24 +146,24 @@ class MCPServer:
 
         @self.mcp.tool()
         async def create_mind(
-            mind_id: str,
+            entity_id: str,
             config: MindConfig,
             ctx: Context = None,
         ) -> MindInfoResponse:
             """Create a new NPC mind
 
             Args:
-                mind_id: Unique identifier for the mind (usually matches entity_id)
+                entity_id: Unique identifier for the entity this mind drives
                 config: Configuration with entity_id, traits, LLM settings, memory settings, initial state
             """
-            mind = Mind.from_config(mind_id, config)
-            self.minds[mind_id] = mind
+            mind = Mind.from_config(entity_id, config)
+            self.minds[entity_id] = mind
 
-            return MindInfoResponse(status="created", mind_id=mind_id)
+            return MindInfoResponse(status="created", entity_id=entity_id)
 
         @self.mcp.tool()
         async def decide_action(
-            mind_id: str,
+            entity_id: str,
             observation: dict,
             events: list = None,
             ctx: Context = None,
@@ -175,7 +171,7 @@ class MCPServer:
             """Process observation from simulation and decide on an action
 
             Args:
-                mind_id: Unique identifier for the mind
+                entity_id: Unique identifier for the entity this mind drives
                 observation: Structured observation dict (will be validated to Observation model)
                 events: List of mind events
 
@@ -183,20 +179,20 @@ class MCPServer:
                 dict with status, action, error_message, and request_id
             """
             request_id = str(uuid.uuid4())[:8]
-            logger.debug(f"[{request_id}] decide_action called for mind_id={mind_id}")
+            logger.debug(f"[{request_id}] decide_action called for entity_id={entity_id}")
 
             try:
-                if mind_id not in self.minds:
-                    logger.warning(f"[{request_id}] Mind {mind_id} not found")
-                    return _error_response(request_id, f"Mind {mind_id} not found")
+                if entity_id not in self.minds:
+                    logger.warning(f"[{request_id}] Mind {entity_id} not found")
+                    return _error_response(request_id, f"Mind {entity_id} not found")
 
-                mind = self.minds[mind_id]
+                mind = self.minds[entity_id]
 
                 # Validate observation
                 try:
                     obs = Observation.model_validate(observation)
                 except ValidationError as e:
-                    logger.exception(f"[{request_id}] Observation validation failed for {mind_id}")
+                    logger.exception(f"[{request_id}] Observation validation failed for {entity_id}")
                     return _error_response(
                         request_id,
                         f"Invalid observation format: {str(e)}",
@@ -209,7 +205,7 @@ class MCPServer:
                     try:
                         mind_events = [MindEvent.model_validate(e) for e in events]
                     except ValidationError as e:
-                        logger.exception(f"[{request_id}] Event validation failed for {mind_id}")
+                        logger.exception(f"[{request_id}] Event validation failed for {entity_id}")
                         return _error_response(
                             request_id,
                             f"Invalid event format: {str(e)}",
@@ -217,7 +213,7 @@ class MCPServer:
                         )
 
                 # Extract conversation observations from INTERACTION_OBSERVATION events
-                conversation_obs = _extract_conversation_observations(mind_events, mind_id)
+                conversation_obs = _extract_conversation_observations(mind_events, entity_id)
                 mind.update_conversations(conversation_obs)
                 mind.update_events(mind_events, obs.current_simulation_time)
 
@@ -233,7 +229,7 @@ class MCPServer:
                 )
 
                 # Run cognitive pipeline
-                logger.debug(f"[{request_id}] Running cognitive pipeline for {mind_id}")
+                logger.debug(f"[{request_id}] Running cognitive pipeline for {entity_id}")
                 result = await mind.pipeline.process(state)
 
                 mind.working_memory = result.working_memory
@@ -241,38 +237,38 @@ class MCPServer:
                 mind.event_buffer = result.recent_events
 
                 # Clean up any bids that were responded to
-                _cleanup_responded_bids(result.chosen_action, mind.pending_incoming_bids, request_id, mind_id)
+                _cleanup_responded_bids(result.chosen_action, mind.pending_incoming_bids, request_id, entity_id)
 
                 if result.chosen_action is None:
-                    logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")
+                    logger.warning(f"[{request_id}] Pipeline returned no action for {entity_id}")
                     return _error_response(request_id, "Pipeline did not select an action")
 
                 logger.info(
-                    f"[{request_id}] Successfully processed decision for {mind_id}: {result.chosen_action.action}"
+                    f"[{request_id}] Successfully processed decision for {entity_id}: {result.chosen_action.action}"
                 )
                 return _success_response(request_id, result.chosen_action.model_dump())
 
             except ValidationError as e:
-                logger.warning(f"[{request_id}] Validation failed in decide_action for {mind_id}: {str(e)}")
+                logger.warning(f"[{request_id}] Validation failed in decide_action for {entity_id}: {str(e)}")
                 return _error_response(request_id, "Action validation failed", details=str(e))
             except Exception:
-                logger.exception(f"[{request_id}] Unexpected error in decide_action for {mind_id}")
+                logger.exception(f"[{request_id}] Unexpected error in decide_action for {entity_id}")
                 return _error_response(request_id, "Unexpected server error")
 
         @self.mcp.tool()
         async def consolidate_memories(
-            mind_id: str,
+            entity_id: str,
             ctx: Context = None,
         ) -> ConsolidationResponse:
             """Consolidate daily memories into long-term storage
 
             Args:
-                mind_id: Mind to consolidate memories for
+                entity_id: Mind to consolidate memories for
             """
-            if mind_id not in self.minds:
+            if entity_id not in self.minds:
                 return ConsolidationResponse(status="error", consolidated_count=0)
 
-            mind = self.minds[mind_id]
+            mind = self.minds[entity_id]
 
             # Create dummy state for consolidation
             # TODO: Track latest observation for better location/timestamp
@@ -297,28 +293,28 @@ class MCPServer:
 
         @self.mcp.tool()
         async def cleanup_mind(
-            mind_id: str,
+            entity_id: str,
             ctx: Context = None,
         ) -> MindInfoResponse:
             """Gracefully cleanup and remove a mind
 
             Args:
-                mind_id: Mind to remove
+                entity_id: Mind to remove
             """
-            if mind_id in self.minds:
-                del self.minds[mind_id]
+            if entity_id in self.minds:
+                del self.minds[entity_id]
 
-            return MindInfoResponse(status="removed", mind_id=mind_id)
+            return MindInfoResponse(status="removed", entity_id=entity_id)
 
         # === Resources ===
 
-        @self.mcp.resource("mind://{mind_id}/state")
-        async def get_mind_state(mind_id: str) -> str:
+        @self.mcp.resource("mind://{entity_id}/state")
+        async def get_mind_state(entity_id: str) -> str:
             """Get the mind's complete mental state"""
-            if mind_id not in self.minds:
-                return json.dumps({"error": f"Mind {mind_id} not found"})
+            if entity_id not in self.minds:
+                return json.dumps({"error": f"Mind {entity_id} not found"})
 
-            mind = self.minds[mind_id]
+            mind = self.minds[entity_id]
 
             state_response = MindStateResponse(
                 entity_id=mind.entity_id,
@@ -331,22 +327,22 @@ class MCPServer:
 
             return state_response.model_dump_json(indent=2)
 
-        @self.mcp.resource("mind://{mind_id}/working_memory")
-        async def get_working_memory(mind_id: str) -> str:
+        @self.mcp.resource("mind://{entity_id}/working_memory")
+        async def get_working_memory(entity_id: str) -> str:
             """Get mind's current working memory"""
-            if mind_id not in self.minds:
-                return json.dumps({"error": f"Mind {mind_id} not found"})
+            if entity_id not in self.minds:
+                return json.dumps({"error": f"Mind {entity_id} not found"})
 
-            mind = self.minds[mind_id]
+            mind = self.minds[entity_id]
             return mind.working_memory.model_dump_json(indent=2)
 
-        @self.mcp.resource("mind://{mind_id}/daily_memories")
-        async def get_daily_memories(mind_id: str) -> str:
+        @self.mcp.resource("mind://{entity_id}/daily_memories")
+        async def get_daily_memories(entity_id: str) -> str:
             """Get mind's accumulated daily memories"""
-            if mind_id not in self.minds:
-                return json.dumps({"error": f"Mind {mind_id} not found"})
+            if entity_id not in self.minds:
+                return json.dumps({"error": f"Mind {entity_id} not found"})
 
-            mind = self.minds[mind_id]
+            mind = self.minds[entity_id]
             return json.dumps(
                 [{"content": m.content, "importance": m.importance} for m in mind.daily_memories],
                 indent=2,

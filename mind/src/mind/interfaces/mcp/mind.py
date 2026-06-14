@@ -21,8 +21,7 @@ EVENT_BUFFER_MAX_SIZE = 15  # Maximum number of events to retain
 class Mind:
     """Runtime state for a single mind - encapsulates all mind behavior"""
 
-    mind_id: str
-    entity_id: str  # Mind's entity ID in simulation
+    entity_id: str  # Mind's entity ID in simulation (MCP routing key)
     traits: list[str]
     pipeline: CognitivePipeline
     memory_store: VectorDBMemory
@@ -39,11 +38,11 @@ class Mind:
     pending_incoming_bids: dict[str, MindEvent] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, mind_id: str, config) -> Self:
+    def from_config(cls, entity_id: str, config) -> Self:
         """Create a Mind instance from configuration
 
         Args:
-            mind_id: Unique identifier for the mind
+            entity_id: Unique identifier for the entity this mind drives
             config: MindConfig with LLM, memory, and initial state settings
 
         Returns:
@@ -54,7 +53,7 @@ class Mind:
 
         # Initialize memory store with configured collection name
         memory_store = VectorDBMemory(
-            collection_name=f"mind_{mind_id}",
+            collection_name=f"mind_{entity_id}",
             embedding_model=config.embedding_model,
             storage_path=config.memory_storage_path,
         )
@@ -71,8 +70,7 @@ class Mind:
 
         # Create Mind instance
         return cls(
-            mind_id=mind_id,
-            entity_id=config.entity_id,
+            entity_id=entity_id,
             traits=config.traits,
             personality_dimensions=config.personality_dimensions,
             pipeline=pipeline,
@@ -130,21 +128,21 @@ class Mind:
             elif event.event_type == MindEventType.ERROR:
                 # Log error events for debugging
                 message = event.payload.get("message", "Unknown error")
-                logger.warning(f"[{self.mind_id}] Received error event: {message}")
+                logger.warning(f"[{self.entity_id}] Received error event: {message}")
 
             elif event.event_type == MindEventType.INTERACTION_BID_CANCELED:
                 # Remove canceled bid from pending list
                 bid_id = event.payload.get("bid_id")
                 if bid_id and bid_id in self.pending_incoming_bids:
                     del self.pending_incoming_bids[bid_id]
-                    logger.debug(f"[{self.mind_id}] Removed canceled bid {bid_id} from pending bids")
+                    logger.debug(f"[{self.entity_id}] Removed canceled bid {bid_id} from pending bids")
 
             elif event.event_type in (MindEventType.INTERACTION_FINISHED, MindEventType.INTERACTION_CANCELED):
                 # Clean up conversation history for ended interactions
                 interaction_id = event.payload.get("interaction_id")
                 if interaction_id and interaction_id in self.conversation_histories:
                     del self.conversation_histories[interaction_id]
-                    logger.debug(f"[{self.mind_id}] Cleaned up conversation history for {interaction_id}")
+                    logger.debug(f"[{self.entity_id}] Cleaned up conversation history for {interaction_id}")
 
         self.event_buffer.extend(new_events)
 

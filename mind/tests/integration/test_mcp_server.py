@@ -96,14 +96,14 @@ def test_observation():
 async def test_create_mind(mcp_server, test_mind_config):
     """Test creating a new mind"""
     result = await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind", {"entity_id": "test_mind_001", "config": test_mind_config.model_dump()}
     )
 
     # Parse response from TextContent list
     response = json.loads(result[0].text)
 
     assert response["status"] == "created"
-    assert response["mind_id"] == "test_mind_001"
+    assert response["entity_id"] == "test_mind_001"
     assert "test_mind_001" in mcp_server.minds
 
 
@@ -111,7 +111,7 @@ async def test_create_mind(mcp_server, test_mind_config):
 async def test_create_mind_stores_personality_dimensions(mcp_server, test_mind_config):
     """Personality dimensions in config should round-trip into the stored Mind"""
     await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_dims", "config": test_mind_config.model_dump()}
+        "create_mind", {"entity_id": "test_mind_dims", "config": test_mind_config.model_dump()}
     )
 
     mind = mcp_server.minds["test_mind_dims"]
@@ -132,7 +132,7 @@ async def test_create_mind_without_personality_dimensions_defaults_to_empty(mcp_
     )
 
     await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_minimal", "config": minimal_config.model_dump()}
+        "create_mind", {"entity_id": "test_mind_minimal", "config": minimal_config.model_dump()}
     )
 
     mind = mcp_server.minds["test_mind_minimal"]
@@ -144,12 +144,12 @@ async def test_decide_action(mcp_server, test_mind_config, test_observation):
     """Test deciding an action based on observation"""
     # Create mind
     await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind", {"entity_id": "test_mind_001", "config": test_mind_config.model_dump()}
     )
 
     # Decide action using new structured format
     result = await mcp_server.mcp.call_tool(
-        "decide_action", {"mind_id": "test_mind_001", "observation": test_observation.model_dump()}
+        "decide_action", {"entity_id": "test_mind_001", "observation": test_observation.model_dump()}
     )
 
     # Parse response from TextContent list
@@ -165,7 +165,7 @@ async def test_consolidate_memories(mcp_server, test_mind_config):
     """Test memory consolidation"""
     # Create mind
     await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind", {"entity_id": "test_mind_001", "config": test_mind_config.model_dump()}
     )
 
     # Manually add some daily memories for testing
@@ -175,7 +175,7 @@ async def test_consolidate_memories(mcp_server, test_mind_config):
     mind.daily_memories.append(NewMemory(content="Test memory", importance=5.0))
 
     # Consolidate
-    result = await mcp_server.mcp.call_tool("consolidate_memories", {"mind_id": "test_mind_001"})
+    result = await mcp_server.mcp.call_tool("consolidate_memories", {"entity_id": "test_mind_001"})
 
     # Parse response from TextContent list
     response = json.loads(result[0].text)
@@ -190,13 +190,13 @@ async def test_cleanup_mind(mcp_server, test_mind_config):
     """Test mind cleanup"""
     # Create mind
     await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind", {"entity_id": "test_mind_001", "config": test_mind_config.model_dump()}
     )
 
     assert "test_mind_001" in mcp_server.minds
 
     # Cleanup
-    result = await mcp_server.mcp.call_tool("cleanup_mind", {"mind_id": "test_mind_001"})
+    result = await mcp_server.mcp.call_tool("cleanup_mind", {"entity_id": "test_mind_001"})
 
     # Parse response from TextContent list
     response = json.loads(result[0].text)
@@ -210,14 +210,14 @@ async def test_full_workflow(mcp_server, test_mind_config, test_observation):
     """Test complete workflow: create, decide, consolidate, cleanup"""
     # Step 1: Create mind
     result = await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind", {"entity_id": "test_mind_001", "config": test_mind_config.model_dump()}
     )
     create_response = json.loads(result[0].text)
     assert create_response["status"] == "created"
 
     # Step 2: Make a decision
     result = await mcp_server.mcp.call_tool(
-        "decide_action", {"mind_id": "test_mind_001", "observation": test_observation.model_dump()}
+        "decide_action", {"entity_id": "test_mind_001", "observation": test_observation.model_dump()}
     )
     action_response = json.loads(result[0].text)
     assert action_response["status"] == "success"
@@ -230,14 +230,14 @@ async def test_full_workflow(mcp_server, test_mind_config, test_observation):
     # Step 4: Consolidate if there are memories
     if memory_count > 0:
         result = await mcp_server.mcp.call_tool(
-            "consolidate_memories", {"mind_id": "test_mind_001"}
+            "consolidate_memories", {"entity_id": "test_mind_001"}
         )
         consolidate_response = json.loads(result[0].text)
         assert consolidate_response["status"] == "success"
         assert consolidate_response["consolidated_count"] == memory_count
 
     # Step 5: Cleanup
-    result = await mcp_server.mcp.call_tool("cleanup_mind", {"mind_id": "test_mind_001"})
+    result = await mcp_server.mcp.call_tool("cleanup_mind", {"entity_id": "test_mind_001"})
     cleanup_response = json.loads(result[0].text)
     assert cleanup_response["status"] == "removed"
 

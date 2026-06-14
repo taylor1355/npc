@@ -39,7 +39,7 @@ class MindConfig(BaseModel):
 class SimulationRequest(BaseModel):
     """Request from simulation to mind for action decision"""
 
-    mind_id: str  # MCP routing (matches entity_id typically)
+    entity_id: str  # MCP routing key
     observation: Observation  # Structured observation
 
 
@@ -76,5 +76,5 @@ class MindInfoResponse(BaseModel):
     """Create/cleanup result"""
 
     status: str
-    mind_id: str
+    entity_id: str
     message: str | None = None
