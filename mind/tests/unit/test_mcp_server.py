@@ -49,9 +49,9 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
+                "entity_id": "entity_test",
                 "config": {
-                    "entity_id": "test",
                     "traits": [],
                     "initial_long_term_memories": [],
                 },
@@ -61,7 +61,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
                 "observation": {"entity_id": "test"},
             },
         )
@@ -86,9 +86,9 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
+                "entity_id": "entity_test",
                 "config": {
-                    "entity_id": "test",
                     "traits": [],
                     "initial_long_term_memories": [],
                 },
@@ -98,7 +98,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
                 "observation": {
                     "entity_id": "test",
                     "current_simulation_time": "not_an_int",
@@ -125,9 +125,9 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
+                "entity_id": "entity_test",
                 "config": {
-                    "entity_id": "test",
                     "traits": [],
                     "initial_long_term_memories": [],
                 },
@@ -137,7 +137,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
                 "observation": {
                     "entity_id": "test",
                     "current_simulation_time": 100,
@@ -165,9 +165,9 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
+                "entity_id": "entity_test",
                 "config": {
-                    "entity_id": "test",
                     "traits": [],
                     "initial_long_term_memories": [],
                 },
@@ -177,7 +177,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
                 "observation": {
                     "entity_id": "test",
                     "current_simulation_time": "invalid",
@@ -203,9 +203,9 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
+                "entity_id": "entity_test",
                 "config": {
-                    "entity_id": "test",
                     "traits": ["curious"],
                     "initial_long_term_memories": [],
                 },
@@ -239,7 +239,7 @@ class TestMCPServerErrorHandling:
         }
 
         # Mock the pipeline to return a successful action
-        mind = server.minds["test"]
+        mind = server.minds["mind_test"]
         original_process = mind.pipeline.process
 
         async def mock_process(state: PipelineState) -> PipelineState:
@@ -251,7 +251,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
                 "observation": observation,
             },
         )
@@ -273,8 +273,15 @@ class TestMCPServerErrorHandling:
             assert "parameters" in response["action"]
 
     @pytest.mark.asyncio
-    async def test_bid_cleanup_after_response(self):
-        """Should remove bid from pending_incoming_bids after responding"""
+    async def test_bid_cleanup_after_response(self, caplog):
+        """Should remove bid from pending_incoming_bids after responding.
+
+        Also asserts the attribution decouple: the bid-cleanup log line carries the
+        entity FK (entity_test), not the mind PK (mind_test), so the sim /logs
+        forwarder routes it to the NPC's Events tab.
+        """
+        import logging
+
         from mind.cognitive_architecture.actions import Action, ActionType
         from mind.cognitive_architecture.observations import MindEvent, MindEventType
         from mind.cognitive_architecture.state import PipelineState
@@ -284,9 +291,9 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
+                "entity_id": "entity_test",
                 "config": {
-                    "entity_id": "test",
                     "traits": ["friendly"],
                     "initial_long_term_memories": [],
                 },
@@ -317,7 +324,7 @@ class TestMCPServerErrorHandling:
         }
 
         # Mock the pipeline to return a bid response action
-        mind = server.minds["test"]
+        mind = server.minds["mind_test"]
         original_process = mind.pipeline.process
 
         async def mock_process(state: PipelineState) -> PipelineState:
@@ -334,14 +341,15 @@ class TestMCPServerErrorHandling:
         mind.pipeline.process = mock_process
 
         # Verify bid is stored before response
-        result = await server.mcp.call_tool(
-            "decide_action",
-            {
-                "mind_id": "test",
-                "observation": observation,
-                "events": [bid_event],
-            },
-        )
+        with caplog.at_level(logging.DEBUG):
+            result = await server.mcp.call_tool(
+                "decide_action",
+                {
+                    "mind_id": "mind_test",
+                    "observation": observation,
+                    "events": [bid_event],
+                },
+            )
 
         # Restore original
         mind.pipeline.process = original_process
@@ -355,6 +363,16 @@ class TestMCPServerErrorHandling:
         # Verify bid was removed from pending_incoming_bids
         assert "bid_test_123" not in mind.pending_incoming_bids
 
+        # Attribution decouple: the bid-cleanup line is tagged with the entity FK,
+        # never the mind PK, so it lands on the NPC's Events tab.
+        cleanup_lines = [
+            r.getMessage() for r in caplog.records if "Removed bid bid_test_123" in r.getMessage()
+        ]
+        assert cleanup_lines, "expected a bid-cleanup log line"
+        for line in cleanup_lines:
+            assert "[entity_test]" in line
+            assert "[mind_test]" not in line
+
     @pytest.mark.asyncio
     async def test_bid_cleanup_only_for_bid_response_actions(self):
         """Should not affect pending_incoming_bids for non-bid actions"""
@@ -367,9 +385,9 @@ class TestMCPServerErrorHandling:
         await server.mcp.call_tool(
             "create_mind",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
+                "entity_id": "entity_test",
                 "config": {
-                    "entity_id": "test",
                     "traits": ["friendly"],
                     "initial_long_term_memories": [],
                 },
@@ -400,7 +418,7 @@ class TestMCPServerErrorHandling:
         }
 
         # Mock the pipeline to return a non-bid action (e.g., wait)
-        mind = server.minds["test"]
+        mind = server.minds["mind_test"]
         original_process = mind.pipeline.process
 
         async def mock_process(state: PipelineState) -> PipelineState:
@@ -415,7 +433,7 @@ class TestMCPServerErrorHandling:
         result = await server.mcp.call_tool(
             "decide_action",
             {
-                "mind_id": "test",
+                "mind_id": "mind_test",
                 "observation": observation,
                 "events": [bid_event],
             },
@@ -442,7 +460,6 @@ class TestMindConfigValidation:
         from mind.interfaces.mcp.models import MindConfig
         with pytest.raises(ValidationError):
             MindConfig(
-                entity_id="npc_test",
                 traits=["curious"],
                 personality_dimensions={"extroversion": 1.5},
             )
@@ -452,7 +469,6 @@ class TestMindConfigValidation:
         from mind.interfaces.mcp.models import MindConfig
         with pytest.raises(ValidationError):
             MindConfig(
-                entity_id="npc_test",
                 traits=["curious"],
                 personality_dimensions={"curiosity": -0.1},
             )
@@ -460,7 +476,6 @@ class TestMindConfigValidation:
     def test_accepts_in_range_values(self):
         from mind.interfaces.mcp.models import MindConfig
         config = MindConfig(
-            entity_id="npc_test",
             traits=["curious"],
             personality_dimensions={
                 "extroversion": 0.0,
@@ -471,3 +486,40 @@ class TestMindConfigValidation:
         assert config.personality_dimensions["extroversion"] == 0.0
         assert config.personality_dimensions["curiosity"] == 0.5
         assert config.personality_dimensions["sensitivity"] == 1.0
+
+    def test_config_has_no_entity_id_field(self):
+        """entity_id is a create_mind arg (FK), not config: config is pure cognition."""
+        from mind.interfaces.mcp.models import MindConfig
+        assert "entity_id" not in MindConfig.model_fields
+
+
+class TestCreateMindDecouplesIds:
+    """create_mind treats mind_id (PK) and entity_id (FK) as distinct first-class ids."""
+
+    @pytest.mark.asyncio
+    async def test_distinct_ids_flow_independently(self):
+        server = MCPServer()
+
+        result = await server.mcp.call_tool(
+            "create_mind",
+            {
+                "mind_id": "mind_abc",
+                "entity_id": "entity_xyz",
+                "config": {"traits": ["curious"]},
+            },
+        )
+        response = parse_response(result)
+
+        assert response["status"] == "created"
+        # Response carries both ids, kept distinct
+        assert response["mind_id"] == "mind_abc"
+        assert response["entity_id"] == "entity_xyz"
+        # Registry keyed by the mind PK, never the entity FK
+        assert "mind_abc" in server.minds
+        assert "entity_xyz" not in server.minds
+        # Stored Mind keeps both fields, distinct
+        mind = server.minds["mind_abc"]
+        assert mind.mind_id == "mind_abc"
+        assert mind.entity_id == "entity_xyz"
+        # Memory collection keyed by the mind PK
+        assert mind.memory_store.collection.name == "mind_mind_abc"

@@ -306,9 +306,8 @@ def create_emergency_observation(simulation_time: int = 100) -> Observation:
 
 
 def create_blacksmith_config() -> MindConfig:
-    """Configuration for a blacksmith NPC mind"""
+    """Configuration for a blacksmith NPC mind (entity_id is a create_mind arg, not config)"""
     return MindConfig(
-        entity_id="blacksmith_npc",
         traits=["diligent", "perfectionist", "proud", "helpful"],
         llm_model=DEFAULT_SMALL_MODEL,
         embedding_model=DEFAULT_EMBEDDING_MODEL,
@@ -328,9 +327,8 @@ def create_blacksmith_config() -> MindConfig:
 
 
 def create_explorer_config() -> MindConfig:
-    """Configuration for an explorer NPC mind"""
+    """Configuration for an explorer NPC mind (entity_id is a create_mind arg, not config)"""
     return MindConfig(
-        entity_id="explorer_npc",
         traits=["curious", "brave", "resourceful", "independent"],
         llm_model=DEFAULT_SMALL_MODEL,
         embedding_model=DEFAULT_EMBEDDING_MODEL,

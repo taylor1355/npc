@@ -53,15 +53,15 @@ def _success_response(request_id: str, action: dict) -> dict:
 
 
 def _extract_conversation_observations(
-    events: list[MindEvent], mind_id: str
+    events: list[MindEvent], entity_id: str
 ) -> list[ConversationObservation]:
     """Extract conversation observations from INTERACTION_OBSERVATION events.
 
     Args:
         events: List of MindEvent objects
-        mind_id: Mind these events belong to (for per-NPC log attribution; must carry the
-            entity-id shape the sim /logs forwarder matches — it does,
-            mind_id == entity_id per models.py)
+        entity_id: Driven entity FK these events belong to. This is a per-NPC log line,
+            so it carries entity_id (not the mind PK): the sim /logs forwarder
+            regex-attributes the tag to the NPC's Events tab.
 
     Returns:
         List of ConversationObservation objects parsed from interaction observation events
@@ -75,21 +75,21 @@ def _extract_conversation_observations(
                 conversations.append(conv_obs)
             except ValidationError as e:
                 # Not a conversation observation or malformed - skip it
-                logger.debug(f"[{mind_id}] Skipping non-conversation interaction observation: {e}")
+                logger.debug(f"[{entity_id}] Skipping non-conversation interaction observation: {e}")
                 continue
     return conversations
 
 
-def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, mind_id: str) -> None:
+def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, entity_id: str) -> None:
     """Remove bids from pending list after responding to them.
 
     Args:
         action: The chosen action (Action model)
         pending_bids: Dict of pending incoming bids (modified in place)
-        request_id: Request ID for logging
-        mind_id: Mind the bids belong to (for per-NPC log attribution; must carry the
-            entity-id shape the sim /logs forwarder matches — it does,
-            mind_id == entity_id per models.py)
+        request_id: Server-routing correlation id (not NPC-attributed)
+        entity_id: Driven entity FK the bids belong to. These are per-NPC log lines,
+            so they carry entity_id (not the mind PK): the sim /logs forwarder
+            regex-attributes the tag to the NPC's Events tab.
     """
     if not action:
         return
@@ -99,7 +99,7 @@ def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, mind_id
         bid_id = action.parameters.get("bid_id")
         if bid_id and bid_id in pending_bids:
             pending_bids.pop(bid_id)
-            logger.debug(f"[{request_id}] [{mind_id}] Removed bid {bid_id} from pending bids after response")
+            logger.debug(f"[{request_id}] [{entity_id}] Removed bid {bid_id} from pending bids after response")
 
     elif action.action == ActionType.BATCH_REJECT_INTERACTION_BIDS:
         # Batch bid rejection
@@ -128,7 +128,7 @@ def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, mind_id
         for bid_id in bid_ids_to_remove:
             pending_bids.pop(bid_id, None)
 
-        logger.debug(f"[{request_id}] [{mind_id}] Batch rejected {len(bid_ids_to_remove)} bids: {bid_ids_to_remove}")
+        logger.debug(f"[{request_id}] [{entity_id}] Batch rejected {len(bid_ids_to_remove)} bids: {bid_ids_to_remove}")
 
 
 class MCPServer:
@@ -151,19 +151,27 @@ class MCPServer:
         @self.mcp.tool()
         async def create_mind(
             mind_id: str,
+            entity_id: str,
             config: MindConfig,
             ctx: Context = None,
         ) -> MindInfoResponse:
             """Create a new NPC mind
 
+            mind_id (PK) and entity_id (FK) are deliberately distinct first-class ids:
+            the mind owns its memory under the PK; the FK names the simulation entity
+            the mind drives and is what per-NPC logs attribute to.
+
             Args:
-                mind_id: Unique identifier for the mind (usually matches entity_id)
-                config: Configuration with entity_id, traits, LLM settings, memory settings, initial state
+                mind_id: The mind's own identifier (PK). Keys self.minds and the
+                    memory collection.
+                entity_id: The simulation entity this mind drives (FK).
+                config: Cognitive configuration - traits, LLM settings, memory
+                    settings, personality dimensions, initial state.
             """
-            mind = Mind.from_config(mind_id, config)
+            mind = Mind.from_config(mind_id, entity_id, config)
             self.minds[mind_id] = mind
 
-            return MindInfoResponse(status="created", mind_id=mind_id)
+            return MindInfoResponse(status="created", mind_id=mind_id, entity_id=entity_id)
 
         @self.mcp.tool()
         async def decide_action(
@@ -216,8 +224,9 @@ class MCPServer:
                             details=str(e)
                         )
 
-                # Extract conversation observations from INTERACTION_OBSERVATION events
-                conversation_obs = _extract_conversation_observations(mind_events, mind_id)
+                # Extract conversation observations from INTERACTION_OBSERVATION events.
+                # Pass the entity FK so per-NPC log lines attribute to the NPC's Events tab.
+                conversation_obs = _extract_conversation_observations(mind_events, mind.entity_id)
                 mind.update_conversations(conversation_obs)
                 mind.update_events(mind_events, obs.current_simulation_time)
 
@@ -240,8 +249,11 @@ class MCPServer:
                 mind.daily_memories.extend(result.daily_memories)
                 mind.event_buffer = result.recent_events
 
-                # Clean up any bids that were responded to
-                _cleanup_responded_bids(result.chosen_action, mind.pending_incoming_bids, request_id, mind_id)
+                # Clean up any bids that were responded to. Pass the entity FK so the
+                # per-NPC bid-cleanup log lines attribute to the NPC's Events tab.
+                _cleanup_responded_bids(
+                    result.chosen_action, mind.pending_incoming_bids, request_id, mind.entity_id
+                )
 
                 if result.chosen_action is None:
                     logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")

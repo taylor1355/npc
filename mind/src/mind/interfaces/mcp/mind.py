@@ -39,12 +39,14 @@ class Mind:
     pending_incoming_bids: dict[str, MindEvent] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, mind_id: str, config) -> Self:
+    def from_config(cls, mind_id: str, entity_id: str, config) -> Self:
         """Create a Mind instance from configuration
 
         Args:
-            mind_id: Unique identifier for the mind
-            config: MindConfig with LLM, memory, and initial state settings
+            mind_id: The mind's own identifier (PK) - keys the memory collection
+            entity_id: The simulation entity this mind drives (FK) - deliberately
+                independent of mind_id; carried for per-NPC log attribution
+            config: MindConfig with traits, LLM, memory, and personality settings
 
         Returns:
             Initialized Mind instance
@@ -52,7 +54,7 @@ class Mind:
         # Initialize LLM from config
         llm = get_llm(config.llm_model)
 
-        # Initialize memory store with configured collection name
+        # Memory belongs to the mind, so the collection is keyed by the mind PK
         memory_store = VectorDBMemory(
             collection_name=f"mind_{mind_id}",
             embedding_model=config.embedding_model,
@@ -72,7 +74,7 @@ class Mind:
         # Create Mind instance
         return cls(
             mind_id=mind_id,
-            entity_id=config.entity_id,
+            entity_id=entity_id,
             traits=config.traits,
             personality_dimensions=config.personality_dimensions,
             pipeline=pipeline,
@@ -128,23 +130,24 @@ class Mind:
                     self.pending_incoming_bids[bid_id] = event
 
             elif event.event_type == MindEventType.ERROR:
-                # Log error events for debugging
+                # Log error events for debugging. Per-NPC line: attribute to the entity FK
+                # so the sim /logs forwarder routes it to the NPC's Events tab.
                 message = event.payload.get("message", "Unknown error")
-                logger.warning(f"[{self.mind_id}] Received error event: {message}")
+                logger.warning(f"[{self.entity_id}] Received error event: {message}")
 
             elif event.event_type == MindEventType.INTERACTION_BID_CANCELED:
                 # Remove canceled bid from pending list
                 bid_id = event.payload.get("bid_id")
                 if bid_id and bid_id in self.pending_incoming_bids:
                     del self.pending_incoming_bids[bid_id]
-                    logger.debug(f"[{self.mind_id}] Removed canceled bid {bid_id} from pending bids")
+                    logger.debug(f"[{self.entity_id}] Removed canceled bid {bid_id} from pending bids")
 
             elif event.event_type in (MindEventType.INTERACTION_FINISHED, MindEventType.INTERACTION_CANCELED):
                 # Clean up conversation history for ended interactions
                 interaction_id = event.payload.get("interaction_id")
                 if interaction_id and interaction_id in self.conversation_histories:
                     del self.conversation_histories[interaction_id]
-                    logger.debug(f"[{self.mind_id}] Cleaned up conversation history for {interaction_id}")
+                    logger.debug(f"[{self.entity_id}] Cleaned up conversation history for {interaction_id}")
 
         self.event_buffer.extend(new_events)
 
