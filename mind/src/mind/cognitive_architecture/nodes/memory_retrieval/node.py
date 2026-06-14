@@ -7,7 +7,7 @@ from mind.logging_config import get_logger
 from ...memory import Memory
 from ...memory.vector_db_memory import VectorDBQuery
 from ...state import PipelineState
-from ..base import Node
+from ..base import Node, entity_tag
 
 logger = get_logger()
 
@@ -62,10 +62,10 @@ class MemoryRetrievalNode(Node):
         state.retrieved_memories = deduplicated_memories
 
         # Log retrieved memories
-        entity_id = state.observation.entity_id if state.observation else "unknown"
-        logger.debug(f"[{entity_id}] Retrieved {len(deduplicated_memories)} memories from {len(state.memory_queries)} queries")
+        tag = entity_tag(state)
+        logger.debug(f"{tag} Retrieved {len(deduplicated_memories)} memories from {len(state.memory_queries)} queries")
         for i, mem in enumerate(deduplicated_memories[:3]):  # Show top 3
             content_preview = mem.content[:100] + "..." if len(mem.content) > 100 else mem.content
-            logger.debug(f"[{entity_id}]   [{i+1}] {content_preview}")
+            logger.debug(f"{tag}   [{i+1}] {content_preview}")
 
         return state

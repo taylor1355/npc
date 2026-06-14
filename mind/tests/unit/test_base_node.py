@@ -1,5 +1,6 @@
 """Unit tests for base node classes"""
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,7 +8,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, ValidationError
 
-from mind.cognitive_architecture.nodes.base import LLMNode, Node
+from mind.cognitive_architecture.nodes.base import LLMNode, Node, entity_tag
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.observations import Observation, StatusObservation
 
@@ -425,3 +426,87 @@ class TestTokenExtraction:
 
         tokens = node._extract_tokens(response)
         assert tokens == 0
+
+
+class TestEntityTagAttribution:
+    """NPC-789: log records must carry the entity id for Events-tab attribution"""
+
+    def _make_state(self, entity_id="entity_attribution_test"):
+        return PipelineState(
+            observation=Observation(
+                entity_id=entity_id,
+                current_simulation_time=0,
+                status=StatusObservation(position=(0, 0), movement_locked=False),
+            )
+        )
+
+    def test_entity_tag_brackets_entity_id(self):
+        """Should wrap the entity id in brackets, matching per-entity log convention"""
+        state = self._make_state("npc_alice")
+        assert entity_tag(state) == "[npc_alice]"
+
+    def test_entity_tag_falls_back_when_entity_id_empty(self):
+        """Should produce a recognizable fallback instead of an empty tag"""
+        state = self._make_state("")
+        assert entity_tag(state) == "[unknown]"
+
+    @pytest.mark.asyncio
+    async def test_raw_string_log_records_carry_entity_id(self, caplog):
+        """call_llm raw-string path must emit only attributed records"""
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.return_value = AIMessage(
+            content="Response",
+            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        )
+        node = LLMNode(
+            llm=mock_llm,
+            prompt=PromptTemplate.from_template("{input}"),
+            output_model=None,
+        )
+        node.step_name = "raw_step"
+        state = self._make_state()
+
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.call_llm(state, input="hi")
+
+        assert caplog.records, "call_llm should emit log records"
+        for record in caplog.records:
+            assert "entity_attribution_test" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_retry_log_records_carry_entity_id(self, caplog):
+        """call_llm retry path must emit only attributed records"""
+        class TestOutput(BaseModel):
+            value: str
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.side_effect = [
+            AIMessage(
+                content="not valid json",
+                usage_metadata={"input_tokens": 10, "output_tokens": 3, "total_tokens": 13},
+            ),
+            AIMessage(
+                content='{"value": "success"}',
+                usage_metadata={"input_tokens": 12, "output_tokens": 4, "total_tokens": 16},
+            ),
+        ]
+        node = LLMNode(
+            llm=mock_llm,
+            prompt=PromptTemplate.from_template("{input}"),
+            output_model=TestOutput,
+            max_retries=1,
+        )
+        node.step_name = "retry_step"
+        state = self._make_state()
+
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            result = await node.call_llm(state, input="hi")
+
+        assert result.value == "success"
+        assert caplog.records, "call_llm should emit log records"
+        for record in caplog.records:
+            assert "entity_attribution_test" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )
