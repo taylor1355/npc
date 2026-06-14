@@ -53,7 +53,7 @@ class Mind:
 
         # Initialize memory store with configured collection name
         memory_store = VectorDBMemory(
-            collection_name=f"mind_{entity_id}",
+            collection_name=f"mind_{entity_id.lower()}",
             embedding_model=config.embedding_model,
             storage_path=config.memory_storage_path,
         )
