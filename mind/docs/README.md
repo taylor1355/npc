@@ -62,7 +62,7 @@ The MCP server (`src/mind/interfaces/mcp/`) provides network access to minds via
 - Dictionary-based registry manages active mind instances
 
 **Tools:**
-- `create_mind(mind_id, config)`: Initialize mind with cognitive pipeline
+- `create_mind(mind_id, entity_id, config)`: Initialize mind with cognitive pipeline
 - `decide_action(mind_id, observation, events)`: Process structured observation + events → action dict
 - `consolidate_memories(mind_id)`: Transfer daily → long-term storage
 - `cleanup_mind(mind_id)`: Remove mind and free resources
