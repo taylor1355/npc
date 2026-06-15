@@ -237,12 +237,18 @@ class MCPServer:
                 # observation carries its own entity_id (FK). In correct operation these
                 # agree (the mind drives that entity); a divergence means the observation
                 # was routed to the wrong mind. Warn (with both ids) so it is diagnosable,
-                # but do not reject - the pipeline keeps using the observation's entity_id.
+                # was routed to the wrong mind. Fail loud at the boundary (a decision
+                # computed on a misrouted observation would be garbage): log and reject.
                 if obs.entity_id != mind.entity_id:
                     logger.warning(
                         f"[{request_id}] entity_id mismatch for mind {mind_id}: "
                         f"observation entity_id={obs.entity_id} but mind entity_id={mind.entity_id} "
-                        f"(possible misrouting; using observation entity_id for the pipeline)"
+                        f"(misrouting — rejecting the request)"
+                    )
+                    return _error_response(
+                        request_id,
+                        f"entity_id mismatch: observation '{obs.entity_id}' "
+                        f"but mind drives '{mind.entity_id}'",
                     )
 
                 # Extract conversation observations from INTERACTION_OBSERVATION events.

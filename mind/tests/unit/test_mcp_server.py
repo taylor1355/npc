@@ -564,7 +564,7 @@ class TestDecideActionEntityIdMismatch:
         )
 
     @pytest.mark.asyncio
-    async def test_warns_when_observation_entity_id_differs_from_mind(self, caplog):
+    async def test_rejects_when_observation_entity_id_differs_from_mind(self, caplog):
         import logging
 
         server = MCPServer()
@@ -577,12 +577,13 @@ class TestDecideActionEntityIdMismatch:
             result = await self._run_decide(server, observation)
 
         response = parse_response(result)
-        assert response["status"] == "success"
+        assert response["status"] == "error"
+        assert "entity_id mismatch" in response["error_message"]
 
         mismatch_lines = [
             r.getMessage() for r in caplog.records if "entity_id mismatch" in r.getMessage()
         ]
-        assert mismatch_lines, "expected an entity_id mismatch warning"
+        assert mismatch_lines, "expected an entity_id mismatch warning before the reject"
         assert any("entity_other" in line and "entity_test" in line for line in mismatch_lines)
 
     @pytest.mark.asyncio

@@ -9,6 +9,7 @@ from mind.cognitive_architecture.observations import ConversationMessage, MindEv
 from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory, WorkingMemory
 from mind.cognitive_architecture.pipeline import CognitivePipeline
 from mind.logging_config import get_logger
+from mind.interfaces.mcp.models import MindConfig
 
 logger = get_logger()
 
@@ -39,7 +40,7 @@ class Mind:
     pending_incoming_bids: dict[str, MindEvent] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, mind_id: str, entity_id: str, config) -> Self:
+    def from_config(cls, mind_id: str, entity_id: str, config: MindConfig) -> Self:
         """Create a Mind instance from configuration
 
         Args:
