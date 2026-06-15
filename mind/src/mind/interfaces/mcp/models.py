@@ -13,9 +13,13 @@ from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMem
 
 
 class MindConfig(BaseModel):
-    """Configuration for creating a new mind - everything should be configurable"""
+    """Configuration for creating a new mind - traits, LLM, memory, personality only.
 
-    entity_id: str  # Mind's entity ID in simulation
+    The driven entity (entity_id FK) is a top-level create_mind argument, not config:
+    config is pure cognitive configuration, deliberately independent of which entity
+    the mind drives.
+    """
+
     traits: list[str]
 
     # LLM configuration
@@ -39,7 +43,7 @@ class MindConfig(BaseModel):
 class SimulationRequest(BaseModel):
     """Request from simulation to mind for action decision"""
 
-    mind_id: str  # MCP routing (matches entity_id typically)
+    mind_id: str  # MCP routing key (PK); deliberately independent of the driven entity_id
     observation: Observation  # Structured observation
 
 
@@ -76,5 +80,6 @@ class MindInfoResponse(BaseModel):
     """Create/cleanup result"""
 
     status: str
-    mind_id: str
+    mind_id: str  # PK: the mind's own identifier
+    entity_id: str | None = None  # FK: the driven entity (None for lifecycle ops like cleanup)
     message: str | None = None

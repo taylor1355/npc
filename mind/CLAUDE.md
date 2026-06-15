@@ -92,8 +92,8 @@ class WorkingMemory(BaseModel):
 
 ### Tools
 
-- **`create_mind(mind_id, config)`** - Initialize cognitive pipeline with traits and seed memories
-- **`decide_action(mind_id, observation)`** - Process structured observation → action dict
+- **`create_mind(mind_id, entity_id, config)`** - Initialize a mind. `mind_id` (PK) keys the mind/memory collection, `entity_id` (FK) names the driven simulation entity, `config` (MindConfig) carries cognition-only settings (traits, seed memories, LLM/personality). `entity_id` is no longer a MindConfig field
+- **`decide_action(mind_id, observation, events)`** - Process structured observation + events → action dict
 - **`consolidate_memories(mind_id)`** - Transfer daily memories → long-term storage
 - **`cleanup_mind(mind_id)`** - Remove mind instance and free resources
 

@@ -66,8 +66,8 @@ The Godot simulation connects to this server for NPC cognitive processing.
 
 ## MCP Tools
 
-- **`create_mind(mind_id, config)`** - Initialize cognitive pipeline
-- **`decide_action(mind_id, observation)`** - Process observation → action
+- **`create_mind(mind_id, entity_id, config)`** - Initialize cognitive pipeline
+- **`decide_action(mind_id, observation, events)`** - Process observation + events → action
 - **`consolidate_memories(mind_id)`** - Move daily → long-term storage
 - **`cleanup_mind(mind_id)`** - Remove mind instance
 
