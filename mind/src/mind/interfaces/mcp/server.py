@@ -186,8 +186,9 @@ class MCPServer:
             handles this request and keys that mind's memory collection. It is distinct
             from the entity_id foreign key carried inside the observation, which names
             the simulation entity the mind drives. In correct operation the two agree
-            (the routed mind drives that entity); a divergence is logged as a possible
-            misrouting (see the mismatch warning below) but does not reject the request.
+            (the routed mind drives that entity); a divergence is logged (both ids) and
+            the request is rejected, since a decision on a misrouted observation would
+            be garbage.
 
             Args:
                 mind_id: Routing primary key (PK) selecting the mind; distinct from the
@@ -236,9 +237,9 @@ class MCPServer:
                 # Defensive misrouting check: mind_id (PK) routes the request while the
                 # observation carries its own entity_id (FK). In correct operation these
                 # agree (the mind drives that entity); a divergence means the observation
-                # was routed to the wrong mind. Warn (with both ids) so it is diagnosable,
-                # was routed to the wrong mind. Fail loud at the boundary (a decision
-                # computed on a misrouted observation would be garbage): log and reject.
+                # was routed to the wrong mind. Fail loud at the boundary - log both ids
+                # (so misrouting stays diagnosable) and reject, since a decision computed
+                # on a misrouted observation would be garbage.
                 if obs.entity_id != mind.entity_id:
                     logger.warning(
                         f"[{request_id}] entity_id mismatch for mind {mind_id}: "

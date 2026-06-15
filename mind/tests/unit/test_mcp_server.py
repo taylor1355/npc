@@ -526,8 +526,8 @@ class TestCreateMindDecouplesIds:
 
 
 class TestDecideActionEntityIdMismatch:
-    """decide_action warns (does not reject) when the observation entity_id (FK)
-    diverges from the routed mind entity_id, so misrouting is diagnosable (NPC-795)."""
+    """decide_action rejects (after logging both ids) when the observation entity_id
+    (FK) diverges from the routed mind entity_id - misrouting is a boundary bug (NPC-795)."""
 
     @staticmethod
     async def _run_decide(server, observation):
