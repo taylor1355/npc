@@ -1,6 +1,7 @@
 """Simple memory store using ChromaDB for vector storage"""
 
 import chromadb
+from chromadb.errors import InvalidCollectionException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
@@ -109,6 +110,31 @@ class VectorDBMemory:
         self.collection = self.client.get_or_create_collection(
             name=collection_name, metadata={"hnsw:space": "cosine"}
         )
+
+    @staticmethod
+    def collection_exists(storage_path: str, collection_name: str) -> bool:
+        """Check whether a persisted collection exists without creating it.
+
+        Opens a PersistentClient at storage_path and probes for the collection via
+        get_collection, which raises InvalidCollectionException when absent. Unlike
+        the constructor (which uses get_or_create_collection), this is strictly
+        read-only: it never creates the collection as a side effect, so it's safe
+        for relink to decide whether retained memory survived a release.
+
+        Args:
+            storage_path: Directory path for persistent storage
+            collection_name: Name of the ChromaDB collection to probe
+
+        Returns:
+            True if the collection exists, False otherwise
+        """
+        settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
+        client = chromadb.PersistentClient(path=storage_path, settings=settings)
+        try:
+            client.get_collection(name=collection_name)
+            return True
+        except InvalidCollectionException:
+            return False
 
     def add_memory(
         self,
