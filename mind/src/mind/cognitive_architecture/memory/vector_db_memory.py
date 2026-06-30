@@ -153,7 +153,16 @@ class VectorDBMemory:
         .clear(), this loads no SentenceTransformer encoder and never calls
         get_or_create_collection (which would recreate the very collection we're
         about to delete). Use this for the non-resident forget path, where no live
-        store exists. No-op when the path was never persisted.
+        store exists.
+
+        Idempotent (delete-if-exists): safe to call whether or not the path or the
+        collection exists. A never-persisted path is a no-op, and an absent
+        collection is a no-op too - ChromaDB's delete_collection raises on a missing
+        collection rather than no-op'ing, so we gate the delete behind a get probe.
+        That gate is also version-robust: the pinned ChromaDB raises a bare
+        ValueError ("Collection X does not exist.") from delete_collection, while
+        get_collection raises InvalidCollectionException - so probing first avoids
+        coupling to whichever exception delete_collection happens to throw.
 
         Args:
             storage_path: Directory path for persistent storage
@@ -164,6 +173,10 @@ class VectorDBMemory:
 
         settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
         client = chromadb.PersistentClient(path=storage_path, settings=settings)
+        try:
+            client.get_collection(name=collection_name)
+        except InvalidCollectionException:
+            return
         client.delete_collection(collection_name)
 
     def add_memory(

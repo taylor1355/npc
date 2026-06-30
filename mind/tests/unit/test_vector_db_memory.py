@@ -211,3 +211,39 @@ class TestVectorDBMemory:
         assert "sword" in results[0].content.lower()
         assert results[0].importance < results[1].importance
 
+
+class TestDeleteCollection:
+    """delete_collection is idempotent (delete-if-exists), with no encoder load."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_chroma(self, monkeypatch, tmp_path):
+        """Isolate ChromaDB's process-global client cache and CWD per test, so a
+        PersistentClient opened here can't alias another test's on-disk store."""
+        from chromadb.api.client import SharedSystemClient
+
+        SharedSystemClient.clear_system_cache()
+        monkeypatch.chdir(tmp_path)
+        yield
+        SharedSystemClient.clear_system_cache()
+
+    def test_delete_absent_collection_on_existing_path_does_not_raise(self):
+        """Deleting a missing collection from an existing storage path is a silent
+        no-op, not a raise (ChromaDB's delete_collection raises on absent). The path
+        must already exist (so the missing-path early-return doesn't mask the case),
+        but the named collection must not - exercising the delete-if-exists guard."""
+        import os
+
+        storage_path = os.path.join(os.getcwd(), "chroma_persist")
+
+        # Persist a DIFFERENT collection so the storage path exists on disk while the
+        # target collection does not - isolating the absent-collection branch.
+        VectorDBMemory(collection_name="present_one", storage_path=storage_path)
+        assert os.path.exists(storage_path)
+        assert VectorDBMemory.collection_exists(storage_path, "never_made") is False
+
+        # Must not raise.
+        VectorDBMemory.delete_collection(storage_path, "never_made")
+
+        # Still absent (delete-if-exists left the world unchanged).
+        assert VectorDBMemory.collection_exists(storage_path, "never_made") is False
+
