@@ -1,5 +1,7 @@
 """Simple memory store using ChromaDB for vector storage"""
 
+import os
+
 import chromadb
 from chromadb.errors import InvalidCollectionException
 from pydantic import BaseModel
@@ -128,6 +130,12 @@ class VectorDBMemory:
         Returns:
             True if the collection exists, False otherwise
         """
+        # PersistentClient(path=...) creates the directory if it's absent, so probing
+        # a never-persisted path would leave an empty DB dir on disk. Short-circuit
+        # before constructing the client to keep this probe truly read-only.
+        if not storage_path or not os.path.exists(storage_path):
+            return False
+
         settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
         client = chromadb.PersistentClient(path=storage_path, settings=settings)
         try:
@@ -135,6 +143,28 @@ class VectorDBMemory:
             return True
         except InvalidCollectionException:
             return False
+
+    @staticmethod
+    def delete_collection(storage_path: str, collection_name: str) -> None:
+        """Delete a persisted collection without instantiating a full store.
+
+        Mirrors collection_exists: opens a bare PersistentClient and deletes the
+        named collection directly. Unlike constructing VectorDBMemory(...) to call
+        .clear(), this loads no SentenceTransformer encoder and never calls
+        get_or_create_collection (which would recreate the very collection we're
+        about to delete). Use this for the non-resident forget path, where no live
+        store exists. No-op when the path was never persisted.
+
+        Args:
+            storage_path: Directory path for persistent storage
+            collection_name: Name of the ChromaDB collection to delete
+        """
+        if not storage_path or not os.path.exists(storage_path):
+            return
+
+        settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
+        client = chromadb.PersistentClient(path=storage_path, settings=settings)
+        client.delete_collection(collection_name)
 
     def add_memory(
         self,

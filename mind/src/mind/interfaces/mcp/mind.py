@@ -5,11 +5,11 @@ from typing import Self
 
 from mind.apis.langchain_llm import get_llm
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
 from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory, WorkingMemory
+from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
 from mind.cognitive_architecture.pipeline import CognitivePipeline
-from mind.logging_config import get_logger
 from mind.interfaces.mcp.models import MindConfig
+from mind.logging_config import get_logger
 
 logger = get_logger()
 

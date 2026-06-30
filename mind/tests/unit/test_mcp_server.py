@@ -1,10 +1,9 @@
 """Unit tests for MCP server"""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage
 
 from mind.interfaces.mcp.server import MCPServer
 
@@ -283,7 +282,7 @@ class TestMCPServerErrorHandling:
         import logging
 
         from mind.cognitive_architecture.actions import Action, ActionType
-        from mind.cognitive_architecture.observations import MindEvent, MindEventType
+        from mind.cognitive_architecture.observations import MindEventType
         from mind.cognitive_architecture.state import PipelineState
 
         server = MCPServer()
@@ -457,6 +456,7 @@ class TestMindConfigValidation:
 
     def test_rejects_value_above_one(self):
         from pydantic import ValidationError
+
         from mind.interfaces.mcp.models import MindConfig
         with pytest.raises(ValidationError):
             MindConfig(
@@ -466,6 +466,7 @@ class TestMindConfigValidation:
 
     def test_rejects_negative_value(self):
         from pydantic import ValidationError
+
         from mind.interfaces.mcp.models import MindConfig
         with pytest.raises(ValidationError):
             MindConfig(
@@ -789,3 +790,52 @@ class TestMindPersistenceLifecycle:
         )
         assert relink["status"] == "relinked"
         assert server2.minds["mind_f"].memory_store.collection.count() == count_before
+
+    def test_collection_exists_is_false_and_creates_no_dir_for_missing_path(self):
+        """collection_exists must be a pure read: a never-persisted path returns False
+        and is NOT created on disk as a side effect (PersistentClient otherwise mkdir's
+        the path). Regression for the empty-DB-dir leak (PR #17 review)."""
+        import os
+
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+
+        missing_path = os.path.join(os.getcwd(), "never_persisted_db")
+        assert not os.path.exists(missing_path)
+
+        assert VectorDBMemory.collection_exists(missing_path, "mind_ghost") is False
+
+        # The probe must not have created the directory.
+        assert not os.path.exists(missing_path)
+
+    @pytest.mark.asyncio
+    async def test_forget_non_resident_deletes_collection_without_loading_encoder(self):
+        """Forgetting a non-resident retained collection must delete it via a bare
+        client - no SentenceTransformer load, no get_or_create that would recreate the
+        collection before deleting it. Regression for the heavy-construct forget path
+        (PR #17 review)."""
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+        from mind.interfaces.mcp.models import MindConfig
+
+        server = MCPServer()
+        storage_path = MindConfig(traits=[]).memory_storage_path
+
+        # Create + release so the collection is retained on disk but no live Mind holds it.
+        await self._create_mind(server, "mind_g", "entity_g")
+        server.minds["mind_g"].memory_store.add_memory(content="z", importance=5.0)
+        await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_g"})
+        assert "mind_g" not in server.minds
+        assert VectorDBMemory.collection_exists(storage_path, "mind_mind_g") is True
+
+        # Patch the encoder constructor on the module VectorDBMemory uses; the
+        # non-resident forget path must never instantiate it.
+        with patch(
+            "mind.cognitive_architecture.memory.vector_db_memory.SentenceTransformer"
+        ) as encoder_ctor:
+            forget = parse_response(
+                await server.mcp.call_tool("forget_mind", {"mind_id": "mind_g"})
+            )
+
+        assert forget["status"] == "forgotten"
+        encoder_ctor.assert_not_called()
+        # Collection is gone (not recreated as an empty shell).
+        assert VectorDBMemory.collection_exists(storage_path, "mind_mind_g") is False

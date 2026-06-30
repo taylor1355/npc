@@ -1,21 +1,20 @@
 """MCP server for mind management"""
 
 import json
-import logging
 import uuid
 
 from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import ActionType
+from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.observations import (
     ConversationObservation,
     MindEvent,
     MindEventType,
     Observation,
 )
-from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.state import PipelineState
 from mind.logging_config import get_logger
 
@@ -371,7 +370,7 @@ class MCPServer:
         ) -> MindInfoResponse:
             """Re-bind a mind to a (possibly new) driven entity, rehydrating if needed.
 
-            Two paths:
+            Three paths:
             - Mind still resident in self.minds: rebind its entity_id (FK) in place
               and report "relinked". No collection work - the live mind already holds
               its memory.
@@ -431,12 +430,9 @@ class MCPServer:
                 mind.memory_store.client.delete_collection(collection_name)
                 del self.minds[mind_id]
             elif VectorDBMemory.collection_exists(config.memory_storage_path, collection_name):
-                store = VectorDBMemory(
-                    collection_name=collection_name,
-                    embedding_model=config.embedding_model,
-                    storage_path=config.memory_storage_path,
-                )
-                store.client.delete_collection(collection_name)
+                # Non-resident: delete via a bare client (no encoder load, no
+                # get_or_create_collection that would recreate the collection first).
+                VectorDBMemory.delete_collection(config.memory_storage_path, collection_name)
 
             return MindInfoResponse(status="forgotten", mind_id=mind_id, entity_id=entity_id)
 
