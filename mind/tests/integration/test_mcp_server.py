@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.observations import (
     EntityData,
     NeedsObservation,
@@ -11,7 +12,6 @@ from mind.cognitive_architecture.observations import (
     StatusObservation,
     VisionObservation,
 )
-from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.interfaces.mcp.models import MindConfig
 from mind.interfaces.mcp.server import MCPServer
 
@@ -245,7 +245,8 @@ async def test_cleanup_mind(mcp_server, test_mind_config):
     # Parse response from TextContent list
     response = json.loads(result[0].text)
 
-    assert response["status"] == "removed"
+    # cleanup_mind releases the mind but RETAINS its collection (retain-on-release).
+    assert response["status"] == "released"
     assert response["mind_id"] == "test_mind_001"
     assert "test_mind_001" not in mcp_server.minds
 
@@ -287,10 +288,10 @@ async def test_full_workflow(mcp_server, test_mind_config, test_observation):
         assert consolidate_response["status"] == "success"
         assert consolidate_response["consolidated_count"] == memory_count
 
-    # Step 5: Cleanup
+    # Step 5: Cleanup (releases the mind; collection retained per retain-on-release)
     result = await mcp_server.mcp.call_tool("cleanup_mind", {"mind_id": "test_mind_001"})
     cleanup_response = json.loads(result[0].text)
-    assert cleanup_response["status"] == "removed"
+    assert cleanup_response["status"] == "released"
 
 
 if __name__ == "__main__":

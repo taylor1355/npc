@@ -1,6 +1,9 @@
 """Simple memory store using ChromaDB for vector storage"""
 
+import os
+
 import chromadb
+from chromadb.errors import InvalidCollectionException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
@@ -109,6 +112,72 @@ class VectorDBMemory:
         self.collection = self.client.get_or_create_collection(
             name=collection_name, metadata={"hnsw:space": "cosine"}
         )
+
+    @staticmethod
+    def collection_exists(storage_path: str, collection_name: str) -> bool:
+        """Check whether a persisted collection exists without creating it.
+
+        Opens a PersistentClient at storage_path and probes for the collection via
+        get_collection, which raises InvalidCollectionException when absent. Unlike
+        the constructor (which uses get_or_create_collection), this is strictly
+        read-only: it never creates the collection as a side effect, so it's safe
+        for relink to decide whether retained memory survived a release.
+
+        Args:
+            storage_path: Directory path for persistent storage
+            collection_name: Name of the ChromaDB collection to probe
+
+        Returns:
+            True if the collection exists, False otherwise
+        """
+        # PersistentClient(path=...) creates the directory if it's absent, so probing
+        # a never-persisted path would leave an empty DB dir on disk. Short-circuit
+        # before constructing the client to keep this probe truly read-only.
+        if not storage_path or not os.path.exists(storage_path):
+            return False
+
+        settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
+        client = chromadb.PersistentClient(path=storage_path, settings=settings)
+        try:
+            client.get_collection(name=collection_name)
+            return True
+        except InvalidCollectionException:
+            return False
+
+    @staticmethod
+    def delete_collection(storage_path: str, collection_name: str) -> None:
+        """Delete a persisted collection without instantiating a full store.
+
+        Mirrors collection_exists: opens a bare PersistentClient and deletes the
+        named collection directly. Unlike constructing VectorDBMemory(...) to call
+        .clear(), this loads no SentenceTransformer encoder and never calls
+        get_or_create_collection (which would recreate the very collection we're
+        about to delete). Use this for the non-resident forget path, where no live
+        store exists.
+
+        Idempotent (delete-if-exists): safe to call whether or not the path or the
+        collection exists. A never-persisted path is a no-op, and an absent
+        collection is a no-op too - ChromaDB's delete_collection raises on a missing
+        collection rather than no-op'ing, so we gate the delete behind a get probe.
+        That gate is also version-robust: the pinned ChromaDB raises a bare
+        ValueError ("Collection X does not exist.") from delete_collection, while
+        get_collection raises InvalidCollectionException - so probing first avoids
+        coupling to whichever exception delete_collection happens to throw.
+
+        Args:
+            storage_path: Directory path for persistent storage
+            collection_name: Name of the ChromaDB collection to delete
+        """
+        if not storage_path or not os.path.exists(storage_path):
+            return
+
+        settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
+        client = chromadb.PersistentClient(path=storage_path, settings=settings)
+        try:
+            client.get_collection(name=collection_name)
+        except InvalidCollectionException:
+            return
+        client.delete_collection(collection_name)
 
     def add_memory(
         self,

@@ -1,20 +1,20 @@
 """MCP server for mind management"""
 
 import json
-import logging
 import uuid
 
 from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import ActionType
+from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.observations import (
     ConversationObservation,
     MindEvent,
     MindEventType,
     Observation,
 )
-from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.state import PipelineState
 from mind.logging_config import get_logger
 
@@ -340,20 +340,101 @@ class MCPServer:
             mind_id: str,
             ctx: Context = None,
         ) -> MindInfoResponse:
-            """Gracefully cleanup and remove a mind
+            """Release a mind from memory while RETAINING its persisted collection.
+
+            This drops the in-memory Mind instance (frees its pipeline/working state)
+            but deliberately does NOT delete the ChromaDB collection. The retained
+            collection is what lets a later relink_mind re-attach via Mind.reattach
+            and recover the mind's long-term memory. To actually erase memory, use
+            forget_mind. The "released" status reflects this retain-on-release
+            contract (the mind is released, its memory persists).
 
             Args:
-                mind_id: Mind to remove
+                mind_id: Mind to release
             """
             # The mind is still registered here, so its entity_id (FK) is available;
-            # surface it in the response so cleanup is symmetric with create_mind.
+            # surface it in the response so release is symmetric with create_mind.
             # (The Godot client ignores this optional field, so this is non-breaking.)
             entity_id = None
             if mind_id in self.minds:
                 entity_id = self.minds[mind_id].entity_id
                 del self.minds[mind_id]
 
-            return MindInfoResponse(status="removed", mind_id=mind_id, entity_id=entity_id)
+            return MindInfoResponse(status="released", mind_id=mind_id, entity_id=entity_id)
+
+        @self.mcp.tool()
+        async def relink_mind(
+            mind_id: str,
+            entity_id: str,
+            ctx: Context = None,
+        ) -> MindInfoResponse:
+            """Re-bind a mind to a (possibly new) driven entity, rehydrating if needed.
+
+            Three paths:
+            - Mind still resident in self.minds: rebind its entity_id (FK) in place
+              and report "relinked". No collection work - the live mind already holds
+              its memory.
+            - Mind released but its collection retained (cleanup_mind kept it): if
+              collection_exists, rehydrate via Mind.reattach (no re-seeding), register
+              it under the PK, and report "relinked".
+            - Neither resident nor a retained collection: report "not_found".
+
+            Args:
+                mind_id: The mind's own identifier (PK) - keys self.minds and the
+                    retained collection.
+                entity_id: The simulation entity this mind should now drive (FK).
+            """
+            # Resident: rebind the FK in place. mind_id (PK) is the stable identity;
+            # the driven entity can change across relinks.
+            if mind_id in self.minds:
+                self.minds[mind_id].entity_id = entity_id
+                return MindInfoResponse(status="relinked", mind_id=mind_id, entity_id=entity_id)
+
+            # Not resident: rehydrate from a retained collection if one survives.
+            # reattach uses the default cognitive config (storage_path/embedding);
+            # initial_long_term_memories is irrelevant since reattach never seeds.
+            config = MindConfig(traits=[])
+            if VectorDBMemory.collection_exists(config.memory_storage_path, f"mind_{mind_id}"):
+                mind = Mind.reattach(mind_id, entity_id, config)
+                self.minds[mind_id] = mind
+                return MindInfoResponse(status="relinked", mind_id=mind_id, entity_id=entity_id)
+
+            return MindInfoResponse(status="not_found", mind_id=mind_id, entity_id=entity_id)
+
+        @self.mcp.tool()
+        async def forget_mind(
+            mind_id: str,
+            ctx: Context = None,
+        ) -> MindInfoResponse:
+            """Permanently erase a mind's memory and drop it from the registry.
+
+            The destructive counterpart to cleanup_mind: it deletes the persisted
+            ChromaDB collection outright (not VectorDBMemory.clear, which would
+            recreate an empty collection), so collection_exists is False afterward
+            and a subsequent relink_mind reports "not_found". Also drops the
+            in-memory Mind if still resident.
+
+            Args:
+                mind_id: Mind to forget
+            """
+            entity_id = None
+            config = MindConfig(traits=[])
+            collection_name = f"mind_{mind_id}"
+
+            # Resolve the FK (if resident) and drop the in-memory instance. The live
+            # store's client is reused for the delete when resident; otherwise open a
+            # client just to delete the retained collection.
+            if mind_id in self.minds:
+                mind = self.minds[mind_id]
+                entity_id = mind.entity_id
+                mind.memory_store.client.delete_collection(collection_name)
+                del self.minds[mind_id]
+            elif VectorDBMemory.collection_exists(config.memory_storage_path, collection_name):
+                # Non-resident: delete via a bare client (no encoder load, no
+                # get_or_create_collection that would recreate the collection first).
+                VectorDBMemory.delete_collection(config.memory_storage_path, collection_name)
+
+            return MindInfoResponse(status="forgotten", mind_id=mind_id, entity_id=entity_id)
 
         # === Resources ===
 

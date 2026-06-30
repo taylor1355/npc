@@ -5,11 +5,11 @@ from typing import Self
 
 from mind.apis.langchain_llm import get_llm
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
 from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory, WorkingMemory
+from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
 from mind.cognitive_architecture.pipeline import CognitivePipeline
-from mind.logging_config import get_logger
 from mind.interfaces.mcp.models import MindConfig
+from mind.logging_config import get_logger
 
 logger = get_logger()
 
@@ -65,6 +65,54 @@ class Mind:
         # Seed initial long-term memories
         for memory_content in config.initial_long_term_memories:
             memory_store.add_memory(content=memory_content, importance=5.0)
+
+        # Initialize pipeline
+        pipeline = CognitivePipeline(llm=llm, memory_store=memory_store)
+
+        # Initialize working memory
+        working_memory = config.initial_working_memory or WorkingMemory()
+
+        # Create Mind instance
+        return cls(
+            mind_id=mind_id,
+            entity_id=entity_id,
+            traits=config.traits,
+            personality_dimensions=config.personality_dimensions,
+            pipeline=pipeline,
+            memory_store=memory_store,
+            working_memory=working_memory,
+        )
+
+    @classmethod
+    def reattach(cls, mind_id: str, entity_id: str, config: MindConfig) -> Self:
+        """Re-attach a Mind to its retained memory collection.
+
+        Identical to from_config except it does NOT seed
+        config.initial_long_term_memories. The collection already exists (it was
+        retained when the mind was released, not deleted), and VectorDBMemory uses
+        get_or_create_collection, so this transparently reopens it. Skipping the
+        seed loop is what keeps re-attaching idempotent - re-seeding here would
+        duplicate the original seeds on every relink.
+
+        Args:
+            mind_id: The mind's own identifier (PK) - keys the retained collection
+            entity_id: The simulation entity this mind now drives (FK). May differ
+                from the entity the mind drove before release; the relink rebinds it.
+            config: MindConfig with traits, LLM, memory, and personality settings.
+                initial_long_term_memories is intentionally ignored here.
+
+        Returns:
+            Initialized Mind instance bound to the existing collection
+        """
+        # Initialize LLM from config
+        llm = get_llm(config.llm_model)
+
+        # Reopen the retained collection keyed by the mind PK (no seeding)
+        memory_store = VectorDBMemory(
+            collection_name=f"mind_{mind_id}",
+            embedding_model=config.embedding_model,
+            storage_path=config.memory_storage_path,
+        )
 
         # Initialize pipeline
         pipeline = CognitivePipeline(llm=llm, memory_store=memory_store)

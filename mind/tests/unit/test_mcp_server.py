@@ -1,10 +1,9 @@
 """Unit tests for MCP server"""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
-from langchain_core.messages import AIMessage
 
 from mind.interfaces.mcp.server import MCPServer
 
@@ -283,7 +282,7 @@ class TestMCPServerErrorHandling:
         import logging
 
         from mind.cognitive_architecture.actions import Action, ActionType
-        from mind.cognitive_architecture.observations import MindEvent, MindEventType
+        from mind.cognitive_architecture.observations import MindEventType
         from mind.cognitive_architecture.state import PipelineState
 
         server = MCPServer()
@@ -457,6 +456,7 @@ class TestMindConfigValidation:
 
     def test_rejects_value_above_one(self):
         from pydantic import ValidationError
+
         from mind.interfaces.mcp.models import MindConfig
         with pytest.raises(ValidationError):
             MindConfig(
@@ -466,6 +466,7 @@ class TestMindConfigValidation:
 
     def test_rejects_negative_value(self):
         from pydantic import ValidationError
+
         from mind.interfaces.mcp.models import MindConfig
         with pytest.raises(ValidationError):
             MindConfig(
@@ -606,3 +607,235 @@ class TestDecideActionEntityIdMismatch:
             r.getMessage() for r in caplog.records if "entity_id mismatch" in r.getMessage()
         ]
         assert not mismatch_lines, "no mismatch warning expected when ids agree"
+
+
+class TestMindPersistenceLifecycle:
+    """Server-side mind persistence: release retains memory, relink rebinds/rehydrates,
+    forget erases (NPC-797).
+
+    Each test runs in an isolated tmp dir so the default MindConfig
+    memory_storage_path ("./chroma_db") - the same path create, relink, and forget
+    all use - resolves under a hermetic per-test directory. The autouse fixture also
+    clears ChromaDB's process-global client cache: PersistentClient caches its
+    system per-process regardless of the resolved path, so without the reset a later
+    test's "./chroma_db" would alias the first test's on-disk store and counts would
+    bleed across tests (a test-isolation artifact, not server behavior - in
+    production the server is one long-lived process keyed by distinct mind_ids).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolated_chroma(self, monkeypatch, tmp_path):
+        from chromadb.api.client import SharedSystemClient
+
+        SharedSystemClient.clear_system_cache()
+        monkeypatch.chdir(tmp_path)
+        yield
+        SharedSystemClient.clear_system_cache()
+
+    @staticmethod
+    async def _create_mind(server, mind_id, entity_id, initial_memories=None):
+        config = {"traits": [], "initial_long_term_memories": initial_memories or []}
+        return await server.mcp.call_tool(
+            "create_mind",
+            {"mind_id": mind_id, "entity_id": entity_id, "config": config},
+        )
+
+    @pytest.mark.asyncio
+    async def test_relink_resident_mind_rebinds_fk_in_place(self):
+        """A still-resident mind keeps its collection and just gets a new entity FK."""
+        server = MCPServer()
+
+        await self._create_mind(server, "mind_a", "entity_old")
+        mind = server.minds["mind_a"]
+        mind.memory_store.add_memory(content="a remembered fact", importance=5.0)
+        count_before = mind.memory_store.collection.count()
+        assert count_before == 1
+
+        result = await server.mcp.call_tool(
+            "relink_mind", {"mind_id": "mind_a", "entity_id": "entity_new"}
+        )
+        response = parse_response(result)
+
+        assert response["status"] == "relinked"
+        # Same live instance, FK rebound in place, memory untouched.
+        assert server.minds["mind_a"] is mind
+        assert mind.entity_id == "entity_new"
+        assert mind.memory_store.collection.count() == count_before
+
+    @pytest.mark.asyncio
+    async def test_release_retains_collection_then_relink_rehydrates_with_new_fk(self):
+        """cleanup_mind retains the collection; relink rehydrates it with a new FK
+        and the memory count is unchanged."""
+        server = MCPServer()
+
+        await self._create_mind(server, "mind_b", "entity_old")
+        server.minds["mind_b"].memory_store.add_memory(content="retained memory", importance=5.0)
+        count_before = server.minds["mind_b"].memory_store.collection.count()
+        assert count_before == 1
+
+        release = parse_response(
+            await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_b"})
+        )
+        assert release["status"] == "released"
+        assert "mind_b" not in server.minds
+
+        relink = parse_response(
+            await server.mcp.call_tool(
+                "relink_mind", {"mind_id": "mind_b", "entity_id": "entity_new"}
+            )
+        )
+        assert relink["status"] == "relinked"
+
+        # Rehydrated instance: collection intact, FK is the new one.
+        rehydrated = server.minds["mind_b"]
+        assert rehydrated.entity_id == "entity_new"
+        assert rehydrated.memory_store.collection.count() == count_before
+
+    @pytest.mark.asyncio
+    async def test_relink_does_not_reseed_initial_memories(self):
+        """reattach skips the seed loop, so relinking does not double the seeds."""
+        server = MCPServer()
+
+        await self._create_mind(
+            server, "mind_c", "entity_c", initial_memories=["seed one", "seed two"]
+        )
+        seed_count = server.minds["mind_c"].memory_store.collection.count()
+        assert seed_count == 2
+
+        await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_c"})
+        await server.mcp.call_tool(
+            "relink_mind", {"mind_id": "mind_c", "entity_id": "entity_c"}
+        )
+
+        # If reattach re-seeded, this would be 4. It must stay 2.
+        assert server.minds["mind_c"].memory_store.collection.count() == seed_count
+
+    @pytest.mark.asyncio
+    async def test_cleanup_retains_but_forget_deletes_collection(self):
+        """collection_exists is True after release, False after forget."""
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+        from mind.interfaces.mcp.models import MindConfig
+
+        server = MCPServer()
+        storage_path = MindConfig(traits=[]).memory_storage_path
+
+        await self._create_mind(server, "mind_d", "entity_d")
+        server.minds["mind_d"].memory_store.add_memory(content="x", importance=5.0)
+
+        await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_d"})
+        assert VectorDBMemory.collection_exists(storage_path, "mind_mind_d") is True
+
+        forget = parse_response(
+            await server.mcp.call_tool("forget_mind", {"mind_id": "mind_d"})
+        )
+        assert forget["status"] == "forgotten"
+        assert VectorDBMemory.collection_exists(storage_path, "mind_mind_d") is False
+
+        # A relink after forget finds nothing.
+        relink = parse_response(
+            await server.mcp.call_tool(
+                "relink_mind", {"mind_id": "mind_d", "entity_id": "entity_d"}
+            )
+        )
+        assert relink["status"] == "not_found"
+
+    @pytest.mark.asyncio
+    async def test_forget_resident_mind_drops_instance_and_collection(self):
+        """forget_mind on a resident mind drops it from the registry and deletes its
+        collection (no recreated empty shell)."""
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+        from mind.interfaces.mcp.models import MindConfig
+
+        server = MCPServer()
+        storage_path = MindConfig(traits=[]).memory_storage_path
+
+        await self._create_mind(server, "mind_e", "entity_e")
+        server.minds["mind_e"].memory_store.add_memory(content="y", importance=5.0)
+
+        forget = parse_response(
+            await server.mcp.call_tool("forget_mind", {"mind_id": "mind_e"})
+        )
+        assert forget["status"] == "forgotten"
+        assert forget["entity_id"] == "entity_e"
+        assert "mind_e" not in server.minds
+        assert VectorDBMemory.collection_exists(storage_path, "mind_mind_e") is False
+
+    @pytest.mark.asyncio
+    async def test_restart_reattach_recovers_memory_across_server_instances(self):
+        """Simulate a server restart: create + memory on one instance, drop it, then a
+        fresh MCPServer relinks the same mind_id and the memory survives.
+
+        Note: clearing ChromaDB's client cache between server instances (the autouse
+        fixture does this at setup/teardown, not mid-test) is unnecessary here -
+        within one process the cached client correctly reopens the on-disk store,
+        which is exactly the restart-recovery path under test.
+        """
+        server1 = MCPServer()
+        await self._create_mind(server1, "mind_f", "entity_f")
+        server1.minds["mind_f"].memory_store.add_memory(
+            content="survives restart", importance=5.0
+        )
+        count_before = server1.minds["mind_f"].memory_store.collection.count()
+        assert count_before == 1
+
+        # Drop the whole server instance (collection is persisted on disk).
+        del server1
+
+        server2 = MCPServer()
+        assert "mind_f" not in server2.minds
+        relink = parse_response(
+            await server2.mcp.call_tool(
+                "relink_mind", {"mind_id": "mind_f", "entity_id": "entity_f"}
+            )
+        )
+        assert relink["status"] == "relinked"
+        assert server2.minds["mind_f"].memory_store.collection.count() == count_before
+
+    def test_collection_exists_is_false_and_creates_no_dir_for_missing_path(self):
+        """collection_exists must be a pure read: a never-persisted path returns False
+        and is NOT created on disk as a side effect (PersistentClient otherwise mkdir's
+        the path). Regression for the empty-DB-dir leak (PR #17 review)."""
+        import os
+
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+
+        missing_path = os.path.join(os.getcwd(), "never_persisted_db")
+        assert not os.path.exists(missing_path)
+
+        assert VectorDBMemory.collection_exists(missing_path, "mind_ghost") is False
+
+        # The probe must not have created the directory.
+        assert not os.path.exists(missing_path)
+
+    @pytest.mark.asyncio
+    async def test_forget_non_resident_deletes_collection_without_loading_encoder(self):
+        """Forgetting a non-resident retained collection must delete it via a bare
+        client - no SentenceTransformer load, no get_or_create that would recreate the
+        collection before deleting it. Regression for the heavy-construct forget path
+        (PR #17 review)."""
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+        from mind.interfaces.mcp.models import MindConfig
+
+        server = MCPServer()
+        storage_path = MindConfig(traits=[]).memory_storage_path
+
+        # Create + release so the collection is retained on disk but no live Mind holds it.
+        await self._create_mind(server, "mind_g", "entity_g")
+        server.minds["mind_g"].memory_store.add_memory(content="z", importance=5.0)
+        await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_g"})
+        assert "mind_g" not in server.minds
+        assert VectorDBMemory.collection_exists(storage_path, "mind_mind_g") is True
+
+        # Patch the encoder constructor on the module VectorDBMemory uses; the
+        # non-resident forget path must never instantiate it.
+        with patch(
+            "mind.cognitive_architecture.memory.vector_db_memory.SentenceTransformer"
+        ) as encoder_ctor:
+            forget = parse_response(
+                await server.mcp.call_tool("forget_mind", {"mind_id": "mind_g"})
+            )
+
+        assert forget["status"] == "forgotten"
+        encoder_ctor.assert_not_called()
+        # Collection is gone (not recreated as an empty shell).
+        assert VectorDBMemory.collection_exists(storage_path, "mind_mind_g") is False
