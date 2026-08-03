@@ -432,7 +432,7 @@ class MCPServer:
                 # line, leaving a mind resident that the caller was told to forget
                 # - the collection being already gone is the desired end state, not
                 # a failure. The store's collection is keyed by the same mind PK as
-                # collection_name above (see Mind.create).
+                # collection_name above (Mind.from_config / Mind.reattach).
                 mind.memory_store.drop_collection()
                 del self.minds[mind_id]
             elif VectorDBMemory.collection_exists(config.memory_storage_path, collection_name):
