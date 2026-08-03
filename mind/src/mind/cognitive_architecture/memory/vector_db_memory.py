@@ -44,7 +44,10 @@ class VectorDBQuery(BaseModel):
     importance_weight: float = 0.3
     recency_weight: float = 0.2
     current_simulation_time: int | None = None
-    tags: list[str] | None = None  # Filter to memories with ANY of these tags
+    # Filter to memories with ANY of these tags. Storage layer only: nothing in the
+    # cognitive pipeline sets this yet, and no node passes tags to add_memory, so
+    # every stored memory is currently untagged. Producer/consumer wiring is NPC-1013.
+    tags: list[str] | None = None
 
 
 class ChromaQueryResult(BaseModel):
@@ -171,13 +174,11 @@ class VectorDBMemory:
         collection is a no-op too - ChromaDB's delete_collection raises on a missing
         collection rather than no-op'ing, so the raise is absorbed here.
 
-        Absorbing it directly is only safe because delete_collection raises a
-        precise NotFoundError. It is not catchable in the general case: some
-        ChromaDB releases signal the same condition with a bare ValueError, which
-        is far too broad to swallow around a mutating call. Prefer this shape over
-        a get_collection probe followed by an unguarded delete - the probe leaves a
-        window in which a concurrent deleter can win the race, so the delete raises
-        anyway and the idempotence this function promises does not hold.
+        Absorbing the raise is safe because delete_collection signals this with a
+        precise NotFoundError. Prefer this shape over a get_collection probe
+        followed by an unguarded delete - the probe leaves a window in which a
+        concurrent deleter can win the race, so the delete raises anyway and the
+        idempotence this function promises does not hold.
 
         Args:
             storage_path: Directory path for persistent storage
@@ -329,9 +330,18 @@ class VectorDBMemory:
         return [m for _, m in memories[: query.top_k]]
 
     def clear(self):
-        """Clear all memories"""
-        self.client.delete_collection(self.collection.name)
+        """Clear all memories, leaving an empty collection behind.
+
+        The delete is guarded the same way as the static delete_collection: a live
+        store can outlive its collection (forget_mind deletes it out from under a
+        resident store, and a concurrent clear can win the race), and in that case
+        the collection is already in the state this method is trying to reach. The
+        recreate below then restores the invariant that self.collection is valid.
+        """
+        try:
+            self.client.delete_collection(self.collection.name)
+        except NotFoundError:
+            pass
         self.collection = self.client.create_collection(
             name=self.collection.name, metadata={"hnsw:space": "cosine"}
         )
-        self._id_counter = 0
