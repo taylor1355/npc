@@ -341,7 +341,9 @@ class VectorDBMemory:
         """Delete this store's collection, treating "already gone" as success.
 
         The destructive counterpart to clear(): nothing is recreated, so self.collection
-        is left dangling by design and the caller is expected to be discarding the store.
+        is left pointing at a deleted collection. Callers that keep using the store must
+        reassign it - clear() does; forget_mind, the external caller, is discarding the
+        store anyway.
         Exposed so callers outside this module (forget_mind) can drop a live store's
         collection without reaching through .client and importing chromadb's exception
         types to guard it.
@@ -366,7 +368,10 @@ class VectorDBMemory:
         promises; what it must not do is leave self.collection pointing at a deleted
         collection, which is what letting the raise escape would do.
         """
+        # Read the name before the drop: afterward self.collection refers to a deleted
+        # collection, and this method's job is to stop depending on it.
+        collection_name = self.collection.name
         self.drop_collection()
         self.collection = self.client.get_or_create_collection(
-            name=self.collection.name, metadata={"hnsw:space": "cosine"}
+            name=collection_name, metadata={"hnsw:space": "cosine"}
         )
