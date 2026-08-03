@@ -61,3 +61,23 @@ class TestMemoryModel:
         assert "500" in mem_str
         assert "(10, 15)" in mem_str or "10" in mem_str  # Format may vary
         assert "Worked at forge" in mem_str
+
+    def test_create_memory_with_tags(self):
+        """Should create memory with tags"""
+        memory = Memory(id="mem_1", content="Test", importance=5.0, tags=["social", "positive"])
+        assert memory.tags == ["social", "positive"]
+
+    def test_create_memory_default_empty_tags(self):
+        """Should default to empty tags list"""
+        memory = Memory(id="mem_1", content="Test", importance=5.0)
+        assert memory.tags == []
+
+    def test_memory_string_with_tags(self):
+        """Should include tags in string representation"""
+        memory = Memory(id="mem_1", content="Test", importance=5.0, tags=["architecture"])
+        assert "architecture" in str(memory)
+
+    def test_memory_string_without_tags(self):
+        """Should not include tags label when no tags present"""
+        memory = Memory(id="mem_1", content="Test", importance=5.0)
+        assert "tags" not in str(memory)

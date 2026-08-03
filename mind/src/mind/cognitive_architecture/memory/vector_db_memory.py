@@ -3,12 +3,29 @@
 import os
 
 import chromadb
-from chromadb.errors import InvalidCollectionException
-from pydantic import BaseModel
+from chromadb.errors import NotFoundError
+from pydantic import BaseModel, ConfigDict, Field
 from sentence_transformers import SentenceTransformer
 
 from ..id_generator import IdGenerator
 from .models import Memory
+
+
+def _delete_collection_if_exists(client: chromadb.ClientAPI, collection_name: str) -> None:
+    """Delete a collection, treating "already gone" as success.
+
+    ChromaDB's delete_collection raises on a missing collection rather than
+    no-op'ing, so every caller wanting delete-if-exists has to absorb that raise.
+    Absorbing it directly is safe because delete_collection signals this condition
+    with a precise NotFoundError. Prefer this shape over a get_collection probe
+    followed by an unguarded delete - the probe leaves a window in which a concurrent
+    deleter can win the race, so the delete raises anyway and the idempotence the
+    probe was meant to buy does not hold.
+    """
+    try:
+        client.delete_collection(collection_name)
+    except NotFoundError:
+        pass
 
 
 class VectorDBMetadata(BaseModel):
@@ -18,6 +35,7 @@ class VectorDBMetadata(BaseModel):
     timestamp: int | None = None
     location_x: int | None = None
     location_y: int | None = None
+    tags: list[str] = Field(default_factory=list)
 
     def get_location(self) -> tuple[int, int] | None:
         """Extract location tuple if both coordinates present"""
@@ -27,13 +45,26 @@ class VectorDBMetadata(BaseModel):
 
 
 class VectorDBQuery(BaseModel):
-    """Query parameters for vector database search"""
+    """Query parameters for vector database search
+
+    Rejects unknown fields. Pydantic's default is extra='ignore', which makes a
+    misspelled or not-yet-supported filter silently vanish: the search then runs
+    unfiltered and returns a full, plausible-looking result set that the caller
+    reads as filtered. A dropped filter is a wrong answer, not a missing one, so
+    it must fail at construction rather than degrade into unfiltered data.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     query: str
     top_k: int = 5
     importance_weight: float = 0.3
     recency_weight: float = 0.2
     current_simulation_time: int | None = None
+    # Filter to memories with ANY of these tags. Storage layer only: nothing in the
+    # cognitive pipeline sets this yet, and no node passes tags to add_memory, so
+    # every stored memory is currently untagged. Producer/consumer wiring is NPC-1013.
+    tags: list[str] | None = None
 
 
 class ChromaQueryResult(BaseModel):
@@ -118,8 +149,8 @@ class VectorDBMemory:
         """Check whether a persisted collection exists without creating it.
 
         Opens a PersistentClient at storage_path and probes for the collection via
-        get_collection, which raises InvalidCollectionException when absent. Unlike
-        the constructor (which uses get_or_create_collection), this is strictly
+        get_collection, which raises NotFoundError when absent. Unlike the
+        constructor (which uses get_or_create_collection), this is strictly
         read-only: it never creates the collection as a side effect, so it's safe
         for relink to decide whether retained memory survived a release.
 
@@ -141,7 +172,7 @@ class VectorDBMemory:
         try:
             client.get_collection(name=collection_name)
             return True
-        except InvalidCollectionException:
+        except NotFoundError:
             return False
 
     @staticmethod
@@ -157,12 +188,8 @@ class VectorDBMemory:
 
         Idempotent (delete-if-exists): safe to call whether or not the path or the
         collection exists. A never-persisted path is a no-op, and an absent
-        collection is a no-op too - ChromaDB's delete_collection raises on a missing
-        collection rather than no-op'ing, so we gate the delete behind a get probe.
-        That gate is also version-robust: the pinned ChromaDB raises a bare
-        ValueError ("Collection X does not exist.") from delete_collection, while
-        get_collection raises InvalidCollectionException - so probing first avoids
-        coupling to whichever exception delete_collection happens to throw.
+        collection is a no-op too - see _delete_collection_if_exists for why the
+        raise is absorbed rather than probed for.
 
         Args:
             storage_path: Directory path for persistent storage
@@ -173,11 +200,7 @@ class VectorDBMemory:
 
         settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
         client = chromadb.PersistentClient(path=storage_path, settings=settings)
-        try:
-            client.get_collection(name=collection_name)
-        except InvalidCollectionException:
-            return
-        client.delete_collection(collection_name)
+        _delete_collection_if_exists(client, collection_name)
 
     def add_memory(
         self,
@@ -185,6 +208,7 @@ class VectorDBMemory:
         importance: float = 1.0,
         timestamp: int | None = None,
         location: tuple[int, int] | None = None,
+        tags: list[str] | None = None,
     ) -> Memory:
         """Add a memory to the store
 
@@ -193,7 +217,9 @@ class VectorDBMemory:
             importance: Importance score (0.0-10.0)
             timestamp: Simulation timestamp (game ticks/frames)
             location: Grid coordinates (x, y)
+            tags: Categorical tags for filtering
         """
+        tag_list = tags or []
 
         # Generate memory ID
         memory_id = IdGenerator.generate_memory_id()
@@ -205,6 +231,7 @@ class VectorDBMemory:
             timestamp=timestamp,
             importance=importance,
             location=location,
+            tags=tag_list,
         )
 
         # Generate embedding
@@ -216,14 +243,19 @@ class VectorDBMemory:
             timestamp=timestamp,
             location_x=location[0] if location else None,
             location_y=location[1] if location else None,
+            tags=tag_list,
         )
 
-        # Store in ChromaDB
+        # Store in ChromaDB (empty arrays not allowed in metadata, so exclude them)
+        metadata_dict = metadata.model_dump(exclude_none=True)
+        if not metadata_dict.get("tags"):
+            metadata_dict.pop("tags", None)
+
         self.collection.add(
             ids=[memory_id],
             embeddings=[embedding],
             documents=[content],
-            metadatas=[metadata.model_dump(exclude_none=True)],
+            metadatas=[metadata_dict],
         )
 
         return memory
@@ -239,9 +271,18 @@ class VectorDBMemory:
         if collection_count == 0:
             return []
 
+        # Build tag filter using ChromaDB's native $contains operator
+        where_clause = None
+        if query.tags:
+            if len(query.tags) == 1:
+                where_clause = {"tags": {"$contains": query.tags[0]}}
+            else:
+                where_clause = {"$or": [{"tags": {"$contains": t}} for t in query.tags]}
+
         raw_results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=min(query.top_k, collection_count),
+            where=where_clause,
             include=["documents", "metadatas", "distances"],
         )
 
@@ -288,6 +329,7 @@ class VectorDBMemory:
                 timestamp=metadata.timestamp,
                 importance=metadata.importance,
                 location=metadata.get_location(),
+                tags=metadata.tags,
             )
             memories.append((combined_score, memory))
 
@@ -295,10 +337,41 @@ class VectorDBMemory:
         memories.sort(key=lambda x: x[0], reverse=True)
         return [m for _, m in memories[: query.top_k]]
 
+    def drop_collection(self) -> None:
+        """Delete this store's collection, treating "already gone" as success.
+
+        The destructive counterpart to clear(): nothing is recreated, so self.collection
+        is left pointing at a deleted collection. Callers that keep using the store must
+        reassign it - clear() does; forget_mind, the external caller, is discarding the
+        store anyway.
+        Exposed so callers outside this module (forget_mind) can drop a live store's
+        collection without reaching through .client and importing chromadb's exception
+        types to guard it.
+        """
+        _delete_collection_if_exists(self.client, self.collection.name)
+
     def clear(self):
-        """Clear all memories"""
-        self.client.delete_collection(self.collection.name)
-        self.collection = self.client.create_collection(
-            name=self.collection.name, metadata={"hnsw:space": "cosine"}
+        """Clear all memories, leaving an empty collection behind.
+
+        Both halves are guarded, because both can lose the same race. A live store can
+        outlive its collection (forget_mind deletes it out from under a resident store),
+        so the delete tolerates an absent collection; and a concurrent clear can complete
+        its own delete+create in the window between ours, so the recreate has to tolerate
+        the name already existing - create_collection raises InternalError on a duplicate
+        name, which is far too broad to swallow around a mutating call. get_or_create is
+        the right shape here for the same reason it is the wrong shape in
+        delete_collection: there recreating would defeat the purpose, here recreating is
+        the purpose.
+
+        Under that race the collection handed back is the concurrent clear's rather than
+        ours. That is still an empty collection under the name, which is what this method
+        promises; what it must not do is leave self.collection pointing at a deleted
+        collection, which is what letting the raise escape would do.
+        """
+        # Read the name before the drop: afterward self.collection refers to a deleted
+        # collection, and this method's job is to stop depending on it.
+        collection_name = self.collection.name
+        self.drop_collection()
+        self.collection = self.client.get_or_create_collection(
+            name=collection_name, metadata={"hnsw:space": "cosine"}
         )
-        self._id_counter = 0

@@ -761,6 +761,41 @@ class TestMindPersistenceLifecycle:
         assert VectorDBMemory.collection_exists(storage_path, "mind_mind_e") is False
 
     @pytest.mark.asyncio
+    async def test_forget_resident_mind_tolerates_an_already_deleted_collection(self):
+        """forget_mind still drops the registry entry when the collection is already gone.
+
+        The load-bearing assertion is that mind_h has left server.minds, not that the
+        call avoided raising. An unguarded raise on the delete skipped the registry
+        drop on the following line, so the caller was told the forget failed while the
+        mind stayed resident and a later relink_mind would still find it. Swallowing
+        the exception without restoring that invariant would be the same defect with a
+        quieter symptom.
+        """
+        server = MCPServer()
+
+        await self._create_mind(server, "mind_h", "entity_h")
+        mind = server.minds["mind_h"]
+        mind.memory_store.add_memory(content="z", importance=5.0)
+
+        # Delete the collection out from under the resident store, so forget_mind's
+        # resident branch meets an absent collection.
+        mind.memory_store.client.delete_collection("mind_mind_h")
+
+        forget = parse_response(await server.mcp.call_tool("forget_mind", {"mind_id": "mind_h"}))
+
+        assert forget["status"] == "forgotten"
+        assert forget["entity_id"] == "entity_h"
+        assert "mind_h" not in server.minds
+
+        # Gone for good, not merely dropped from the registry.
+        relink = parse_response(
+            await server.mcp.call_tool(
+                "relink_mind", {"mind_id": "mind_h", "entity_id": "entity_h"}
+            )
+        )
+        assert relink["status"] == "not_found"
+
+    @pytest.mark.asyncio
     async def test_restart_reattach_recovers_memory_across_server_instances(self):
         """Simulate a server restart: create + memory on one instance, drop it, then a
         fresh MCPServer relinks the same mind_id and the memory survives.

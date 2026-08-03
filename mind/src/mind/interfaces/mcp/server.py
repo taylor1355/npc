@@ -427,7 +427,13 @@ class MCPServer:
             if mind_id in self.minds:
                 mind = self.minds[mind_id]
                 entity_id = mind.entity_id
-                mind.memory_store.client.delete_collection(collection_name)
+                # Delete-if-exists, matching the non-resident branch below. An
+                # unguarded raise here would skip the registry drop on the next
+                # line, leaving a mind resident that the caller was told to forget
+                # - the collection being already gone is the desired end state, not
+                # a failure. The store's collection is keyed by the same mind PK as
+                # collection_name above (Mind.from_config / Mind.reattach).
+                mind.memory_store.drop_collection()
                 del self.minds[mind_id]
             elif VectorDBMemory.collection_exists(config.memory_storage_path, collection_name):
                 # Non-resident: delete via a bare client (no encoder load, no
