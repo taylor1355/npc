@@ -1,5 +1,6 @@
 """Unit tests for ActionSelectionNode"""
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -154,6 +155,55 @@ class TestActionSelectionNode:
         assert result.chosen_action is not None
         assert isinstance(result.chosen_action, Action)
 
+    async def test_renders_personality_dimensions_in_prompt(self, node, mock_llm):
+        """Personality dimensions should be rendered into the LLM prompt with sorted keys"""
+        state = PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(5, 10), movement_locked=False),
+            ),
+            working_memory=WorkingMemory(),
+            personality_traits=["curious"],
+            personality_dimensions={"extroversion": 0.85, "curiosity": 0.2},
+            available_actions=[AvailableAction(name="wait", description="Wait")],
+        )
+
+        await node.process(state)
+
+        # The rendered prompt is passed as a HumanMessage to ainvoke
+        call_args = mock_llm.ainvoke.call_args
+        rendered = call_args[0][0][0].content
+        # Sorted alphabetically: curiosity before extroversion
+        assert "curiosity: 0.20" in rendered
+        assert "extroversion: 0.85" in rendered
+        assert rendered.index("curiosity: 0.20") < rendered.index("extroversion: 0.85")
+        # Dimensions must render on separate lines (multi-line convention matches
+        # other prompt sections like personality_traits / available_actions)
+        assert "curiosity: 0.20\nextroversion: 0.85" in rendered
+        assert "curiosity: 0.20, extroversion: 0.85" not in rendered
+
+    async def test_handles_empty_personality_dimensions(self, node, mock_llm):
+        """Empty personality_dimensions should render a sentinel string, not crash"""
+        state = PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(5, 10), movement_locked=False),
+            ),
+            working_memory=WorkingMemory(),
+            personality_traits=["curious"],
+            personality_dimensions={},
+            available_actions=[AvailableAction(name="wait", description="Wait")],
+        )
+
+        result = await node.process(state)
+
+        assert result.chosen_action is not None
+        call_args = mock_llm.ainvoke.call_args
+        rendered = call_args[0][0][0].content
+        assert "No personality dimensions provided" in rendered
+
     async def test_handles_empty_cognitive_context(self, node, mock_llm):
         """Should handle state with no cognitive context"""
         state = PipelineState(
@@ -191,11 +241,14 @@ class TestActionSelectionNode:
 
     async def test_handles_complex_action_parameters(self, node, mock_llm, basic_state):
         """Should handle actions with multiple complex parameters"""
-        # Set up an active interaction so act_in_interaction is valid
+        # Set up an active interaction so act_in_interaction is valid.
+        # NPC-688: validity is grounded in BOTH current_interaction AND
+        # activity_state == interacting, so set both authoritative signals.
         basic_state.observation.status.current_interaction = {
             "interaction_id": "conversation_123",
             "interaction_name": "chat",
         }
+        basic_state.observation.status.activity_state = {"state_name": "interacting"}
 
         mock_llm.ainvoke.return_value = AIMessage(
             content="""{
@@ -217,3 +270,32 @@ class TestActionSelectionNode:
         assert result.chosen_action.parameters["interaction_id"] == "conversation_123"
         assert result.chosen_action.parameters["response"] == "I agree to help"
         assert result.chosen_action.parameters["intensity"] == 0.8
+
+    async def test_all_log_records_carry_entity_id(self, node, mock_llm, basic_state, caplog):
+        """Every record from process() must carry the entity id so the simulation's
+        log forwarder can attribute it to the NPC's Events tab (NPC-789)"""
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        assert caplog.records, "process() should emit log records"
+        for record in caplog.records:
+            assert "test_npc" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )
+
+    async def test_fallback_log_records_carry_entity_id(self, node, mock_llm, basic_state, caplog):
+        """Retry and fallback-warning records must also carry the entity id (NPC-789)"""
+        mock_llm.ainvoke.return_value = AIMessage(
+            content="not valid json",
+            usage_metadata={"input_tokens": 10, "output_tokens": 3, "total_tokens": 13},
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            result = await node.process(basic_state)
+
+        assert result.chosen_action.action == ActionType.WAIT
+        assert caplog.records, "fallback path should emit log records"
+        for record in caplog.records:
+            assert "test_npc" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )

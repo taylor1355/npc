@@ -14,8 +14,16 @@ You are modeling a person making moment-to-moment decisions in a simulated world
 ### Personality Traits
 {personality_traits}
 
+### Personality Dimensions (0.0 = low, 1.0 = high)
+{personality_dimensions}
+
 ### Recent Events
 {recent_events}
+
+### Authoritative Interaction Status
+{interaction_status}
+
+This status is the ground truth from the simulation. Only choose interaction-participation actions (e.g. act_in_interaction) when it confirms you are currently in an interaction. If it says you are NOT interacting, do not attempt to act in or continue an interaction even if working memory still mentions one.
 
 ## Available Actions
 {available_actions}

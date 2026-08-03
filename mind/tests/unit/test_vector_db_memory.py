@@ -1,6 +1,7 @@
 """Unit tests for VectorDBMemory"""
 
 import pytest
+from pydantic import ValidationError
 
 from mind.cognitive_architecture.memory.vector_db_memory import (
     VectorDBMemory,
@@ -218,9 +219,7 @@ class TestVectorDBMemory:
 
     async def test_multi_tag_or_filter(self, memory_store):
         """Should match memories with ANY of the requested tags"""
-        memory_store.add_memory(
-            content="Social debugging session", tags=["social", "debugging"]
-        )
+        memory_store.add_memory(content="Social debugging session", tags=["social", "debugging"])
         memory_store.add_memory(content="Architecture review", tags=["architecture"])
         memory_store.add_memory(content="Routine task", tags=["routine"])
 
@@ -242,3 +241,85 @@ class TestVectorDBMemory:
 
         assert len(results) == 1
         assert results[0].tags == ["important"]
+
+    async def test_unknown_query_field_is_rejected(self):
+        """A misspelled/unsupported filter must raise, not silently run unfiltered.
+
+        Regression for the silent-drop bug: with pydantic's default
+        extra='ignore', VectorDBQuery(query=..., tags=[...]) built against a
+        model without a `tags` field discarded the filter and returned an
+        unfiltered result set indistinguishable from a filtered one. Constructing
+        with a field the model does not declare must fail loudly.
+        """
+        with pytest.raises(ValidationError):
+            VectorDBQuery(query="anything", top_k=5, tagz=["typo"])
+
+    async def test_similarity_influences_ranking(self, memory_store):
+        """High-similarity/low-importance should outrank low-similarity/high-importance.
+
+        Regression for the bug where similarity_score was hardcoded to 1.0,
+        making the combined score depend only on importance + recency. With a
+        modest importance_weight, real semantic similarity must be able to flip
+        the ranking in favor of the more relevant (but less important) memory.
+        """
+        # On-topic but low importance.
+        memory_store.add_memory(
+            content="The blacksmith forged a gleaming steel sword at the forge",
+            importance=1.0,
+        )
+        # Off-topic but high importance.
+        memory_store.add_memory(
+            content="A gentle rain fell over the quiet meadow at dawn",
+            importance=10.0,
+        )
+
+        # Modest importance weight: similarity should dominate.
+        query = VectorDBQuery(
+            query="forging a sword at the blacksmith forge",
+            top_k=2,
+            importance_weight=0.2,
+            recency_weight=0.0,
+        )
+        results = await memory_store.search(query)
+
+        assert len(results) == 2
+        # The semantically relevant (low-importance) memory must rank first,
+        # which is only possible once real similarity feeds the combined score.
+        assert "sword" in results[0].content.lower()
+        assert results[0].importance < results[1].importance
+
+
+class TestDeleteCollection:
+    """delete_collection is idempotent (delete-if-exists), with no encoder load."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_chroma(self, monkeypatch, tmp_path):
+        """Isolate ChromaDB's process-global client cache and CWD per test, so a
+        PersistentClient opened here can't alias another test's on-disk store."""
+        from chromadb.api.client import SharedSystemClient
+
+        SharedSystemClient.clear_system_cache()
+        monkeypatch.chdir(tmp_path)
+        yield
+        SharedSystemClient.clear_system_cache()
+
+    def test_delete_absent_collection_on_existing_path_does_not_raise(self):
+        """Deleting a missing collection from an existing storage path is a silent
+        no-op, not a raise (ChromaDB's delete_collection raises on absent). The path
+        must already exist (so the missing-path early-return doesn't mask the case),
+        but the named collection must not - exercising the delete-if-exists guard."""
+        import os
+
+        storage_path = os.path.join(os.getcwd(), "chroma_persist")
+
+        # Persist a DIFFERENT collection so the storage path exists on disk while the
+        # target collection does not - isolating the absent-collection branch.
+        VectorDBMemory(collection_name="present_one", storage_path=storage_path)
+        assert os.path.exists(storage_path)
+        assert VectorDBMemory.collection_exists(storage_path, "never_made") is False
+
+        # Must not raise.
+        VectorDBMemory.delete_collection(storage_path, "never_made")
+
+        # Still absent (delete-if-exists left the world unchanged).
+        assert VectorDBMemory.collection_exists(storage_path, "never_made") is False

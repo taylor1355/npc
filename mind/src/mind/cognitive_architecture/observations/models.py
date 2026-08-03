@@ -109,6 +109,27 @@ class StatusObservation(BaseModel):
     current_interaction: dict = Field(default_factory=dict)
     activity_state: dict = Field(default_factory=dict)
 
+    def is_interacting(self) -> bool:
+        """Ground "am I in an interaction?" in BOTH authoritative observation signals.
+
+        The simulation can clear ``current_interaction`` and the controller's
+        ``activity_state`` on different frames during interaction teardown
+        (documented cross-field cleanup race in the Godot
+        ``entity_controller._on_interaction_ended`` handler). Requiring BOTH
+        signals to agree avoids treating a half-torn-down state as "still
+        interacting", which is the upstream cause of the act_in_interaction
+        desync loop (NPC-688).
+
+        Backward compatible: an older sim payload without ``activity_state``
+        (or without ``state_name``) safely resolves to ``False`` rather than
+        crashing, so a missing field never produces a spurious interaction
+        action.
+        """
+        if not self.current_interaction:
+            return False
+        state_name = (self.activity_state or {}).get("state_name", "")
+        return state_name == "interacting"
+
 
 class NeedsObservation(BaseModel):
     """Entity needs state"""
@@ -233,6 +254,14 @@ class Observation(BaseModel):
 
         return "\n\n".join(parts) if parts else "No observations"
 
+    def is_interacting(self) -> bool:
+        """Authoritative "am I interacting?" grounded in the current observation.
+
+        Defaults to ``False`` when no status is present so a malformed or
+        partial observation can never advertise interaction-only actions.
+        """
+        return bool(self.status and self.status.is_interacting())
+
     def get_available_actions(self, pending_incoming_bids: dict[str, "MindEvent"] = None):
         """Build list of available actions from this observation.
 
@@ -298,8 +327,10 @@ class Observation(BaseModel):
         )
 
         # Wait action only available when NOT in an active interaction
-        # (wait exits interactions, use cancel_interaction to explicitly end one)
-        if not (self.status and self.status.current_interaction):
+        # (wait exits interactions, use cancel_interaction to explicitly end one).
+        # Grounded on is_interacting() so a half-torn-down state (current_interaction
+        # set but activity_state already non-interacting) still offers wait.
+        if not self.is_interacting():
             actions.append(
                 AvailableAction(
                     name=ActionType.WAIT,
@@ -317,7 +348,7 @@ class Observation(BaseModel):
                         description="Continue current movement without changes",
                     )
                 )
-            elif state_name == 'interacting' and self.status.current_interaction:
+            elif self.is_interacting():
                 interaction_name = self.status.current_interaction.get('interaction_name', 'interaction')
                 actions.append(
                     AvailableAction(
@@ -326,8 +357,11 @@ class Observation(BaseModel):
                     )
                 )
 
-        # Conditional: interaction actions only if currently in an interaction
-        if self.status and self.status.current_interaction:
+        # Conditional: interaction actions only when the observation confirms an
+        # active interaction on BOTH signals (current_interaction + activity_state).
+        # Grounding here (not just current_interaction presence) prevents emitting
+        # act_in_interaction during interaction teardown — the NPC-688 desync loop.
+        if self.is_interacting():
             interaction_name = self.status.current_interaction.get('interaction_name', 'interaction')
 
             # Add action to participate in the interaction (e.g., send message in conversation)

@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.observations import (
     EntityData,
     NeedsObservation,
@@ -11,7 +12,6 @@ from mind.cognitive_architecture.observations import (
     StatusObservation,
     VisionObservation,
 )
-from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.interfaces.mcp.models import MindConfig
 from mind.interfaces.mcp.server import MCPServer
 
@@ -22,12 +22,23 @@ def mcp_server():
     return MCPServer("Test Mind Server")
 
 
+# mind_id (PK) and entity_id (FK) are deliberately DIFFERENT here so every test
+# proves the decouple rather than relying on them being the same string.
+TEST_MIND_ID = "mind_abc"
+TEST_ENTITY_ID = "entity_xyz"
+
+
 @pytest.fixture
 def test_mind_config():
-    """Create a test mind configuration"""
+    """Create a test mind configuration (no entity_id - that is a create_mind arg)"""
     return MindConfig(
-        entity_id="test_npc_001",
         traits=["curious", "brave"],
+        personality_dimensions={
+            "extroversion": 0.7,
+            "curiosity": 0.9,
+            "sensitivity": 0.4,
+            "conscientiousness": 0.6,
+        },
         llm_model="google/gemini-2.0-flash-lite-001",
         embedding_model="all-MiniLM-L6-v2",
         memory_storage_path="./tmp/test_chroma_db",
@@ -88,28 +99,89 @@ def test_observation():
 
 @pytest.mark.asyncio
 async def test_create_mind(mcp_server, test_mind_config):
-    """Test creating a new mind"""
+    """Test creating a new mind - mind_id (PK) and entity_id (FK) flow independently"""
+    assert TEST_MIND_ID != TEST_ENTITY_ID  # guard: the fixtures must actually differ
+
     result = await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind",
+        {
+            "mind_id": TEST_MIND_ID,
+            "entity_id": TEST_ENTITY_ID,
+            "config": test_mind_config.model_dump(),
+        },
     )
 
     # Parse response from TextContent list
     response = json.loads(result[0].text)
 
     assert response["status"] == "created"
-    assert response["mind_id"] == "test_mind_001"
-    assert "test_mind_001" in mcp_server.minds
+    # Response carries BOTH ids, distinct
+    assert response["mind_id"] == TEST_MIND_ID
+    assert response["entity_id"] == TEST_ENTITY_ID
+    # Registry is keyed by the mind PK, not the entity FK
+    assert TEST_MIND_ID in mcp_server.minds
+    assert TEST_ENTITY_ID not in mcp_server.minds
+    # The stored Mind carries the entity FK exactly as supplied
+    assert mcp_server.minds[TEST_MIND_ID].entity_id == TEST_ENTITY_ID
+    # Memory collection is keyed by the mind PK
+    assert mcp_server.minds[TEST_MIND_ID].memory_store.collection.name == f"mind_{TEST_MIND_ID}"
+
+
+@pytest.mark.asyncio
+async def test_create_mind_stores_personality_dimensions(mcp_server, test_mind_config):
+    """Personality dimensions in config should round-trip into the stored Mind"""
+    await mcp_server.mcp.call_tool(
+        "create_mind",
+        {
+            "mind_id": "test_mind_dims",
+            "entity_id": "entity_dims",
+            "config": test_mind_config.model_dump(),
+        },
+    )
+
+    mind = mcp_server.minds["test_mind_dims"]
+    assert mind.personality_dimensions == {
+        "extroversion": 0.7,
+        "curiosity": 0.9,
+        "sensitivity": 0.4,
+        "conscientiousness": 0.6,
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_mind_without_personality_dimensions_defaults_to_empty(mcp_server):
+    """Configs that omit personality_dimensions should default to an empty dict"""
+    minimal_config = MindConfig(
+        traits=["plain"],
+    )
+
+    await mcp_server.mcp.call_tool(
+        "create_mind",
+        {
+            "mind_id": "test_mind_minimal",
+            "entity_id": "entity_minimal",
+            "config": minimal_config.model_dump(),
+        },
+    )
+
+    mind = mcp_server.minds["test_mind_minimal"]
+    assert mind.personality_dimensions == {}
 
 
 @pytest.mark.asyncio
 async def test_decide_action(mcp_server, test_mind_config, test_observation):
-    """Test deciding an action based on observation"""
-    # Create mind
+    """Test deciding an action based on observation - routing keys on the mind PK"""
+    # Create mind: PK and FK are distinct
     await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind",
+        {
+            "mind_id": "test_mind_001",
+            "entity_id": "test_npc_001",
+            "config": test_mind_config.model_dump(),
+        },
     )
 
-    # Decide action using new structured format
+    # decide_action routes by the mind PK, not the entity FK
     result = await mcp_server.mcp.call_tool(
         "decide_action", {"mind_id": "test_mind_001", "observation": test_observation.model_dump()}
     )
@@ -124,10 +196,15 @@ async def test_decide_action(mcp_server, test_mind_config, test_observation):
 
 @pytest.mark.asyncio
 async def test_consolidate_memories(mcp_server, test_mind_config):
-    """Test memory consolidation"""
-    # Create mind
+    """Test memory consolidation - routes by the mind PK"""
+    # Create mind: PK and FK are distinct
     await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind",
+        {
+            "mind_id": "test_mind_001",
+            "entity_id": "test_npc_001",
+            "config": test_mind_config.model_dump(),
+        },
     )
 
     # Manually add some daily memories for testing
@@ -149,33 +226,46 @@ async def test_consolidate_memories(mcp_server, test_mind_config):
 
 @pytest.mark.asyncio
 async def test_cleanup_mind(mcp_server, test_mind_config):
-    """Test mind cleanup"""
-    # Create mind
+    """Test mind cleanup - routes by the mind PK"""
+    # Create mind: PK and FK are distinct
     await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind",
+        {
+            "mind_id": "test_mind_001",
+            "entity_id": "test_npc_001",
+            "config": test_mind_config.model_dump(),
+        },
     )
 
     assert "test_mind_001" in mcp_server.minds
 
-    # Cleanup
+    # Cleanup routes by the mind PK
     result = await mcp_server.mcp.call_tool("cleanup_mind", {"mind_id": "test_mind_001"})
 
     # Parse response from TextContent list
     response = json.loads(result[0].text)
 
-    assert response["status"] == "removed"
+    # cleanup_mind releases the mind but RETAINS its collection (retain-on-release).
+    assert response["status"] == "released"
+    assert response["mind_id"] == "test_mind_001"
     assert "test_mind_001" not in mcp_server.minds
 
 
 @pytest.mark.asyncio
 async def test_full_workflow(mcp_server, test_mind_config, test_observation):
     """Test complete workflow: create, decide, consolidate, cleanup"""
-    # Step 1: Create mind
+    # Step 1: Create mind (PK and FK distinct)
     result = await mcp_server.mcp.call_tool(
-        "create_mind", {"mind_id": "test_mind_001", "config": test_mind_config.model_dump()}
+        "create_mind",
+        {
+            "mind_id": "test_mind_001",
+            "entity_id": "test_npc_001",
+            "config": test_mind_config.model_dump(),
+        },
     )
     create_response = json.loads(result[0].text)
     assert create_response["status"] == "created"
+    assert create_response["entity_id"] == "test_npc_001"
 
     # Step 2: Make a decision
     result = await mcp_server.mcp.call_tool(
@@ -198,10 +288,10 @@ async def test_full_workflow(mcp_server, test_mind_config, test_observation):
         assert consolidate_response["status"] == "success"
         assert consolidate_response["consolidated_count"] == memory_count
 
-    # Step 5: Cleanup
+    # Step 5: Cleanup (releases the mind; collection retained per retain-on-release)
     result = await mcp_server.mcp.call_tool("cleanup_mind", {"mind_id": "test_mind_001"})
     cleanup_response = json.loads(result[0].text)
-    assert cleanup_response["status"] == "removed"
+    assert cleanup_response["status"] == "released"
 
 
 if __name__ == "__main__":

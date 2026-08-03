@@ -5,9 +5,10 @@ from typing import Self
 
 from mind.apis.langchain_llm import get_llm
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
 from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory, WorkingMemory
+from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
 from mind.cognitive_architecture.pipeline import CognitivePipeline
+from mind.interfaces.mcp.models import MindConfig
 from mind.logging_config import get_logger
 
 logger = get_logger()
@@ -27,6 +28,7 @@ class Mind:
     pipeline: CognitivePipeline
     memory_store: VectorDBMemory
     working_memory: WorkingMemory
+    personality_dimensions: dict[str, float] = field(default_factory=dict)
     daily_memories: list[NewMemory] = field(default_factory=list)
 
     # Conversation history aggregation (keyed by interaction_id)
@@ -38,12 +40,14 @@ class Mind:
     pending_incoming_bids: dict[str, MindEvent] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, mind_id: str, config) -> Self:
+    def from_config(cls, mind_id: str, entity_id: str, config: MindConfig) -> Self:
         """Create a Mind instance from configuration
 
         Args:
-            mind_id: Unique identifier for the mind
-            config: MindConfig with LLM, memory, and initial state settings
+            mind_id: The mind's own identifier (PK) - keys the memory collection
+            entity_id: The simulation entity this mind drives (FK) - deliberately
+                independent of mind_id; carried for per-NPC log attribution
+            config: MindConfig with traits, LLM, memory, and personality settings
 
         Returns:
             Initialized Mind instance
@@ -51,7 +55,7 @@ class Mind:
         # Initialize LLM from config
         llm = get_llm(config.llm_model)
 
-        # Initialize memory store with configured collection name
+        # Memory belongs to the mind, so the collection is keyed by the mind PK
         memory_store = VectorDBMemory(
             collection_name=f"mind_{mind_id}",
             embedding_model=config.embedding_model,
@@ -71,8 +75,57 @@ class Mind:
         # Create Mind instance
         return cls(
             mind_id=mind_id,
-            entity_id=config.entity_id,
+            entity_id=entity_id,
             traits=config.traits,
+            personality_dimensions=config.personality_dimensions,
+            pipeline=pipeline,
+            memory_store=memory_store,
+            working_memory=working_memory,
+        )
+
+    @classmethod
+    def reattach(cls, mind_id: str, entity_id: str, config: MindConfig) -> Self:
+        """Re-attach a Mind to its retained memory collection.
+
+        Identical to from_config except it does NOT seed
+        config.initial_long_term_memories. The collection already exists (it was
+        retained when the mind was released, not deleted), and VectorDBMemory uses
+        get_or_create_collection, so this transparently reopens it. Skipping the
+        seed loop is what keeps re-attaching idempotent - re-seeding here would
+        duplicate the original seeds on every relink.
+
+        Args:
+            mind_id: The mind's own identifier (PK) - keys the retained collection
+            entity_id: The simulation entity this mind now drives (FK). May differ
+                from the entity the mind drove before release; the relink rebinds it.
+            config: MindConfig with traits, LLM, memory, and personality settings.
+                initial_long_term_memories is intentionally ignored here.
+
+        Returns:
+            Initialized Mind instance bound to the existing collection
+        """
+        # Initialize LLM from config
+        llm = get_llm(config.llm_model)
+
+        # Reopen the retained collection keyed by the mind PK (no seeding)
+        memory_store = VectorDBMemory(
+            collection_name=f"mind_{mind_id}",
+            embedding_model=config.embedding_model,
+            storage_path=config.memory_storage_path,
+        )
+
+        # Initialize pipeline
+        pipeline = CognitivePipeline(llm=llm, memory_store=memory_store)
+
+        # Initialize working memory
+        working_memory = config.initial_working_memory or WorkingMemory()
+
+        # Create Mind instance
+        return cls(
+            mind_id=mind_id,
+            entity_id=entity_id,
+            traits=config.traits,
+            personality_dimensions=config.personality_dimensions,
             pipeline=pipeline,
             memory_store=memory_store,
             working_memory=working_memory,
@@ -126,23 +179,24 @@ class Mind:
                     self.pending_incoming_bids[bid_id] = event
 
             elif event.event_type == MindEventType.ERROR:
-                # Log error events for debugging
+                # Log error events for debugging. Per-NPC line: attribute to the entity FK
+                # so the sim /logs forwarder routes it to the NPC's Events tab.
                 message = event.payload.get("message", "Unknown error")
-                logger.warning(f"[{self.mind_id}] Received error event: {message}")
+                logger.warning(f"[{self.entity_id}] Received error event: {message}")
 
             elif event.event_type == MindEventType.INTERACTION_BID_CANCELED:
                 # Remove canceled bid from pending list
                 bid_id = event.payload.get("bid_id")
                 if bid_id and bid_id in self.pending_incoming_bids:
                     del self.pending_incoming_bids[bid_id]
-                    logger.debug(f"[{self.mind_id}] Removed canceled bid {bid_id} from pending bids")
+                    logger.debug(f"[{self.entity_id}] Removed canceled bid {bid_id} from pending bids")
 
             elif event.event_type in (MindEventType.INTERACTION_FINISHED, MindEventType.INTERACTION_CANCELED):
                 # Clean up conversation history for ended interactions
                 interaction_id = event.payload.get("interaction_id")
                 if interaction_id and interaction_id in self.conversation_histories:
                     del self.conversation_histories[interaction_id]
-                    logger.debug(f"[{self.mind_id}] Cleaned up conversation history for {interaction_id}")
+                    logger.debug(f"[{self.entity_id}] Cleaned up conversation history for {interaction_id}")
 
         self.event_buffer.extend(new_events)
 

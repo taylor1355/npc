@@ -1,20 +1,20 @@
 """MCP server for mind management"""
 
 import json
-import logging
 import uuid
 
 from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import ActionType
+from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.observations import (
     ConversationObservation,
     MindEvent,
     MindEventType,
     Observation,
 )
-from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.state import PipelineState
 from mind.logging_config import get_logger
 
@@ -52,11 +52,16 @@ def _success_response(request_id: str, action: dict) -> dict:
     }
 
 
-def _extract_conversation_observations(events: list[MindEvent]) -> list[ConversationObservation]:
+def _extract_conversation_observations(
+    events: list[MindEvent], entity_id: str
+) -> list[ConversationObservation]:
     """Extract conversation observations from INTERACTION_OBSERVATION events.
 
     Args:
         events: List of MindEvent objects
+        entity_id: Driven entity FK these events belong to. This is a per-NPC log line,
+            so it carries entity_id (not the mind PK): the sim /logs forwarder
+            regex-attributes the tag to the NPC's Events tab.
 
     Returns:
         List of ConversationObservation objects parsed from interaction observation events
@@ -70,18 +75,21 @@ def _extract_conversation_observations(events: list[MindEvent]) -> list[Conversa
                 conversations.append(conv_obs)
             except ValidationError as e:
                 # Not a conversation observation or malformed - skip it
-                logger.debug(f"Skipping non-conversation interaction observation: {e}")
+                logger.debug(f"[{entity_id}] Skipping non-conversation interaction observation: {e}")
                 continue
     return conversations
 
 
-def _cleanup_responded_bids(action, pending_bids: dict, request_id: str) -> None:
+def _cleanup_responded_bids(action, pending_bids: dict, request_id: str, entity_id: str) -> None:
     """Remove bids from pending list after responding to them.
 
     Args:
         action: The chosen action (Action model)
         pending_bids: Dict of pending incoming bids (modified in place)
-        request_id: Request ID for logging
+        request_id: Server-routing correlation id (not NPC-attributed)
+        entity_id: Driven entity FK the bids belong to. These are per-NPC log lines,
+            so they carry entity_id (not the mind PK): the sim /logs forwarder
+            regex-attributes the tag to the NPC's Events tab.
     """
     if not action:
         return
@@ -91,7 +99,7 @@ def _cleanup_responded_bids(action, pending_bids: dict, request_id: str) -> None
         bid_id = action.parameters.get("bid_id")
         if bid_id and bid_id in pending_bids:
             pending_bids.pop(bid_id)
-            logger.debug(f"[{request_id}] Removed bid {bid_id} from pending bids after response")
+            logger.debug(f"[{request_id}] [{entity_id}] Removed bid {bid_id} from pending bids after response")
 
     elif action.action == ActionType.BATCH_REJECT_INTERACTION_BIDS:
         # Batch bid rejection
@@ -120,7 +128,7 @@ def _cleanup_responded_bids(action, pending_bids: dict, request_id: str) -> None
         for bid_id in bid_ids_to_remove:
             pending_bids.pop(bid_id, None)
 
-        logger.debug(f"[{request_id}] Batch rejected {len(bid_ids_to_remove)} bids: {bid_ids_to_remove}")
+        logger.debug(f"[{request_id}] [{entity_id}] Batch rejected {len(bid_ids_to_remove)} bids: {bid_ids_to_remove}")
 
 
 class MCPServer:
@@ -143,19 +151,27 @@ class MCPServer:
         @self.mcp.tool()
         async def create_mind(
             mind_id: str,
+            entity_id: str,
             config: MindConfig,
             ctx: Context = None,
         ) -> MindInfoResponse:
             """Create a new NPC mind
 
+            mind_id (PK) and entity_id (FK) are deliberately distinct first-class ids:
+            the mind owns its memory under the PK; the FK names the simulation entity
+            the mind drives and is what per-NPC logs attribute to.
+
             Args:
-                mind_id: Unique identifier for the mind (usually matches entity_id)
-                config: Configuration with entity_id, traits, LLM settings, memory settings, initial state
+                mind_id: The mind's own identifier (PK). Keys self.minds and the
+                    memory collection.
+                entity_id: The simulation entity this mind drives (FK).
+                config: Cognitive configuration - traits, LLM settings, memory
+                    settings, personality dimensions, initial state.
             """
-            mind = Mind.from_config(mind_id, config)
+            mind = Mind.from_config(mind_id, entity_id, config)
             self.minds[mind_id] = mind
 
-            return MindInfoResponse(status="created", mind_id=mind_id)
+            return MindInfoResponse(status="created", mind_id=mind_id, entity_id=entity_id)
 
         @self.mcp.tool()
         async def decide_action(
@@ -166,9 +182,19 @@ class MCPServer:
         ) -> dict:
             """Process observation from simulation and decide on an action
 
+            mind_id is the routing primary key: it selects which mind in self.minds
+            handles this request and keys that mind's memory collection. It is distinct
+            from the entity_id foreign key carried inside the observation, which names
+            the simulation entity the mind drives. In correct operation the two agree
+            (the routed mind drives that entity); a divergence is logged (both ids) and
+            the request is rejected, since a decision on a misrouted observation would
+            be garbage.
+
             Args:
-                mind_id: Unique identifier for the mind
-                observation: Structured observation dict (will be validated to Observation model)
+                mind_id: Routing primary key (PK) selecting the mind; distinct from the
+                    observation entity_id foreign key (FK).
+                observation: Structured observation dict (will be validated to Observation
+                    model); carries the entity_id FK the pipeline attributes work to.
                 events: List of mind events
 
             Returns:
@@ -208,8 +234,27 @@ class MCPServer:
                             details=str(e)
                         )
 
-                # Extract conversation observations from INTERACTION_OBSERVATION events
-                conversation_obs = _extract_conversation_observations(mind_events)
+                # Defensive misrouting check: mind_id (PK) routes the request while the
+                # observation carries its own entity_id (FK). In correct operation these
+                # agree (the mind drives that entity); a divergence means the observation
+                # was routed to the wrong mind. Fail loud at the boundary - log both ids
+                # (so misrouting stays diagnosable) and reject, since a decision computed
+                # on a misrouted observation would be garbage.
+                if obs.entity_id != mind.entity_id:
+                    logger.warning(
+                        f"[{request_id}] entity_id mismatch for mind {mind_id}: "
+                        f"observation entity_id={obs.entity_id} but mind entity_id={mind.entity_id} "
+                        f"(misrouting — rejecting the request)"
+                    )
+                    return _error_response(
+                        request_id,
+                        f"entity_id mismatch: observation '{obs.entity_id}' "
+                        f"but mind drives '{mind.entity_id}'",
+                    )
+
+                # Extract conversation observations from INTERACTION_OBSERVATION events.
+                # Pass the entity FK so per-NPC log lines attribute to the NPC's Events tab.
+                conversation_obs = _extract_conversation_observations(mind_events, mind.entity_id)
                 mind.update_conversations(conversation_obs)
                 mind.update_events(mind_events, obs.current_simulation_time)
 
@@ -218,6 +263,7 @@ class MCPServer:
                     available_actions=obs.get_available_actions(pending_incoming_bids=mind.pending_incoming_bids),
                     working_memory=mind.working_memory,
                     personality_traits=mind.traits,
+                    personality_dimensions=mind.personality_dimensions,
                     conversation_histories=mind.conversation_histories,
                     recent_events=mind.event_buffer,
                     pending_incoming_bids=mind.pending_incoming_bids,
@@ -231,8 +277,11 @@ class MCPServer:
                 mind.daily_memories.extend(result.daily_memories)
                 mind.event_buffer = result.recent_events
 
-                # Clean up any bids that were responded to
-                _cleanup_responded_bids(result.chosen_action, mind.pending_incoming_bids, request_id)
+                # Clean up any bids that were responded to. Pass the entity FK so the
+                # per-NPC bid-cleanup log lines attribute to the NPC's Events tab.
+                _cleanup_responded_bids(
+                    result.chosen_action, mind.pending_incoming_bids, request_id, mind.entity_id
+                )
 
                 if result.chosen_action is None:
                     logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")
@@ -291,15 +340,101 @@ class MCPServer:
             mind_id: str,
             ctx: Context = None,
         ) -> MindInfoResponse:
-            """Gracefully cleanup and remove a mind
+            """Release a mind from memory while RETAINING its persisted collection.
+
+            This drops the in-memory Mind instance (frees its pipeline/working state)
+            but deliberately does NOT delete the ChromaDB collection. The retained
+            collection is what lets a later relink_mind re-attach via Mind.reattach
+            and recover the mind's long-term memory. To actually erase memory, use
+            forget_mind. The "released" status reflects this retain-on-release
+            contract (the mind is released, its memory persists).
 
             Args:
-                mind_id: Mind to remove
+                mind_id: Mind to release
             """
+            # The mind is still registered here, so its entity_id (FK) is available;
+            # surface it in the response so release is symmetric with create_mind.
+            # (The Godot client ignores this optional field, so this is non-breaking.)
+            entity_id = None
             if mind_id in self.minds:
+                entity_id = self.minds[mind_id].entity_id
                 del self.minds[mind_id]
 
-            return MindInfoResponse(status="removed", mind_id=mind_id)
+            return MindInfoResponse(status="released", mind_id=mind_id, entity_id=entity_id)
+
+        @self.mcp.tool()
+        async def relink_mind(
+            mind_id: str,
+            entity_id: str,
+            ctx: Context = None,
+        ) -> MindInfoResponse:
+            """Re-bind a mind to a (possibly new) driven entity, rehydrating if needed.
+
+            Three paths:
+            - Mind still resident in self.minds: rebind its entity_id (FK) in place
+              and report "relinked". No collection work - the live mind already holds
+              its memory.
+            - Mind released but its collection retained (cleanup_mind kept it): if
+              collection_exists, rehydrate via Mind.reattach (no re-seeding), register
+              it under the PK, and report "relinked".
+            - Neither resident nor a retained collection: report "not_found".
+
+            Args:
+                mind_id: The mind's own identifier (PK) - keys self.minds and the
+                    retained collection.
+                entity_id: The simulation entity this mind should now drive (FK).
+            """
+            # Resident: rebind the FK in place. mind_id (PK) is the stable identity;
+            # the driven entity can change across relinks.
+            if mind_id in self.minds:
+                self.minds[mind_id].entity_id = entity_id
+                return MindInfoResponse(status="relinked", mind_id=mind_id, entity_id=entity_id)
+
+            # Not resident: rehydrate from a retained collection if one survives.
+            # reattach uses the default cognitive config (storage_path/embedding);
+            # initial_long_term_memories is irrelevant since reattach never seeds.
+            config = MindConfig(traits=[])
+            if VectorDBMemory.collection_exists(config.memory_storage_path, f"mind_{mind_id}"):
+                mind = Mind.reattach(mind_id, entity_id, config)
+                self.minds[mind_id] = mind
+                return MindInfoResponse(status="relinked", mind_id=mind_id, entity_id=entity_id)
+
+            return MindInfoResponse(status="not_found", mind_id=mind_id, entity_id=entity_id)
+
+        @self.mcp.tool()
+        async def forget_mind(
+            mind_id: str,
+            ctx: Context = None,
+        ) -> MindInfoResponse:
+            """Permanently erase a mind's memory and drop it from the registry.
+
+            The destructive counterpart to cleanup_mind: it deletes the persisted
+            ChromaDB collection outright (not VectorDBMemory.clear, which would
+            recreate an empty collection), so collection_exists is False afterward
+            and a subsequent relink_mind reports "not_found". Also drops the
+            in-memory Mind if still resident.
+
+            Args:
+                mind_id: Mind to forget
+            """
+            entity_id = None
+            config = MindConfig(traits=[])
+            collection_name = f"mind_{mind_id}"
+
+            # Resolve the FK (if resident) and drop the in-memory instance. The live
+            # store's client is reused for the delete when resident; otherwise open a
+            # client just to delete the retained collection.
+            if mind_id in self.minds:
+                mind = self.minds[mind_id]
+                entity_id = mind.entity_id
+                mind.memory_store.client.delete_collection(collection_name)
+                del self.minds[mind_id]
+            elif VectorDBMemory.collection_exists(config.memory_storage_path, collection_name):
+                # Non-resident: delete via a bare client (no encoder load, no
+                # get_or_create_collection that would recreate the collection first).
+                VectorDBMemory.delete_collection(config.memory_storage_path, collection_name)
+
+            return MindInfoResponse(status="forgotten", mind_id=mind_id, entity_id=entity_id)
 
         # === Resources ===
 

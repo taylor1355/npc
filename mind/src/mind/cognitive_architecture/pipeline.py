@@ -7,6 +7,7 @@ from mind.logging_config import get_logger
 
 from .memory.vector_db_memory import VectorDBMemory
 from .nodes.action_selection.node import ActionSelectionNode
+from .nodes.base import entity_tag
 from .nodes.cognitive_update.node import CognitiveUpdateNode
 from .nodes.memory_query.node import MemoryQueryNode
 from .nodes.memory_retrieval.node import MemoryRetrievalNode
@@ -55,7 +56,7 @@ class CognitivePipeline:
 
     async def process(self, state: PipelineState) -> PipelineState:
         """Process an observation through the cognitive pipeline"""
-        logger.debug(f"Pipeline starting for entity_id={state.observation.entity_id}")
+        logger.debug(f"{entity_tag(state)} Pipeline starting")
 
         result_dict = await self.chain.ainvoke(state)
         # Convert LangGraph's AddableValuesDict back to our Pydantic model
@@ -65,6 +66,6 @@ class CognitivePipeline:
         # Log pipeline completion summary
         total_time = sum(result.time_ms.values())
         total_tokens = sum(result.tokens_used.values())
-        logger.debug(f"Pipeline completed in {total_time}ms, {total_tokens} tokens")
+        logger.debug(f"{entity_tag(state)} Pipeline completed in {total_time}ms, {total_tokens} tokens")
 
         return result

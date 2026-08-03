@@ -5,12 +5,17 @@ from pathlib import Path
 from pprint import pformat
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action, ActionType
-from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.nodes.base import LLMNode, entity_tag
+from mind.cognitive_architecture.nodes.formatting import (
+    format_interaction_status as _format_interaction_status,
+)
+from mind.cognitive_architecture.nodes.formatting import (
+    format_personality,
+)
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
 from mind.knowledge import KnowledgeBase, KnowledgeFile
@@ -39,11 +44,10 @@ class ActionSelectionNode(LLMNode):
         # Format available actions
         actions_text = "\n".join([f"- {str(action)}" for action in state.available_actions])
 
-        # Format personality traits
-        personality_text = (
-            ", ".join(state.personality_traits)
-            if state.personality_traits
-            else "No specific traits"
+        # Format personality for the prompt (shared helper keeps the rendered
+        # representation identical to cognitive_update across the pipeline)
+        personality_text, dims_text = format_personality(
+            state.personality_traits, state.personality_dimensions
         )
 
         # Build world knowledge from centralized knowledge files
@@ -60,13 +64,15 @@ class ActionSelectionNode(LLMNode):
                 state,
                 working_memory=str(state.working_memory),
                 personality_traits=personality_text,
+                personality_dimensions=dims_text,
                 available_actions=actions_text,
+                interaction_status=_format_interaction_status(state.observation),
                 recent_events=pformat(state.recent_events),
                 world_knowledge=world_knowledge,
                 format_instructions=self.get_format_instructions()
             )
         except (ValidationError, json.JSONDecodeError) as e:
-            logger.warning(f"Action selection failed after retries, falling back to wait: {e}")
+            logger.warning(f"{entity_tag(state)} Action selection failed after retries, falling back to wait: {e}")
             # Use model_construct to bypass validation - WAIT is always safe
             fallback_action = Action.model_construct(action=ActionType.WAIT, parameters={})
             output = ActionSelectionOutput.model_construct(chosen_action=fallback_action)
@@ -85,7 +91,8 @@ class ActionSelectionNode(LLMNode):
         state.recent_events.append(action_event)
 
         # Log action selection
-        logger.debug(f"Evaluated {len(state.available_actions)} available actions")
-        logger.debug(f"Selected: {output.chosen_action}")
+        tag = entity_tag(state)
+        logger.debug(f"{tag} Evaluated {len(state.available_actions)} available actions")
+        logger.debug(f"{tag} Selected: {output.chosen_action}")
 
         return state

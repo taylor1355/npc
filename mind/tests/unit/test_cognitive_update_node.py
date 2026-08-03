@@ -1,5 +1,6 @@
 """Unit tests for CognitiveUpdateNode"""
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -173,3 +174,107 @@ class TestCognitiveUpdateNode:
         assert len(result.daily_memories) == 2
         assert result.daily_memories[0] == existing_memory
         assert result.daily_memories[1].content == "Started sword commission"
+
+    async def test_renders_personality_traits_in_prompt(self, node, mock_llm):
+        """Personality traits should be rendered into the cognitive_update prompt"""
+        state = PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(5, 10), movement_locked=False),
+            ),
+            working_memory=WorkingMemory(),
+            personality_traits=["idiotic", "pedantic", "aquarium-enthusiast"],
+            retrieved_memories=[],
+        )
+
+        await node.process(state)
+
+        call_args = mock_llm.ainvoke.call_args
+        rendered = call_args[0][0][0].content
+        assert "idiotic, pedantic, aquarium-enthusiast" in rendered
+
+    async def test_renders_personality_dimensions_in_prompt(self, node, mock_llm):
+        """Personality dimensions should be rendered with sorted keys, multi-line"""
+        state = PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(5, 10), movement_locked=False),
+            ),
+            working_memory=WorkingMemory(),
+            personality_traits=["curious"],
+            personality_dimensions={"extroversion": 0.85, "curiosity": 0.2},
+            retrieved_memories=[],
+        )
+
+        await node.process(state)
+
+        call_args = mock_llm.ainvoke.call_args
+        rendered = call_args[0][0][0].content
+        # Sorted alphabetically: curiosity before extroversion
+        assert "curiosity: 0.20" in rendered
+        assert "extroversion: 0.85" in rendered
+        assert rendered.index("curiosity: 0.20") < rendered.index("extroversion: 0.85")
+        # Dimensions render on separate lines, matching action_selection convention
+        assert "curiosity: 0.20\nextroversion: 0.85" in rendered
+
+    async def test_handles_empty_personality(self, node, mock_llm):
+        """Empty personality should render sentinel strings, not crash.
+
+        LangChain PromptTemplate requires every declared variable, so the node
+        must always pass personality_traits and personality_dimensions even when
+        the NPC has none.
+        """
+        state = PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(5, 10), movement_locked=False),
+            ),
+            working_memory=WorkingMemory(),
+            personality_traits=[],
+            personality_dimensions={},
+            retrieved_memories=[],
+        )
+
+        result = await node.process(state)
+
+        assert result.working_memory is not None
+        call_args = mock_llm.ainvoke.call_args
+        rendered = call_args[0][0][0].content
+        assert "No specific traits" in rendered
+        assert "No personality dimensions provided" in rendered
+
+    async def test_all_log_records_carry_entity_id(self, node, mock_llm, basic_state, caplog):
+        """Every record from process() must carry the entity id so the simulation's
+        log forwarder can attribute it to the NPC's Events tab (NPC-789)"""
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        assert caplog.records, "process() should emit log records"
+        for record in caplog.records:
+            assert "test_npc" in record.getMessage(), (
+                f"Unattributed log record: {record.getMessage()!r}"
+            )
+
+    async def test_working_memory_logged_as_single_record(self, node, mock_llm, basic_state, caplog):
+        """Working-memory fields land in one record: one Events-tab entry per thought"""
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        wm_records = [r for r in caplog.records if "Updated working memory" in r.getMessage()]
+        assert len(wm_records) == 1
+        message = wm_records[0].getMessage()
+        assert "Situation:" in message
+        assert "Active goals:" in message
+        assert "Emotional state:" in message
+
+    async def test_new_memories_logged_as_single_record(self, node, mock_llm, basic_state, caplog):
+        """Memory-storage lines land in one record, not one per memory"""
+        with caplog.at_level(logging.DEBUG, logger="mind"):
+            await node.process(basic_state)
+
+        storing_records = [r for r in caplog.records if "Storing" in r.getMessage()]
+        assert len(storing_records) == 1
+        assert "Started sword commission" in storing_records[0].getMessage()
