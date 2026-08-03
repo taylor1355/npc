@@ -149,6 +149,45 @@ poetry install
 tree src/mind/cognitive_architecture/nodes/
 ```
 
+### Commit hooks and notebook stripping
+
+`.pre-commit-config.yaml` lives at the **repo root**, one level above this file.
+Install and verify from the root:
+
+```bash
+cd ..                       # repo root, not mind/
+pre-commit install
+ls .git/hooks/pre-commit    # must be a real hook; only *.sample means nothing installed
+```
+
+**Nothing runs until you do this.** Hooks are machine-local: a fresh clone (or a
+`git worktree add`) installs none, and there is no CI job running ruff or pytest —
+`.github/workflows/` contains only the Claude review action. An uninstalled hook set
+is silent, so confirm the file exists rather than assuming (NPC-1024).
+
+Notebook outputs are stripped by the `nbstripout` **pre-commit hook**. A git clean
+filter can do the same job, but only if it is configured, and that configuration
+lives in machine-local `.git/config`, which cannot be committed:
+
+```bash
+git config filter.nbstripout.clean "<abs-path>/mind/.venv/bin/python -m nbstripout"
+```
+
+Use an **absolute** interpreter path. Linked worktrees share one `.git/config` but
+have different roots, so a relative path such as `mind/.venv/bin/python` resolves
+against whichever worktree git is running in. Combined with
+`filter.nbstripout.required = true`, any worktree that has not had `poetry install`
+run yet fails hard on every notebook operation:
+
+```
+mind/.venv/bin/python -m nbstripout: 1: mind/.venv/bin/python: not found
+fatal: <notebook>: clean filter 'nbstripout' failed
+```
+
+Note also that `mind/.gitattributes` scopes `filter=nbstripout` to `mind/**`, so the
+filter never applied to the notebooks under the repo-root `archived/` tree. The
+pre-commit hook has no such gap — it sees every staged `.ipynb`.
+
 ## Current Development Focus
 
 See [docs/planning/roadmap.md](docs/planning/roadmap.md) for detailed planning.
