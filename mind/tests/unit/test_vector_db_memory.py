@@ -218,10 +218,19 @@ class TestVectorDBMemory:
         assert memory.tags == []
 
     async def test_multi_tag_or_filter(self, memory_store):
-        """Should match memories with ANY of the requested tags"""
+        """Should match memories with ANY of the requested tags, by exact membership.
+
+        `antisocial` overlaps `social` as a substring and `architecture_review`
+        overlaps `architecture`; both must be excluded. Without them the OR branch
+        passes under either reading of $contains (membership or substring), so the
+        overlapping tags are what make this test constrain the semantic rather than
+        merely observe it.
+        """
         memory_store.add_memory(content="Social debugging session", tags=["social", "debugging"])
         memory_store.add_memory(content="Architecture review", tags=["architecture"])
         memory_store.add_memory(content="Routine task", tags=["routine"])
+        memory_store.add_memory(content="Avoided the crowd", tags=["antisocial"])
+        memory_store.add_memory(content="Reviewed the architecture", tags=["architecture_review"])
 
         query = VectorDBQuery(query="work", top_k=10, tags=["social", "architecture"])
         results = await memory_store.search(query)
@@ -230,6 +239,9 @@ class TestVectorDBMemory:
         assert any("social" in ts for ts in result_tag_sets)
         assert any("architecture" in ts for ts in result_tag_sets)
         assert not any(ts == {"routine"} for ts in result_tag_sets)
+        # Substring-overlapping tags must not be swept in by the OR filter.
+        assert not any("antisocial" in ts for ts in result_tag_sets)
+        assert not any("architecture_review" in ts for ts in result_tag_sets)
 
     async def test_untagged_memories_excluded_by_tag_filter(self, memory_store):
         """Tag filter should exclude memories with no tags"""
@@ -241,6 +253,17 @@ class TestVectorDBMemory:
 
         assert len(results) == 1
         assert results[0].tags == ["important"]
+
+    async def test_tag_filter_is_exact_not_substring(self, memory_store):
+        """`social` must not match `antisocial` - $contains on an array is membership, not substring."""
+        memory_store.add_memory(content="Avoided the crowd", tags=["antisocial"])
+        memory_store.add_memory(content="Chatted at the market", tags=["social"])
+
+        results = await memory_store.search(
+            VectorDBQuery(query="people", top_k=10, tags=["social"])
+        )
+
+        assert [m.tags for m in results] == [["social"]]
 
     async def test_unknown_query_field_is_rejected(self):
         """A misspelled/unsupported filter must raise, not silently run unfiltered.
