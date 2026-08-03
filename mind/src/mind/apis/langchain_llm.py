@@ -6,11 +6,15 @@ from mind.project_config import OPENROUTER_API_KEY
 
 
 class LangChainModel:
-    """Model identifiers for OpenRouter-compatible models"""
+    """Model identifiers for OpenRouter-compatible models.
+
+    Prefer UNDATED slugs - see mind.constants for why dated preview slugs
+    ("...-preview-09-2025") are a live-outage hazard (NPC-1012).
+    """
 
     CLAUDE_SONNET = "anthropic/claude-sonnet-4"
-    GEMINI_FLASH = "google/gemini-2.5-flash-preview-09-2025"
-    GEMINI_FLASH_LITE = "google/gemini-2.5-flash-lite-preview-09-2025"
+    GEMINI_FLASH = "google/gemini-2.5-flash"
+    GEMINI_FLASH_LITE = "google/gemini-2.5-flash-lite"
 
 
 def get_llm(model: str, temperature: float = 0) -> ChatOpenAI:
