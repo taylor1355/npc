@@ -3,7 +3,6 @@
 import json
 import uuid
 
-from chromadb.errors import NotFoundError
 from fastmcp import Context, FastMCP
 from pydantic import ValidationError
 
@@ -432,11 +431,9 @@ class MCPServer:
                 # unguarded raise here would skip the registry drop on the next
                 # line, leaving a mind resident that the caller was told to forget
                 # - the collection being already gone is the desired end state, not
-                # a failure.
-                try:
-                    mind.memory_store.client.delete_collection(collection_name)
-                except NotFoundError:
-                    pass
+                # a failure. The store's collection is keyed by the same mind PK as
+                # collection_name above (see Mind.create).
+                mind.memory_store.drop_collection()
                 del self.minds[mind_id]
             elif VectorDBMemory.collection_exists(config.memory_storage_path, collection_name):
                 # Non-resident: delete via a bare client (no encoder load, no

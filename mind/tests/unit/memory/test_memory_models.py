@@ -64,9 +64,7 @@ class TestMemoryModel:
 
     def test_create_memory_with_tags(self):
         """Should create memory with tags"""
-        memory = Memory(
-            id="mem_1", content="Test", importance=5.0, tags=["social", "positive"]
-        )
+        memory = Memory(id="mem_1", content="Test", importance=5.0, tags=["social", "positive"])
         assert memory.tags == ["social", "positive"]
 
     def test_create_memory_default_empty_tags(self):

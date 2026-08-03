@@ -11,6 +11,23 @@ from ..id_generator import IdGenerator
 from .models import Memory
 
 
+def _delete_collection_if_exists(client: chromadb.ClientAPI, collection_name: str) -> None:
+    """Delete a collection, treating "already gone" as success.
+
+    ChromaDB's delete_collection raises on a missing collection rather than
+    no-op'ing, so every caller wanting delete-if-exists has to absorb that raise.
+    Absorbing it directly is safe because delete_collection signals this condition
+    with a precise NotFoundError. Prefer this shape over a get_collection probe
+    followed by an unguarded delete - the probe leaves a window in which a concurrent
+    deleter can win the race, so the delete raises anyway and the idempotence the
+    probe was meant to buy does not hold.
+    """
+    try:
+        client.delete_collection(collection_name)
+    except NotFoundError:
+        pass
+
+
 class VectorDBMetadata(BaseModel):
     """Metadata stored with each memory in ChromaDB"""
 
@@ -171,14 +188,8 @@ class VectorDBMemory:
 
         Idempotent (delete-if-exists): safe to call whether or not the path or the
         collection exists. A never-persisted path is a no-op, and an absent
-        collection is a no-op too - ChromaDB's delete_collection raises on a missing
-        collection rather than no-op'ing, so the raise is absorbed here.
-
-        Absorbing the raise is safe because delete_collection signals this with a
-        precise NotFoundError. Prefer this shape over a get_collection probe
-        followed by an unguarded delete - the probe leaves a window in which a
-        concurrent deleter can win the race, so the delete raises anyway and the
-        idempotence this function promises does not hold.
+        collection is a no-op too - see _delete_collection_if_exists for why the
+        raise is absorbed rather than probed for.
 
         Args:
             storage_path: Directory path for persistent storage
@@ -189,10 +200,7 @@ class VectorDBMemory:
 
         settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
         client = chromadb.PersistentClient(path=storage_path, settings=settings)
-        try:
-            client.delete_collection(collection_name)
-        except NotFoundError:
-            return
+        _delete_collection_if_exists(client, collection_name)
 
     def add_memory(
         self,
@@ -329,19 +337,36 @@ class VectorDBMemory:
         memories.sort(key=lambda x: x[0], reverse=True)
         return [m for _, m in memories[: query.top_k]]
 
+    def drop_collection(self) -> None:
+        """Delete this store's collection, treating "already gone" as success.
+
+        The destructive counterpart to clear(): nothing is recreated, so self.collection
+        is left dangling by design and the caller is expected to be discarding the store.
+        Exposed so callers outside this module (forget_mind) can drop a live store's
+        collection without reaching through .client and importing chromadb's exception
+        types to guard it.
+        """
+        _delete_collection_if_exists(self.client, self.collection.name)
+
     def clear(self):
         """Clear all memories, leaving an empty collection behind.
 
-        The delete is guarded the same way as the static delete_collection: a live
-        store can outlive its collection (forget_mind deletes it out from under a
-        resident store, and a concurrent clear can win the race), and in that case
-        the collection is already in the state this method is trying to reach. The
-        recreate below then restores the invariant that self.collection is valid.
+        Both halves are guarded, because both can lose the same race. A live store can
+        outlive its collection (forget_mind deletes it out from under a resident store),
+        so the delete tolerates an absent collection; and a concurrent clear can complete
+        its own delete+create in the window between ours, so the recreate has to tolerate
+        the name already existing - create_collection raises InternalError on a duplicate
+        name, which is far too broad to swallow around a mutating call. get_or_create is
+        the right shape here for the same reason it is the wrong shape in
+        delete_collection: there recreating would defeat the purpose, here recreating is
+        the purpose.
+
+        Under that race the collection handed back is the concurrent clear's rather than
+        ours. That is still an empty collection under the name, which is what this method
+        promises; what it must not do is leave self.collection pointing at a deleted
+        collection, which is what letting the raise escape would do.
         """
-        try:
-            self.client.delete_collection(self.collection.name)
-        except NotFoundError:
-            pass
-        self.collection = self.client.create_collection(
+        self.drop_collection()
+        self.collection = self.client.get_or_create_collection(
             name=self.collection.name, metadata={"hnsw:space": "cosine"}
         )

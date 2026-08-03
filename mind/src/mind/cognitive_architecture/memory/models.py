@@ -15,7 +15,14 @@ class Memory(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
     def __str__(self) -> str:
-        """Format memory for LLM consumption"""
+        """Format memory for LLM consumption.
+
+        This is a prompt surface: retrieved memories are rendered through it into the
+        memory-query, cognitive-update, and action-selection prompts. The tags segment
+        below is inert today because nothing populates Memory.tags, so the first commit
+        that wires a producer silently changes prompt content for all three LLM nodes.
+        Wiring is NPC-1013.
+        """
         parts = [f"[{self.id}"]
 
         if self.timestamp is not None:

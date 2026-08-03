@@ -312,19 +312,21 @@ class TestVectorDBMemory:
         assert results[0].importance < results[1].importance
 
 
+@pytest.fixture
+def isolated_chroma(monkeypatch, tmp_path):
+    """Isolate ChromaDB's process-global client cache and CWD per test, so a
+    PersistentClient opened here can't alias another test's on-disk store."""
+    from chromadb.api.client import SharedSystemClient
+
+    SharedSystemClient.clear_system_cache()
+    monkeypatch.chdir(tmp_path)
+    yield
+    SharedSystemClient.clear_system_cache()
+
+
+@pytest.mark.usefixtures("isolated_chroma")
 class TestDeleteCollection:
     """delete_collection is idempotent (delete-if-exists), with no encoder load."""
-
-    @pytest.fixture(autouse=True)
-    def _isolated_chroma(self, monkeypatch, tmp_path):
-        """Isolate ChromaDB's process-global client cache and CWD per test, so a
-        PersistentClient opened here can't alias another test's on-disk store."""
-        from chromadb.api.client import SharedSystemClient
-
-        SharedSystemClient.clear_system_cache()
-        monkeypatch.chdir(tmp_path)
-        yield
-        SharedSystemClient.clear_system_cache()
 
     def test_delete_absent_collection_on_existing_path_does_not_raise(self):
         """Deleting a missing collection from an existing storage path is a silent
@@ -346,3 +348,62 @@ class TestDeleteCollection:
 
         # Still absent (delete-if-exists left the world unchanged).
         assert VectorDBMemory.collection_exists(storage_path, "never_made") is False
+
+
+@pytest.mark.usefixtures("isolated_chroma")
+class TestClearGuards:
+    """clear() promises an empty collection and a valid self.collection afterward.
+
+    It must keep that promise when the collection it is clearing is already gone, and
+    when a concurrent clear recreates the name in the window between its own delete
+    and create. Both states are reachable: forget_mind deletes a collection out from
+    under a still-resident store, and two clears can interleave.
+    """
+
+    def test_clear_tolerates_an_already_deleted_collection(self):
+        """A store whose collection was deleted underneath it can still clear().
+
+        The load-bearing assertions are the ones after the call: not raising is only
+        half the contract, and absorbing the delete without recreating would trade a
+        raise for a store whose self.collection points at nothing.
+        """
+        store = VectorDBMemory(collection_name="orphaned")
+        store.add_memory(content="doomed", importance=5.0)
+
+        # Model forget_mind deleting the collection out from under a resident store.
+        store.client.delete_collection("orphaned")
+
+        store.clear()
+
+        assert store.collection.count() == 0
+        store.add_memory(content="written after clear", importance=5.0)
+        assert store.collection.count() == 1
+
+    def test_clear_survives_a_concurrent_recreate_between_delete_and_create(self, monkeypatch):
+        """The delete guard alone does not make clear() race-safe: a concurrent clear
+        can finish its own delete+create in the window between ours, and then our
+        recreate meets a name that already exists.
+
+        The interleaving is forced deterministically by wrapping delete_collection -
+        the wrapper performs the real delete and then plays the other thread's
+        recreate before returning, which is exactly the state clear() resumes into.
+        """
+        store = VectorDBMemory(collection_name="raced")
+        real_delete = store.client.delete_collection
+        interleaved = []
+
+        def delete_then_concurrent_recreate(name):
+            real_delete(name)
+            if interleaved:
+                return
+            interleaved.append(name)
+            store.client.create_collection(name=name, metadata={"hnsw:space": "cosine"})
+
+        monkeypatch.setattr(store.client, "delete_collection", delete_then_concurrent_recreate)
+
+        store.clear()
+
+        assert interleaved == ["raced"], "the race window was never exercised"
+        assert store.collection.count() == 0
+        store.add_memory(content="written after the race", importance=5.0)
+        assert store.collection.count() == 1
