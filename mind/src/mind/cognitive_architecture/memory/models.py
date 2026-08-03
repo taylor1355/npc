@@ -17,11 +17,13 @@ class Memory(BaseModel):
     def __str__(self) -> str:
         """Format memory for LLM consumption.
 
-        This is a prompt surface: retrieved memories are rendered through it into the
-        memory-query, cognitive-update, and action-selection prompts. The tags segment
-        below is inert today because nothing populates Memory.tags, so the first commit
-        that wires a producer silently changes prompt content for all three LLM nodes.
-        Wiring is NPC-1013.
+        This is a prompt surface, and it has exactly one render site: the
+        cognitive-update node joins retrieved memories through it into its prompt
+        (nodes/cognitive_update/node.py). No other node renders a Memory - the rest
+        take working-memory text - so tags reach them only indirectly, via whatever
+        cognitive-update writes back. The tags segment below is inert today because
+        nothing populates Memory.tags, so the first commit that wires a producer
+        changes that prompt's content without touching this file. Wiring is NPC-1013.
         """
         parts = [f"[{self.id}"]
 
