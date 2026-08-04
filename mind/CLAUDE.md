@@ -153,6 +153,89 @@ poetry install
 tree src/mind/cognitive_architecture/nodes/
 ```
 
+### Commit hooks and notebook stripping
+
+`.pre-commit-config.yaml` lives at the **repo root**, one level above this file.
+Install and verify from the root:
+
+```bash
+cd ..                       # repo root, not mind/
+pre-commit install
+ls "$(git rev-parse --git-common-dir)/hooks/pre-commit"
+```
+
+That must be a real hook; only `*.sample` files means nothing is installed. Use
+`--git-common-dir` rather than a literal `.git/hooks`: in a **linked worktree** `.git`
+is a file, so `ls .git/hooks/pre-commit` fails with `Not a directory`, which reads
+like a missing hook rather than a wrong path. Hooks live in the common dir, so one
+install covers every worktree.
+
+**Nothing runs until you do this.** Hooks are machine-local: a fresh clone installs
+none, and there is no CI job running ruff or pytest — `.github/workflows/` contains
+only the Claude review action. An uninstalled hook set is silent, so confirm the file
+exists rather than assuming (NPC-1024).
+
+**mypy is configured but held at `stages: [manual]`**, so it does not run on commit:
+
+```bash
+pre-commit run --hook-stage manual mypy --all-files
+```
+
+It currently reports 41 errors across 12 files, so gating commits on it would block work
+it did not cause. Cleanup is tracked as NPC-1034; promote the hook out of `stages` once
+it is clean.
+
+**Treat that count as a floor, not a measure of the debt.** It is whatever the current
+resolution settings surface, and it has already moved once — 20 errors in 10 files
+before `mypy_path` made the internal imports resolve. Re-measure after any change to
+`[tool.mypy]` rather than quoting the number.
+
+Two things make the hook work, and both are easy to break:
+
+- It is a `local` hook that `cd`s into `mind/`, because mypy resolves its config from
+  the **current directory only** — unlike ruff, which walks up from each file — and
+  pre-commit runs hooks from the repo root, which has no `pyproject.toml`. Run from the
+  root, mypy loads no config at all and reports `Config File: Default`.
+- Every setting lives in `mind/pyproject.toml`'s `[tool.mypy]`, and the hook entry
+  passes **no flags**. This is deliberate: `poetry run mypy src/mind` — the obvious
+  thing to run by hand — must behave identically to the hook.
+  `mypy_path = "$MYPY_CONFIG_FILE_DIR/src"` is the load-bearing one; without it the
+  absolute `from mind.…` imports resolve to nothing and `ignore_missing_imports`
+  quietly degrades them to `Any`, so the check passes by not looking. Keep the
+  `$MYPY_CONFIG_FILE_DIR` prefix: mypy resolves a relative `mypy_path` against the
+  **working directory**, not against the config file, and an entry pointing at a
+  directory that does not exist is dropped **silently** — so simplifying it back to
+  `"src"` restores the shallow check with no signal that anything changed.
+
+Notebook outputs are stripped by the `nbstripout` **pre-commit hook**, and only by
+that hook. `mind/.gitattributes` no longer declares `filter=nbstripout`, because a
+clean filter runs on `git add` and checkout independently of pre-commit and its
+configuration is uncommittable: the interpreter path and `required = true` live in
+machine-local `.git/config`. Linked worktrees share that config but have different
+roots, so the relative path it held resolved per worktree, and any worktree without
+`mind/.venv` aborted routine git commands outright:
+
+```
+mind/.venv/bin/python -m nbstripout: 1: mind/.venv/bin/python: not found
+fatal: <notebook>: clean filter 'nbstripout' failed
+```
+
+**If you still have that filter configured locally, drop it** — the attribute is
+gone, so it is inert for `.ipynb`, but the stale config is a trap for anyone who
+re-adds an attribute later:
+
+```bash
+git config --unset-all filter.nbstripout.clean
+git config --unset-all filter.nbstripout.smudge
+git config --unset-all filter.nbstripout.required
+```
+
+The hook covers strictly more than the filter did — `.gitattributes` scoped it to
+`mind/**`, so the notebooks under the repo-root `archived/` tree were never stripped.
+What the hook cannot cover is `git commit --no-verify`, or an IDE committing with
+hooks disabled; the Claude review workflow flags committed notebook outputs, so that
+case is caught at review time rather than commit time.
+
 ## Current Development Focus
 
 See [docs/planning/roadmap.md](docs/planning/roadmap.md) for detailed planning.
