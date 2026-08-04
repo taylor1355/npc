@@ -85,6 +85,24 @@ disallow_untyped_defs = false
 ignore_missing_imports = true
 no_implicit_optional = true
 
+# Module resolution. The package is a namespace package (no src/mind/__init__.py) laid
+# out as packages = [{ include = "mind", from = "src" }], while all internal imports are
+# absolute `from mind.…`. Without mypy_path, `src` is on neither the search path nor the
+# cwd, so explicit_package_bases picks `mind/` as the base and checks
+# src/mind/interfaces/mcp/server.py as module `src.mind.interfaces.mcp.server`. The
+# absolute imports then resolve to nothing, and ignore_missing_imports degrades them to
+# Any rather than erroring - a check that passes by not looking. The editable install
+# cannot rescue it either: there is no py.typed in this repo, so PEP 561 bars mypy from
+# using it. Measured: adding mypy_path took the reported count from 20 errors in 10
+# files to 41 in 12.
+mypy_path = "src"
+explicit_package_bases = true
+
+# Kept as it was when these lived as hook flags, so this change is about WHERE the
+# settings live, not about retuning strictness. Revisit alongside NPC-1034: this is a
+# real loosening, and the errors it hides are part of that cleanup's scope.
+strict_optional = false
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

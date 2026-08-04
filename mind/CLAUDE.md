@@ -177,12 +177,27 @@ exists rather than assuming (NPC-1024).
 pre-commit run --hook-stage manual mypy --all-files
 ```
 
-It reports 20 pre-existing errors across 10 files, so gating commits on it would block
-work it did not cause. It is a `local` hook that `cd`s into `mind/` because mypy
-resolves its config from the **current directory only** — unlike ruff, which walks up
-from each file — and pre-commit runs hooks from the repo root, which has no
-`pyproject.toml`. Run from the root it silently loads no config at all. Cleanup is
-tracked as NPC-1034; promote the hook out of `stages` once it is clean.
+It currently reports 41 errors across 12 files, so gating commits on it would block work
+it did not cause. Cleanup is tracked as NPC-1034; promote the hook out of `stages` once
+it is clean.
+
+**Treat that count as a floor, not a measure of the debt.** It is whatever the current
+resolution settings surface, and it has already moved once — 20 errors in 10 files
+before `mypy_path` made the internal imports resolve. Re-measure after any change to
+`[tool.mypy]` rather than quoting the number.
+
+Two things make the hook work, and both are easy to break:
+
+- It is a `local` hook that `cd`s into `mind/`, because mypy resolves its config from
+  the **current directory only** — unlike ruff, which walks up from each file — and
+  pre-commit runs hooks from the repo root, which has no `pyproject.toml`. Run from the
+  root, mypy loads no config at all and reports `Config File: Default`.
+- Every setting lives in `mind/pyproject.toml`'s `[tool.mypy]`, and the hook entry
+  passes **no flags**. This is deliberate: `poetry run mypy src/mind` — the obvious
+  thing to run by hand — must behave identically to the hook. `mypy_path = "src"` is
+  the load-bearing one; without it the absolute `from mind.…` imports resolve to
+  nothing and `ignore_missing_imports` quietly degrades them to `Any`, so the check
+  passes by not looking.
 
 Notebook outputs are stripped by the `nbstripout` **pre-commit hook**, and only by
 that hook. `mind/.gitattributes` no longer declares `filter=nbstripout`, because a

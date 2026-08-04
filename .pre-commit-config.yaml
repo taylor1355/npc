@@ -104,25 +104,38 @@ repos:
       # pyproject.toml, so at the root mypy reports `Config File: Default` and
       # mind/pyproject.toml's [tool.mypy] block is silently never loaded. Confirmed
       # with a probe that errors only under warn_return_any: run from the root it
-      # passes, run from mind/ it fails. Running at the root also miscomputes module
-      # names under --explicit-package-bases (mind.src.mind.X instead of mind.X), and
-      # poetry's env is what supplies real pydantic/langgraph types rather than Any.
+      # passes, run from mind/ it fails. Since every setting now lives in that block,
+      # running from the wrong directory loses the module-resolution fix too, not just
+      # strictness. poetry's env is also what supplies real pydantic/langgraph types
+      # rather than Any.
+      #
+      # The entry passes NO flags: every setting lives in mind/pyproject.toml's
+      # [tool.mypy], including the mypy_path/explicit_package_bases pair that makes the
+      # absolute `from mind.…` imports resolve at all. That matters beyond tidiness -
+      # when the hook carries flags the config lacks, a developer running the obvious
+      # `poetry run mypy src/mind` gets different strictness AND different module names
+      # than the hook does. That is the same hook-vs-local disagreement as the trailing
+      # pins this PR fixes, so fixing one while introducing the other would be odd.
       #
       # Held at stage `manual`, so it does NOT run on commit. This hook has never
       # actually executed - while the config lived in mind/, `files: ^mind/src/` could
       # not match a path pre-commit renders as `src/...`, the same misplacement that
-      # made `pre-commit install` a no-op. So this is its first real run, and
-      # correctly configured it reports 20 pre-existing errors across 10 files.
-      # Enabling it on commit would block every commit touching mind/src/ on debt this
-      # config-only change did not create. Those errors are not fixed here for the
-      # same reason the 22-file ruff format sweep is deferred: several are in
+      # made `pre-commit install` a no-op. Correctly configured it reports 41 errors
+      # across 12 files; enabling it on commit would block every commit touching
+      # mind/src/ on debt this config-only change did not create. Those errors are not
+      # fixed here for the same reason the ruff format sweep is deferred: several are in
       # server.py and vector_db_memory.py, which in-flight #20 is editing. Tracked as
       # NPC-1034 - promote this out of `stages` once it is clean.
+      #
+      # Treat 41 as a floor, not a measure of the debt: it is whatever the current
+      # resolution settings surface, and it has already moved once (20 errors in 10
+      # files before mypy_path made the internal imports resolve). Re-measure after any
+      # change to the [tool.mypy] block rather than quoting this number.
       #
       # Run it:  pre-commit run --hook-stage manual mypy --all-files
       - id: mypy
         name: mypy
-        entry: bash -c 'cd mind && poetry run mypy --ignore-missing-imports --no-strict-optional --explicit-package-bases src/mind'
+        entry: bash -c 'cd mind && poetry run mypy src/mind'
         language: system
         pass_filenames: false
         files: ^mind/src/
