@@ -1208,7 +1208,12 @@ class TestRestartStoragePathParameter:
             )
 
         assert relink["status"] == "relinked"
-        assert "Ignoring memory_storage_path" not in caplog.text
+        # Assert on captured records, not on message text. Keying the negative on the
+        # warning's wording would go vacuous the moment anyone rewords it - and the
+        # positive test above would not notice, because it asserts on the paths rather
+        # than the prefix. This form also catches any OTHER spurious warning on the
+        # agreeing-caller path, which is the property actually under test.
+        assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
 
 
 class TestRecordedConfigFidelity:

@@ -200,13 +200,13 @@ class MCPServer:
         pinning every NPC's seed text for the process lifetime, and makes "reattach never
         re-seeds" structural here instead of merely conventional.
 
-        "Practically", not "entirely" - the stripping does not make an entry small. Of
-        MindConfig's seven fields, three are client-sized collections: the two stripped
-        here, plus traits and personality_dimensions, which are deliberately RETAINED
-        because a rehydrated mind must be the same character. An entry is therefore
-        bounded by whatever personality the client sent, not by a constant.
-        (initial_working_memory is unbounded in its own right: WorkingMemory carries four
-        list[str] fields and sets extra="allow".)
+        "Practically", not "entirely" - the stripping does not make an entry small. The
+        client-sized fields are not just the two stripped here: traits and
+        personality_dimensions are client-supplied collections too, and they are
+        deliberately RETAINED, because a rehydrated mind must be the same character. An
+        entry is therefore bounded by whatever personality the client sent, not by a
+        constant. (initial_working_memory is unbounded in its own right whatever its
+        declared fields, because WorkingMemory sets extra="allow".)
 
         initial_working_memory is different: Mind.reattach DOES read it (the
         `config.initial_working_memory or WorkingMemory()` line in mind.py), and there is
