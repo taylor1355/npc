@@ -2,12 +2,12 @@
 
 # LLM Model Families - OpenRouter compatible models
 #
-# Prefer UNDATED slugs. Dated preview slugs ("...-preview-09-2025") are retired
-# upstream on a schedule, and OpenRouter then rejects them with a 404 "No endpoints
-# found for <slug>" at CALL time rather than at startup - so the whole pipeline
-# (MCP mind decisions, memory consolidation, the LLM-judge harness) goes silently
-# dead and presents as "the NPC stopped deciding". Both Gemini constants here were
-# dated previews and both had been retired (NPC-1012).
+# Prefer undated, unpinned slugs. Preview and version-pinned slugs
+# ("...-preview-09-2025", "...-lite-001") are retired upstream on a schedule, and
+# OpenRouter then rejects them with a 404 at CALL time rather than at startup - so
+# the pipeline goes silently dead rather than failing loudly (NPC-1012).
+#
+# This is the single source for model slugs; LangChainModel aliases these values.
 SONNET = "anthropic/claude-sonnet-4"
 GEMINI_FLASH = "google/gemini-2.5-flash"
 GEMINI_FLASH_LITE = "google/gemini-2.5-flash-lite"

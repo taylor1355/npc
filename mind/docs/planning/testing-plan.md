@@ -179,7 +179,8 @@ tests/integration/
 ```
 
 **LLM Configuration:**
-- Use cheap model: `google/gemini-2.0-flash-lite-001` (current default)
+- Use the cheap model: `mind.constants.DEFAULT_SMALL_MODEL`. Reference the constant
+  rather than a slug literal - provider slugs retire on a schedule (NPC-1012)
 - Set low temperature (0) for deterministic testing
 - Mock LLM for fast tests, real LLM for integration validation
 
