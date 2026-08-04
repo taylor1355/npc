@@ -1,6 +1,7 @@
 """MCP server for mind management"""
 
 import json
+import os
 import uuid
 
 from fastmcp import Context, FastMCP
@@ -170,8 +171,10 @@ class MCPServer:
         #
         # Growth: entries are added per created (or relinked) mind and removed only by
         # forget_mind, so the map grows monotonically in distinct client-supplied
-        # mind_ids over the process lifetime. Each entry is bounded - _config_to_record
-        # strips the seed payload, the only unbounded part of a MindConfig.
+        # mind_ids over the process lifetime. _config_to_record strips the seed payload,
+        # which is what keeps an entry from pinning arbitrarily long prose - but an entry
+        # is not small: traits and personality_dimensions are client-sized and retained.
+        # See _config_to_record for the per-field accounting.
         #
         # Scope: process-local. It restores fidelity across an EVICTION; across a
         # server RESTART the map is empty and the client must supply the location
@@ -192,10 +195,18 @@ class MCPServer:
 
         initial_long_term_memories is genuinely ignored by Mind.reattach - re-seeding on
         every relink would duplicate the originals - so dropping it cannot change a
-        rehydrated mind. It is also the only unbounded part of a MindConfig, so dropping
-        it is what keeps each map entry small rather than pinning every NPC's seed text
-        for the process lifetime, and makes "reattach never re-seeds" structural here
-        instead of merely conventional.
+        rehydrated mind. It is also the field a client fills with arbitrarily long prose,
+        so dropping it is what keeps each map entry practically bounded rather than
+        pinning every NPC's seed text for the process lifetime, and makes "reattach never
+        re-seeds" structural here instead of merely conventional.
+
+        "Practically", not "entirely" - the stripping does not make an entry small. Of
+        MindConfig's seven fields, three are client-sized collections: the two stripped
+        here, plus traits and personality_dimensions, which are deliberately RETAINED
+        because a rehydrated mind must be the same character. An entry is therefore
+        bounded by whatever personality the client sent, not by a constant.
+        (initial_working_memory is unbounded in its own right: WorkingMemory carries four
+        list[str] fields and sets extra="allow".)
 
         initial_working_memory is different: Mind.reattach DOES read it (the
         `config.initial_working_memory or WorkingMemory()` line in mind.py), and there is
@@ -243,7 +254,22 @@ class MCPServer:
         """
         recorded = self.mind_configs.get(mind_id)
         if recorded is not None:
-            if memory_storage_path and memory_storage_path != recorded.memory_storage_path:
+            # Compare normalized, so "./db", "db" and "db/" - the same directory spelled
+            # three ways - do not trip the warning. A diagnostic that cries wolf on a
+            # caller who agrees with the record gets filtered out by that client before
+            # the stale-path case it exists for ever arrives, which is worse than no
+            # warning at all.
+            #
+            # normpath is purely textual, and deliberately so: it collapses "." and
+            # redundant separators without touching the filesystem. It therefore does
+            # NOT equate a symlink with its target, does NOT account for
+            # case-insensitive filesystems, and does NOT equate a relative spelling with
+            # an absolute one. Those still produce a false warning; realpath would fix
+            # the first two at the cost of a filesystem call on every resolve, including
+            # for paths that may not exist.
+            if memory_storage_path and os.path.normpath(memory_storage_path) != os.path.normpath(
+                recorded.memory_storage_path
+            ):
                 # Discarding the caller's path silently would let a destructive
                 # forget_mind report success over a location the caller never named.
                 # The record still wins - this is diagnosable, not negotiable.

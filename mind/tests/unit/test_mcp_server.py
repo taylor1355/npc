@@ -1,6 +1,7 @@
 """Unit tests for MCP server"""
 
 import json
+import logging
 from unittest.mock import patch
 
 import pytest
@@ -1131,13 +1132,18 @@ class TestRestartStoragePathParameter:
         assert VectorDBMemory.collection_exists(self.CUSTOM_PATH, "mind_mind_rv") is True
 
     @pytest.mark.asyncio
-    async def test_supplied_path_is_ignored_when_a_config_is_recorded(self):
+    async def test_supplied_path_is_ignored_when_a_config_is_recorded(self, caplog):
         """Precedence rule 1: the recorded config beats a caller-supplied path.
 
         Every other test in this class runs against an empty map, so they all exercise
         case 2 of _config_for. This one pins rule 1 itself - the rule that makes
         memory_storage_path a restart-only fallback rather than a relocation
         instruction. Without it a refactor could invert the precedence and stay green.
+
+        It also pins that the discard is LOGGED. The warning is the entire mitigation
+        for the destructive case _config_for documents - a forget_mind that reports
+        success over a location the caller never named - so a silent discard is the
+        failure this branch exists to prevent, not a cosmetic regression.
         """
         from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
 
@@ -1148,16 +1154,17 @@ class TestRestartStoragePathParameter:
         server.minds["mind_rw"].memory_store.add_memory(content="recorded", importance=5.0)
         await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_rw"})
 
-        relink = parse_response(
-            await server.mcp.call_tool(
-                "relink_mind",
-                {
-                    "mind_id": "mind_rw",
-                    "entity_id": "entity_rw",
-                    "memory_storage_path": wrong_path,
-                },
+        with caplog.at_level(logging.WARNING, logger="mind"):
+            relink = parse_response(
+                await server.mcp.call_tool(
+                    "relink_mind",
+                    {
+                        "mind_id": "mind_rw",
+                        "entity_id": "entity_rw",
+                        "memory_storage_path": wrong_path,
+                    },
+                )
             )
-        )
 
         assert relink["status"] == "relinked"
         # The load-bearing assertion: the rehydrated store holds what was written to
@@ -1166,6 +1173,42 @@ class TestRestartStoragePathParameter:
         assert server.minds["mind_rw"].memory_store.collection.count() == 1
         # And the bogus path was never even created on disk.
         assert VectorDBMemory.collection_exists(wrong_path, "mind_mind_rw") is False
+        # The discard is diagnosable rather than silent. Both paths are named, so the
+        # client can tell which one it sent and which one won.
+        assert wrong_path in caplog.text
+        assert self.CUSTOM_PATH in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_an_equivalent_path_spelling_does_not_warn(self, caplog):
+        """The warning must not fire on a caller who AGREES with the record.
+
+        "./x", "x" and "x/" are the same directory. A diagnostic that flags them as a
+        mismatch trains its reader to ignore it, which costs exactly the stale-path
+        case the warning exists for. Behavior is unaffected either way (the record
+        wins), so this pins the diagnostic's precision, not its effect.
+        """
+        server = MCPServer()
+        await self._create_mind(server, "mind_rx", "entity_rx")
+        await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_rx"})
+
+        # Same directory as CUSTOM_PATH ("./tmp/restart_chroma_db"), spelled without
+        # the leading "./" and with a trailing separator.
+        equivalent = self.CUSTOM_PATH.removeprefix("./") + "/"
+
+        with caplog.at_level(logging.WARNING, logger="mind"):
+            relink = parse_response(
+                await server.mcp.call_tool(
+                    "relink_mind",
+                    {
+                        "mind_id": "mind_rx",
+                        "entity_id": "entity_rx",
+                        "memory_storage_path": equivalent,
+                    },
+                )
+            )
+
+        assert relink["status"] == "relinked"
+        assert "Ignoring memory_storage_path" not in caplog.text
 
 
 class TestRecordedConfigFidelity:
