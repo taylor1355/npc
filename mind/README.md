@@ -69,7 +69,9 @@ The Godot simulation connects to this server for NPC cognitive processing.
 - **`create_mind(mind_id, entity_id, config)`** - Initialize cognitive pipeline
 - **`decide_action(mind_id, observation, events)`** - Process observation + events → action
 - **`consolidate_memories(mind_id)`** - Move daily → long-term storage
-- **`cleanup_mind(mind_id)`** - Remove mind instance
+- **`cleanup_mind(mind_id)`** - Release the instance, **retaining** its stored memory (`released`)
+- **`relink_mind(mind_id, entity_id, memory_storage_path=None)`** - Re-bind to an entity, rehydrating from retained memory if needed (`relinked` | `not_found`)
+- **`forget_mind(mind_id, memory_storage_path=None)`** - Permanently erase stored memory (`forgotten` | `not_found`)
 
 ## Documentation
 

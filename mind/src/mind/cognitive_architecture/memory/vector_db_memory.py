@@ -7,6 +7,8 @@ from chromadb.errors import NotFoundError
 from pydantic import BaseModel, ConfigDict, Field
 from sentence_transformers import SentenceTransformer
 
+from mind.constants import DEFAULT_EMBEDDING_MODEL
+
 from ..id_generator import IdGenerator
 from .models import Memory
 
@@ -118,7 +120,7 @@ class VectorDBMemory:
     def __init__(
         self,
         collection_name: str = "memories",
-        embedding_model: str = "all-MiniLM-L6-v2",
+        embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         storage_path: str | None = None,
     ):
         """Initialize vector database memory component
