@@ -2,15 +2,21 @@
 
 from langchain_openai import ChatOpenAI
 
+from mind import constants
 from mind.project_config import OPENROUTER_API_KEY
 
 
 class LangChainModel:
-    """Model identifiers for OpenRouter-compatible models"""
+    """Model identifiers for OpenRouter-compatible models.
 
-    CLAUDE_SONNET = "anthropic/claude-sonnet-4"
-    GEMINI_FLASH = "google/gemini-2.5-flash-preview-09-2025"
-    GEMINI_FLASH_LITE = "google/gemini-2.5-flash-lite-preview-09-2025"
+    A named view over `mind.constants`, not a second table. NPC-1012 had to be fixed
+    in two hand-duplicated copies of these slugs; aliasing means a future slug change
+    lands in one place and cannot leave half the project on a retired model.
+    """
+
+    CLAUDE_SONNET = constants.SONNET
+    GEMINI_FLASH = constants.GEMINI_FLASH
+    GEMINI_FLASH_LITE = constants.GEMINI_FLASH_LITE
 
 
 def get_llm(model: str, temperature: float = 0) -> ChatOpenAI:

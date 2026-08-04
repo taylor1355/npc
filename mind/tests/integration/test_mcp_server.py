@@ -12,6 +12,7 @@ from mind.cognitive_architecture.observations import (
     StatusObservation,
     VisionObservation,
 )
+from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_SMALL_MODEL
 from mind.interfaces.mcp.models import MindConfig
 from mind.interfaces.mcp.server import MCPServer
 
@@ -39,8 +40,8 @@ def test_mind_config():
             "sensitivity": 0.4,
             "conscientiousness": 0.6,
         },
-        llm_model="google/gemini-2.0-flash-lite-001",
-        embedding_model="all-MiniLM-L6-v2",
+        llm_model=DEFAULT_SMALL_MODEL,
+        embedding_model=DEFAULT_EMBEDDING_MODEL,
         memory_storage_path="./tmp/test_chroma_db",
         initial_working_memory=WorkingMemory(
             situation_assessment="I am exploring a new area",
