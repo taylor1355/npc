@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from mind.constants import DEFAULT_MEMORY_STORAGE_PATH
 from mind.interfaces.mcp.server import MCPServer
 
 
@@ -714,10 +715,9 @@ class TestMindPersistenceLifecycle:
     async def test_cleanup_retains_but_forget_deletes_collection(self):
         """collection_exists is True after release, False after forget."""
         from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-        from mind.interfaces.mcp.models import MindConfig
 
         server = MCPServer()
-        storage_path = MindConfig(traits=[]).memory_storage_path
+        storage_path = DEFAULT_MEMORY_STORAGE_PATH
 
         await self._create_mind(server, "mind_d", "entity_d")
         server.minds["mind_d"].memory_store.add_memory(content="x", importance=5.0)
@@ -742,10 +742,9 @@ class TestMindPersistenceLifecycle:
         """forget_mind on a resident mind drops it from the registry and deletes its
         collection (no recreated empty shell)."""
         from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-        from mind.interfaces.mcp.models import MindConfig
 
         server = MCPServer()
-        storage_path = MindConfig(traits=[]).memory_storage_path
+        storage_path = DEFAULT_MEMORY_STORAGE_PATH
 
         await self._create_mind(server, "mind_e", "entity_e")
         server.minds["mind_e"].memory_store.add_memory(content="y", importance=5.0)
@@ -843,10 +842,9 @@ class TestMindPersistenceLifecycle:
         collection before deleting it. Regression for the heavy-construct forget path
         (PR #17 review)."""
         from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-        from mind.interfaces.mcp.models import MindConfig
 
         server = MCPServer()
-        storage_path = MindConfig(traits=[]).memory_storage_path
+        storage_path = DEFAULT_MEMORY_STORAGE_PATH
 
         # Create + release so the collection is retained on disk but no live Mind holds it.
         await self._create_mind(server, "mind_g", "entity_g")
@@ -922,6 +920,10 @@ class TestCustomStoragePathLifecycle:
         assert "mind_cp" not in server.minds
         # The collection is retained - on the custom path, where it was created.
         assert VectorDBMemory.collection_exists(self.CUSTOM_PATH, "mind_mind_cp") is True
+        # The lifetime rule that makes the relink below possible, asserted directly
+        # rather than only through its consequence: release must NOT drop the config,
+        # or the retained collection becomes unaddressable.
+        assert "mind_cp" in server.mind_configs
 
         relink = parse_response(
             await server.mcp.call_tool(
@@ -955,6 +957,9 @@ class TestCustomStoragePathLifecycle:
 
         assert forget["status"] == "forgotten"
         assert VectorDBMemory.collection_exists(self.CUSTOM_PATH, "mind_mind_cq") is False
+        # The other half of the lifetime rule: forget destroys the target, so it is
+        # the one operation that may drop the recorded config.
+        assert "mind_cq" not in server.mind_configs
 
     @pytest.mark.asyncio
     async def test_forget_reports_not_found_when_no_collection_was_erased(self):
@@ -971,3 +976,275 @@ class TestCustomStoragePathLifecycle:
         )
 
         assert forget["status"] == "not_found"
+
+    @pytest.mark.asyncio
+    async def test_second_forget_of_the_same_mind_reports_not_found(self):
+        """The repeat case a retrying client actually produces, as opposed to an id
+        that never existed.
+
+        forget_mind used to be unconditionally idempotent - it always answered
+        "forgotten", including over a mind it had already erased. That made a retry
+        indistinguishable from a successful first erase. The honest answer on the
+        second call is "not_found": nothing was erased, because there was nothing
+        left to erase.
+        """
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+
+        server = MCPServer()
+        await self._create_mind(server, "mind_cr", "entity_cr")
+
+        first = parse_response(await server.mcp.call_tool("forget_mind", {"mind_id": "mind_cr"}))
+        assert first["status"] == "forgotten"
+        assert VectorDBMemory.collection_exists(self.CUSTOM_PATH, "mind_mind_cr") is False
+
+        second = parse_response(await server.mcp.call_tool("forget_mind", {"mind_id": "mind_cr"}))
+        assert second["status"] == "not_found"
+
+
+class TestRestartStoragePathParameter:
+    """A restarted server can address a custom-path mind when the client supplies the
+    path (NPC-1023).
+
+    self.mind_configs is process-local, so a restart empties it. Before the optional
+    memory_storage_path parameter existed, that left a custom-path mind permanently
+    unreachable: relink_mind probed the default path and reported "not_found", and
+    forget_mind could not erase it.
+
+    "Restart" here is a fresh MCPServer over the same on-disk directory - the same
+    idiom TestMindPersistenceLifecycle uses - which is exactly what distinguishes this
+    from eviction: eviction keeps the map, a restart does not.
+    """
+
+    CUSTOM_PATH = "./tmp/restart_chroma_db"
+
+    @pytest.fixture(autouse=True)
+    def _isolated_chroma(self, monkeypatch, tmp_path):
+        from chromadb.api.client import SharedSystemClient
+
+        SharedSystemClient.clear_system_cache()
+        monkeypatch.chdir(tmp_path)
+        yield
+        SharedSystemClient.clear_system_cache()
+
+    @classmethod
+    async def _create_mind(cls, server, mind_id, entity_id):
+        config = {"traits": [], "memory_storage_path": cls.CUSTOM_PATH}
+        return await server.mcp.call_tool(
+            "create_mind",
+            {"mind_id": mind_id, "entity_id": entity_id, "config": config},
+        )
+
+    @pytest.mark.asyncio
+    async def test_relink_after_restart_recovers_a_custom_path_mind_when_path_supplied(self):
+        """The restart case: a fresh server has no record, so the client's path is the
+        only thing that can locate the collection."""
+        server1 = MCPServer()
+        await self._create_mind(server1, "mind_rs", "entity_rs")
+        server1.minds["mind_rs"].memory_store.add_memory(content="survives", importance=5.0)
+        count_before = server1.minds["mind_rs"].memory_store.collection.count()
+        assert count_before == 1
+
+        # Restart: the new server shares the on-disk store but not the config map.
+        del server1
+        server2 = MCPServer()
+        assert "mind_rs" not in server2.mind_configs
+
+        relink = parse_response(
+            await server2.mcp.call_tool(
+                "relink_mind",
+                {
+                    "mind_id": "mind_rs",
+                    "entity_id": "entity_rs",
+                    "memory_storage_path": self.CUSTOM_PATH,
+                },
+            )
+        )
+
+        assert relink["status"] == "relinked"
+        assert server2.minds["mind_rs"].memory_store.collection.count() == count_before
+
+    @pytest.mark.asyncio
+    async def test_relink_after_restart_still_not_found_without_the_path(self):
+        """Omitting the parameter preserves the old behavior exactly.
+
+        This is what keeps the change backward-compatible: a client that does not send
+        memory_storage_path gets the same default-path probe - and the same honest
+        "not_found" - as before.
+        """
+        server1 = MCPServer()
+        await self._create_mind(server1, "mind_rt", "entity_rt")
+        del server1
+
+        server2 = MCPServer()
+        relink = parse_response(
+            await server2.mcp.call_tool(
+                "relink_mind", {"mind_id": "mind_rt", "entity_id": "entity_rt"}
+            )
+        )
+
+        assert relink["status"] == "not_found"
+
+    @pytest.mark.asyncio
+    async def test_forget_after_restart_erases_a_custom_path_mind_when_path_supplied(self):
+        """The worst half of NPC-1023, at restart scope.
+
+        The load-bearing assertion is collection_exists, not the status string: a
+        forget that answers "forgotten" while the collection survives tells the caller
+        their data is destroyed when it is not. A status-only test would pass against
+        exactly that bug.
+        """
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+
+        server1 = MCPServer()
+        await self._create_mind(server1, "mind_ru", "entity_ru")
+        server1.minds["mind_ru"].memory_store.add_memory(content="erase me", importance=5.0)
+        del server1
+
+        server2 = MCPServer()
+        assert VectorDBMemory.collection_exists(self.CUSTOM_PATH, "mind_mind_ru") is True
+
+        forget = parse_response(
+            await server2.mcp.call_tool(
+                "forget_mind",
+                {"mind_id": "mind_ru", "memory_storage_path": self.CUSTOM_PATH},
+            )
+        )
+
+        assert forget["status"] == "forgotten"
+        assert VectorDBMemory.collection_exists(self.CUSTOM_PATH, "mind_mind_ru") is False
+
+    @pytest.mark.asyncio
+    async def test_forget_after_restart_reports_not_found_without_the_path(self):
+        """Without the path the collection is not reachable, so nothing is erased -
+        and the status must say so rather than claim a deletion it did not perform."""
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+
+        server1 = MCPServer()
+        await self._create_mind(server1, "mind_rv", "entity_rv")
+        del server1
+
+        server2 = MCPServer()
+        forget = parse_response(await server2.mcp.call_tool("forget_mind", {"mind_id": "mind_rv"}))
+
+        assert forget["status"] == "not_found"
+        # The collection is untouched, which is what makes "not_found" the honest answer.
+        assert VectorDBMemory.collection_exists(self.CUSTOM_PATH, "mind_mind_rv") is True
+
+
+class TestRecordedConfigFidelity:
+    """relink_mind must rebuild a mind from the config it was CREATED with, not a
+    default-constructed one (NPC-1023).
+
+    memory_storage_path is the self-announcing field - get it wrong and relink says
+    "not_found". These tests cover the quiet ones. embedding_model is the sharpest:
+    Mind.reattach passes it to VectorDBMemory, which constructs its own
+    SentenceTransformer and embeds queries with it, so rehydrating under the default
+    model means querying a collection with vectors from a different model - a
+    dimension error at best and silently meaningless neighbours at worst.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolated_chroma(self, monkeypatch, tmp_path):
+        from chromadb.api.client import SharedSystemClient
+
+        SharedSystemClient.clear_system_cache()
+        monkeypatch.chdir(tmp_path)
+        yield
+        SharedSystemClient.clear_system_cache()
+
+    @pytest.mark.asyncio
+    async def test_relink_reattaches_with_the_recorded_embedding_model(self):
+        """The encoder the rehydrated store builds must be the one that wrote the
+        stored vectors.
+
+        SentenceTransformer is patched so the assertion is about which model name is
+        requested, not about downloading a real model - and so a fictitious name can
+        stand in for "not the default" without touching the network.
+        """
+        custom_model = "test-only-embedding-model"
+
+        with patch(
+            "mind.cognitive_architecture.memory.vector_db_memory.SentenceTransformer"
+        ) as encoder_ctor:
+            server = MCPServer()
+            await server.mcp.call_tool(
+                "create_mind",
+                {
+                    "mind_id": "mind_em",
+                    "entity_id": "entity_em",
+                    "config": {"traits": [], "embedding_model": custom_model},
+                },
+            )
+            await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_em"})
+
+            # Only the reattach-time construction is under test.
+            encoder_ctor.reset_mock()
+            relink = parse_response(
+                await server.mcp.call_tool(
+                    "relink_mind", {"mind_id": "mind_em", "entity_id": "entity_em"}
+                )
+            )
+
+        assert relink["status"] == "relinked"
+        encoder_ctor.assert_called_once_with(custom_model)
+
+    @pytest.mark.asyncio
+    async def test_relink_restores_traits_and_personality_from_the_recorded_config(self):
+        """A rehydrated mind must be the same character it was before release.
+
+        Rebuilding from MindConfig(traits=[]) returns a mind with no traits and no
+        personality dimensions - the NPC comes back a stranger, with nothing in the
+        response to indicate it.
+        """
+        server = MCPServer()
+        await server.mcp.call_tool(
+            "create_mind",
+            {
+                "mind_id": "mind_id_fid",
+                "entity_id": "entity_fid",
+                "config": {
+                    "traits": ["gruff", "loyal"],
+                    "personality_dimensions": {"extroversion": 0.9},
+                },
+            },
+        )
+        await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_id_fid"})
+
+        relink = parse_response(
+            await server.mcp.call_tool(
+                "relink_mind", {"mind_id": "mind_id_fid", "entity_id": "entity_fid_new"}
+            )
+        )
+        assert relink["status"] == "relinked"
+
+        rehydrated = server.minds["mind_id_fid"]
+        assert rehydrated.traits == ["gruff", "loyal"]
+        assert rehydrated.personality_dimensions == {"extroversion": 0.9}
+
+    @pytest.mark.asyncio
+    async def test_recorded_config_drops_the_seed_payload(self):
+        """The map records how to rebuild a mind, not what it was seeded with.
+
+        Mind.reattach ignores initial_long_term_memories by design (re-seeding on every
+        relink would duplicate the originals), so retaining them would pin every NPC's
+        seed text for the process lifetime to no purpose. Dropping them is what keeps
+        each entry bounded, and makes the never-re-seed contract structural.
+        """
+        server = MCPServer()
+        await server.mcp.call_tool(
+            "create_mind",
+            {
+                "mind_id": "mind_seed",
+                "entity_id": "entity_seed",
+                "config": {
+                    "traits": ["curious"],
+                    "initial_long_term_memories": ["a seeded memory"],
+                },
+            },
+        )
+
+        recorded = server.mind_configs["mind_seed"]
+        assert recorded.initial_long_term_memories == []
+        assert recorded.initial_working_memory is None
+        # The fields that DO drive a rebuild are kept.
+        assert recorded.traits == ["curious"]

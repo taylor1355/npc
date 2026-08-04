@@ -17,7 +17,9 @@ NPC Cognitive Architecture
 │   ├── Tool: create_mind - Initialize cognitive pipeline
 │   ├── Tool: decide_action - Process observation → action
 │   ├── Tool: consolidate_memories - Daily → long-term storage
-│   ├── Tool: cleanup_mind - Remove mind instance
+│   ├── Tool: cleanup_mind - Release instance, RETAIN memory
+│   ├── Tool: relink_mind - Re-bind entity, rehydrate if needed
+│   ├── Tool: forget_mind - Erase memory permanently
 │   └── Resources: mind://{id}/* - State endpoints
 └── Memory Systems
     ├── Working Memory - Pydantic model for current context
@@ -65,7 +67,13 @@ The MCP server (`src/mind/interfaces/mcp/`) provides network access to minds via
 - `create_mind(mind_id, entity_id, config)`: Initialize mind with cognitive pipeline
 - `decide_action(mind_id, observation, events)`: Process structured observation + events → action dict
 - `consolidate_memories(mind_id)`: Transfer daily → long-term storage
-- `cleanup_mind(mind_id)`: Remove mind and free resources
+- `cleanup_mind(mind_id)`: Release the mind, **retaining** its collection → `released`
+- `relink_mind(mind_id, entity_id, memory_storage_path=None)`: Re-bind to an entity, rehydrating from the retained collection → `relinked` | `not_found`
+- `forget_mind(mind_id, memory_storage_path=None)`: Permanently delete the collection → `forgotten` | `not_found`
+
+See [interfaces/mcp.md](interfaces/mcp.md) for the retain-vs-erase contract and the
+optional `memory_storage_path` parameter (needed only to address a mind after a
+server restart).
 
 **Resources:**
 - `mind://{id}/state`: Complete mental state snapshot

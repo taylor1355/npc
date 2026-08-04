@@ -16,6 +16,7 @@ from mind.cognitive_architecture.observations import (
     Observation,
 )
 from mind.cognitive_architecture.state import PipelineState
+from mind.constants import DEFAULT_MEMORY_STORAGE_PATH
 from mind.logging_config import get_logger
 
 from .mind import Mind
@@ -144,37 +145,92 @@ class MCPServer:
         """Initialize the MCP server"""
         self.minds: dict[str, Mind] = {}  # Simple dict registry
 
-        # mind_id (PK) -> the memory_storage_path that mind was CREATED with.
-        # memory_storage_path is client-settable per mind, so relink/forget cannot
-        # probe the default path and expect to find a mind that was placed elsewhere
-        # (NPC-1023). This map deliberately OUTLIVES cleanup_mind: release retains the
-        # collection, so the path must survive to make the later relink addressable.
-        # Only forget_mind drops the entry, because only forget destroys the target.
+        # mind_id (PK) -> the MindConfig that mind was CREATED with.
         #
-        # Scope: this is process-local, so it restores addressability across an
-        # eviction, not across a server restart. See _storage_path_for.
-        self.mind_storage_paths: dict[str, str] = {}
+        # Several MindConfig fields are client-settable per mind, so relink/forget
+        # cannot default-construct a MindConfig(traits=[]) and expect it to describe
+        # THIS mind (NPC-1023). Each defaulted field fails differently, and the
+        # loudest is not the worst:
+        #   - memory_storage_path decides WHERE the collection is looked for. Getting
+        #     it wrong is at least self-announcing: relink reports "not_found".
+        #   - embedding_model decides whether the vectors read back are comparable to
+        #     the stored ones at all. Mind.reattach hands it to VectorDBMemory, which
+        #     builds its own SentenceTransformer and embeds queries client-side, so a
+        #     mind rehydrated under the default model queries a collection written by
+        #     a different one - InvalidDimension when the widths differ, and silently
+        #     meaningless nearest-neighbours when they happen to match. Nothing
+        #     reports the second case, which makes it strictly worse than "not_found".
+        #   - traits / personality_dimensions / llm_model decide who the rehydrated
+        #     NPC actually is; defaulting them returns a personality-less stranger.
+        #
+        # This map deliberately OUTLIVES cleanup_mind: release retains the collection,
+        # so the config must survive to make the later relink both addressable and
+        # faithful. Only forget_mind drops the entry, because only forget destroys the
+        # target.
+        #
+        # Growth: entries are added per created (or relinked) mind and removed only by
+        # forget_mind, so the map grows monotonically in distinct client-supplied
+        # mind_ids over the process lifetime. Each entry is bounded - _config_to_record
+        # strips the seed payload, the only unbounded part of a MindConfig.
+        #
+        # Scope: process-local. It restores fidelity across an EVICTION; across a
+        # server RESTART the map is empty and the client must supply the location
+        # itself. See _config_for.
+        self.mind_configs: dict[str, MindConfig] = {}
 
         # Create MCP server
         self.mcp = FastMCP(name)
 
         self._register_tools_and_resources()
 
-    def _storage_path_for(self, mind_id: str) -> str:
-        """Resolve the storage path to probe for a non-resident mind.
+    @staticmethod
+    def _config_to_record(config: MindConfig) -> MindConfig:
+        """Strip the seed payload from a config before recording it.
 
-        Returns the path the mind was created with when that is known, and the
-        MindConfig default otherwise.
-
-        The fallback is a genuine gap, not a safe default: after a server restart
-        the map is empty, so a mind created on a custom path is unreachable and
-        relink_mind will honestly report "not_found". Closing that would require
-        either persisting this map outside any per-mind storage path or letting the
-        client pass memory_storage_path to relink_mind/forget_mind - the latter is
-        an MCP tool-signature change affecting the Godot bridge, so it is
-        deliberately out of scope here.
+        Mind.reattach deliberately ignores initial_long_term_memories (re-seeding on
+        every relink would duplicate the originals) and takes working memory from the
+        live mind, so neither field can influence a future relink. Dropping them keeps
+        each map entry small and bounded rather than pinning every NPC's seed text for
+        the process lifetime - and makes "reattach never re-seeds" structural here
+        instead of merely conventional.
         """
-        return self.mind_storage_paths.get(mind_id, MindConfig(traits=[]).memory_storage_path)
+        return config.model_copy(
+            update={"initial_long_term_memories": [], "initial_working_memory": None}
+        )
+
+    def _config_for(self, mind_id: str, memory_storage_path: str | None = None) -> MindConfig:
+        """Resolve the MindConfig to use for a non-resident mind.
+
+        Precedence, strongest first:
+          1. The recorded creating config. It is ground truth - it is what the mind
+             was actually built with - so it wins even when the caller also supplies
+             a path. A caller-supplied path that disagrees with it is a client error,
+             not a relocation instruction; this server has no move operation.
+          2. A default config pointed at the caller-supplied memory_storage_path.
+             This is the server-restart path: the map is empty, and the caller is the
+             only remaining witness to where the collection lives.
+          3. A fully default config, i.e. today's behavior for a caller that supplies
+             nothing.
+
+        Case 3 stays a genuine gap rather than a safe default: a mind created on a
+        custom path with no path supplied here is unreachable, and relink_mind reports
+        "not_found" honestly instead of mis-probing.
+
+        Case 2 closes addressability across a restart but NOT fidelity: only the path
+        crosses the process boundary, so a mind whose creating config set a non-default
+        embedding_model, llm_model, traits, or personality_dimensions is rehydrated
+        with the defaults for those. For embedding_model that is the silent-mismatch
+        failure described on self.mind_configs, so a client that sets a non-default
+        embedding_model must not rely on restart-relink to recover the mind.
+        """
+        recorded = self.mind_configs.get(mind_id)
+        if recorded is not None:
+            return recorded
+
+        return MindConfig(
+            traits=[],
+            memory_storage_path=memory_storage_path or DEFAULT_MEMORY_STORAGE_PATH,
+        )
 
     def _register_tools_and_resources(self):
         """Register all tools and resources with MCP"""
@@ -203,9 +259,10 @@ class MCPServer:
             """
             mind = Mind.from_config(mind_id, entity_id, config)
             self.minds[mind_id] = mind
-            # Remember where this mind's collection lives so relink/forget can still
-            # address it once the mind is no longer resident (NPC-1023).
-            self.mind_storage_paths[mind_id] = config.memory_storage_path
+            # Remember how this mind was built - not just where it lives - so a later
+            # relink/forget can address it and rehydrate it faithfully once it is no
+            # longer resident (NPC-1023).
+            self.mind_configs[mind_id] = self._config_to_record(config)
 
             return MindInfoResponse(status="created", mind_id=mind_id, entity_id=entity_id)
 
@@ -402,6 +459,7 @@ class MCPServer:
         async def relink_mind(
             mind_id: str,
             entity_id: str,
+            memory_storage_path: str | None = None,
             ctx: Context = None,
         ) -> MindInfoResponse:
             """Re-bind a mind to a (possibly new) driven entity, rehydrating if needed.
@@ -419,6 +477,13 @@ class MCPServer:
                 mind_id: The mind's own identifier (PK) - keys self.minds and the
                     retained collection.
                 entity_id: The simulation entity this mind should now drive (FK).
+                memory_storage_path: Where to look for the retained collection when
+                    this server has no record of the mind - i.e. after a restart.
+                    Optional, and ignored when a recorded config exists (that config
+                    is ground truth); omitting it preserves the previous behavior of
+                    probing the default path, so an older client stays compatible.
+                    Supplying it restores addressability but not the rest of the
+                    creating config - see _config_for.
             """
             # Resident: rebind the FK in place. mind_id (PK) is the stable identity;
             # the driven entity can change across relinks.
@@ -427,16 +492,15 @@ class MCPServer:
                 return MindInfoResponse(status="relinked", mind_id=mind_id, entity_id=entity_id)
 
             # Not resident: rehydrate from a retained collection if one survives.
-            # The probe must use the path this mind was CREATED with - a client-set
-            # memory_storage_path is not the default, and probing the default would
-            # report "not_found" over a collection that is on disk (NPC-1023).
-            # reattach otherwise uses the default cognitive config (embedding);
-            # initial_long_term_memories is irrelevant since reattach never seeds.
-            config = MindConfig(traits=[], memory_storage_path=self._storage_path_for(mind_id))
+            # The config must be the one this mind was CREATED with, not a freshly
+            # defaulted one (NPC-1023). It decides both where to probe and how to
+            # rebuild the mind - most sharply embedding_model, which must match the
+            # model that wrote the stored vectors. See self.mind_configs.
+            config = self._config_for(mind_id, memory_storage_path)
             if VectorDBMemory.collection_exists(config.memory_storage_path, f"mind_{mind_id}"):
                 mind = Mind.reattach(mind_id, entity_id, config)
                 self.minds[mind_id] = mind
-                self.mind_storage_paths[mind_id] = config.memory_storage_path
+                self.mind_configs[mind_id] = self._config_to_record(config)
                 return MindInfoResponse(status="relinked", mind_id=mind_id, entity_id=entity_id)
 
             return MindInfoResponse(status="not_found", mind_id=mind_id, entity_id=entity_id)
@@ -444,6 +508,7 @@ class MCPServer:
         @self.mcp.tool()
         async def forget_mind(
             mind_id: str,
+            memory_storage_path: str | None = None,
             ctx: Context = None,
         ) -> MindInfoResponse:
             """Permanently erase a mind's memory and drop it from the registry.
@@ -463,11 +528,18 @@ class MCPServer:
 
             Args:
                 mind_id: Mind to forget
+                memory_storage_path: Where to look for the collection when this server
+                    has no record of the mind - i.e. after a restart. Optional and
+                    ignored when a recorded config exists; omitting it preserves the
+                    previous default-path behavior, so an older client stays
+                    compatible. Without it, a restarted server cannot erase a mind
+                    that lived on a custom path and reports "not_found" rather than
+                    claiming a deletion it did not perform.
             """
             entity_id = None
             # Erase where this mind actually lives, not where the default config
-            # points - see _storage_path_for (NPC-1023).
-            storage_path = self._storage_path_for(mind_id)
+            # points - see _config_for (NPC-1023).
+            storage_path = self._config_for(mind_id, memory_storage_path).memory_storage_path
             collection_name = f"mind_{mind_id}"
             erased = False
 
@@ -498,9 +570,9 @@ class MCPServer:
             if not erased:
                 return MindInfoResponse(status="not_found", mind_id=mind_id, entity_id=entity_id)
 
-            # Only forget drops the path entry - cleanup_mind must keep it so the
+            # Only forget drops the recorded config - cleanup_mind must keep it so the
             # retained collection stays addressable by a later relink.
-            self.mind_storage_paths.pop(mind_id, None)
+            self.mind_configs.pop(mind_id, None)
             return MindInfoResponse(status="forgotten", mind_id=mind_id, entity_id=entity_id)
 
         # === Resources ===

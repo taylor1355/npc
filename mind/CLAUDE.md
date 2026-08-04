@@ -95,7 +95,11 @@ class WorkingMemory(BaseModel):
 - **`create_mind(mind_id, entity_id, config)`** - Initialize a mind. `mind_id` (PK) keys the mind/memory collection, `entity_id` (FK) names the driven simulation entity, `config` (MindConfig) carries cognition-only settings (traits, seed memories, LLM/personality). `entity_id` is no longer a MindConfig field
 - **`decide_action(mind_id, observation, events)`** - Process structured observation + events → action dict
 - **`consolidate_memories(mind_id)`** - Transfer daily memories → long-term storage
-- **`cleanup_mind(mind_id)`** - Remove mind instance and free resources
+- **`cleanup_mind(mind_id)`** - Release the in-memory instance but **retain** its ChromaDB collection → `released`. Not a delete; `forget_mind` is
+- **`relink_mind(mind_id, entity_id, memory_storage_path=None)`** - Re-bind a mind to a (possibly new) entity, rehydrating from the retained collection when it is no longer resident → `relinked` | `not_found`
+- **`forget_mind(mind_id, memory_storage_path=None)`** - Permanently delete the collection and drop the instance → `forgotten` | `not_found`. Not idempotent: a second forget returns `not_found`, since `forgotten` must never be claimed over memory that survived
+
+The server records each mind's creating `MindConfig` so relink/forget address the mind's own storage path and rehydrate it with its own `embedding_model`, traits, and personality rather than defaults. That record is process-local, so the optional `memory_storage_path` exists to locate a mind after a **server restart**; it restores addressability, not the rest of the config (NPC-1023).
 
 ### Resources
 
