@@ -1,3 +1,15 @@
-*.ipynb filter=nbstripout
-*.zpln filter=nbstripout
+# Notebook stripping is a pre-commit hook (see /.pre-commit-config.yaml), not a git
+# clean filter. `filter=nbstripout` was removed deliberately: the filter runs on
+# `git add` and checkout independently of pre-commit, and its interpreter path and
+# `required = true` live in machine-local .git/config, which cannot be committed.
+# Linked worktrees share that config but have different roots, so a relative path
+# resolves per worktree and every fresh `git worktree add` aborted arbitrary git
+# operations with exit 127 until `poetry install` had run (NPC-1024).
+#
+# Trade-off accepted: a clean filter also catches `git commit --no-verify` and IDE
+# commits made with hooks disabled, which a hook cannot. That gap is covered at
+# review time instead - .github/workflows/claude-review.yml flags committed notebook
+# outputs. A hard abort of routine git commands in every new worktree is the worse
+# failure, and the hook covers strictly more files than the filter did: this file
+# scopes to mind/**, so the filter never saw the notebooks under archived/.
 *.ipynb diff=ipynb

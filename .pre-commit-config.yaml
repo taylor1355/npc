@@ -37,16 +37,32 @@ repos:
     # this change, because it would collide with in-flight edits to server.py and
     # test_mcp_server.py. Expect ruff-format to rewrite those files the first time a
     # commit touches them until a dedicated formatting pass lands.
+    #
+    # Both hooks are scoped to ^mind/, matching mypy's scope below. That scoping is a
+    # separate concern from the pin: ruff discovers settings by walking up from each
+    # file, and the repo root has no pyproject.toml (its only tracked files are
+    # .gitignore, LICENSE and .github/workflows/claude-review.yml). So files under
+    # mind/ get line-length 100 and the configured rule set, while the 28 tracked
+    # archived/**/*.py - and the 4 archived .ipynb, which ruff's hooks also match -
+    # would get ruff's own defaults: line-length 88, E501 not ignored. Unscoped, a
+    # one-line edit to an archived file triggers --fix and reformats legacy code
+    # against a standard this repo uses nowhere.
     rev: v0.14.1
     hooks:
       # Run the linter
       - id: ruff
         args: [--fix]
+        files: ^mind/
       # Run the formatter
       - id: ruff-format
+        files: ^mind/
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.1
+    # Matches the mypy in mind/poetry.lock (1.18.2), which is what pyproject's
+    # ^1.18.2 resolves to locally. A pin that trails the local tool is the same
+    # defect as the ruff pin above: the hook and a local run disagree, and four
+    # minor releases of new checks never fire.
+    rev: v1.18.2
     hooks:
       - id: mypy
         args: [--ignore-missing-imports, --no-strict-optional, --explicit-package-bases]

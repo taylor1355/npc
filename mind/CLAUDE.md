@@ -165,28 +165,34 @@ ls .git/hooks/pre-commit    # must be a real hook; only *.sample means nothing i
 `.github/workflows/` contains only the Claude review action. An uninstalled hook set
 is silent, so confirm the file exists rather than assuming (NPC-1024).
 
-Notebook outputs are stripped by the `nbstripout` **pre-commit hook**. A git clean
-filter can do the same job, but only if it is configured, and that configuration
-lives in machine-local `.git/config`, which cannot be committed:
-
-```bash
-git config filter.nbstripout.clean "<abs-path>/mind/.venv/bin/python -m nbstripout"
-```
-
-Use an **absolute** interpreter path. Linked worktrees share one `.git/config` but
-have different roots, so a relative path such as `mind/.venv/bin/python` resolves
-against whichever worktree git is running in. Combined with
-`filter.nbstripout.required = true`, any worktree that has not had `poetry install`
-run yet fails hard on every notebook operation:
+Notebook outputs are stripped by the `nbstripout` **pre-commit hook**, and only by
+that hook. `mind/.gitattributes` no longer declares `filter=nbstripout`, because a
+clean filter runs on `git add` and checkout independently of pre-commit and its
+configuration is uncommittable: the interpreter path and `required = true` live in
+machine-local `.git/config`. Linked worktrees share that config but have different
+roots, so the relative path it held resolved per worktree, and any worktree without
+`mind/.venv` aborted routine git commands outright:
 
 ```
 mind/.venv/bin/python -m nbstripout: 1: mind/.venv/bin/python: not found
 fatal: <notebook>: clean filter 'nbstripout' failed
 ```
 
-Note also that `mind/.gitattributes` scopes `filter=nbstripout` to `mind/**`, so the
-filter never applied to the notebooks under the repo-root `archived/` tree. The
-pre-commit hook has no such gap — it sees every staged `.ipynb`.
+**If you still have that filter configured locally, drop it** — the attribute is
+gone, so it is inert for `.ipynb`, but the stale config is a trap for anyone who
+re-adds an attribute later:
+
+```bash
+git config --unset-all filter.nbstripout.clean
+git config --unset-all filter.nbstripout.smudge
+git config --unset-all filter.nbstripout.required
+```
+
+The hook covers strictly more than the filter did — `.gitattributes` scoped it to
+`mind/**`, so the notebooks under the repo-root `archived/` tree were never stripped.
+What the hook cannot cover is `git commit --no-verify`, or an IDE committing with
+hooks disabled; the Claude review workflow flags committed notebook outputs, so that
+case is caught at review time rather than commit time.
 
 ## Current Development Focus
 
