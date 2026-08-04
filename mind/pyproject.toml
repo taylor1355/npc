@@ -95,7 +95,16 @@ no_implicit_optional = true
 # cannot rescue it either: there is no py.typed in this repo, so PEP 561 bars mypy from
 # using it. Measured: adding mypy_path took the reported count from 20 errors in 10
 # files to 41 in 12.
-mypy_path = "src"
+#
+# $MYPY_CONFIG_FILE_DIR, not a bare "src": mypy resolves a relative mypy_path against the
+# WORKING DIRECTORY, not against this file. A bare "src" would be the one key in this
+# block that needs cwd to *be* mind/, rather than merely needing this file to be found.
+# Nothing hits that today - config discovery is cwd-only too, so config-found implies
+# cwd == mind/ - but `--config-file mind/pyproject.toml` from the root, or an editor
+# integration passing the config path explicitly, splits the two apart. A mypy_path entry
+# pointing at a nonexistent directory is dropped SILENTLY, with no warning, which lands
+# straight back in the "passes by not looking" state this block exists to escape.
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
 explicit_package_bases = true
 
 # Kept as it was when these lived as hook flags, so this change is about WHERE the
