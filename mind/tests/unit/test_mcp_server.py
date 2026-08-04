@@ -1130,6 +1130,43 @@ class TestRestartStoragePathParameter:
         # The collection is untouched, which is what makes "not_found" the honest answer.
         assert VectorDBMemory.collection_exists(self.CUSTOM_PATH, "mind_mind_rv") is True
 
+    @pytest.mark.asyncio
+    async def test_supplied_path_is_ignored_when_a_config_is_recorded(self):
+        """Precedence rule 1: the recorded config beats a caller-supplied path.
+
+        Every other test in this class runs against an empty map, so they all exercise
+        case 2 of _config_for. This one pins rule 1 itself - the rule that makes
+        memory_storage_path a restart-only fallback rather than a relocation
+        instruction. Without it a refactor could invert the precedence and stay green.
+        """
+        from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+
+        wrong_path = "./tmp/wrong_path"
+
+        server = MCPServer()
+        await self._create_mind(server, "mind_rw", "entity_rw")
+        server.minds["mind_rw"].memory_store.add_memory(content="recorded", importance=5.0)
+        await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_rw"})
+
+        relink = parse_response(
+            await server.mcp.call_tool(
+                "relink_mind",
+                {
+                    "mind_id": "mind_rw",
+                    "entity_id": "entity_rw",
+                    "memory_storage_path": wrong_path,
+                },
+            )
+        )
+
+        assert relink["status"] == "relinked"
+        # The load-bearing assertion: the rehydrated store holds what was written to
+        # CUSTOM_PATH, so the recorded path was used - not merely that wrong_path was
+        # left alone, which an unrelated failure to relink would also satisfy.
+        assert server.minds["mind_rw"].memory_store.collection.count() == 1
+        # And the bogus path was never even created on disk.
+        assert VectorDBMemory.collection_exists(wrong_path, "mind_mind_rw") is False
+
 
 class TestRecordedConfigFidelity:
     """relink_mind must rebuild a mind from the config it was CREATED with, not a
@@ -1189,6 +1226,40 @@ class TestRecordedConfigFidelity:
         encoder_ctor.assert_called_once_with(custom_model)
 
     @pytest.mark.asyncio
+    async def test_relink_reattaches_with_the_recorded_llm_model(self):
+        """llm_model is recorded for the same reason as the rest, and fails the same way.
+
+        A mind rehydrated on the default LLM is a different reasoner than the one the
+        client paid to configure, and nothing in the relink response says so. get_llm is
+        patched so the assertion is about which model name is requested, without
+        constructing a real client.
+        """
+        custom_model = "test-only/llm-model"
+
+        with patch("mind.interfaces.mcp.mind.get_llm") as get_llm_mock:
+            server = MCPServer()
+            await server.mcp.call_tool(
+                "create_mind",
+                {
+                    "mind_id": "mind_lm",
+                    "entity_id": "entity_lm",
+                    "config": {"traits": [], "llm_model": custom_model},
+                },
+            )
+            await server.mcp.call_tool("cleanup_mind", {"mind_id": "mind_lm"})
+
+            # Only the reattach-time construction is under test.
+            get_llm_mock.reset_mock()
+            relink = parse_response(
+                await server.mcp.call_tool(
+                    "relink_mind", {"mind_id": "mind_lm", "entity_id": "entity_lm"}
+                )
+            )
+
+        assert relink["status"] == "relinked"
+        get_llm_mock.assert_called_once_with(custom_model)
+
+    @pytest.mark.asyncio
     async def test_relink_restores_traits_and_personality_from_the_recorded_config(self):
         """A rehydrated mind must be the same character it was before release.
 
@@ -1225,10 +1296,19 @@ class TestRecordedConfigFidelity:
     async def test_recorded_config_drops_the_seed_payload(self):
         """The map records how to rebuild a mind, not what it was seeded with.
 
-        Mind.reattach ignores initial_long_term_memories by design (re-seeding on every
-        relink would duplicate the originals), so retaining them would pin every NPC's
-        seed text for the process lifetime to no purpose. Dropping them is what keeps
-        each entry bounded, and makes the never-re-seed contract structural.
+        The two dropped fields are dropped for different reasons, so this test pins two
+        different claims:
+
+        initial_long_term_memories is ignored by Mind.reattach by design (re-seeding on
+        every relink would duplicate the originals), so retaining it would pin every
+        NPC's seed text for the process lifetime to no purpose. Dropping it is what
+        keeps each entry bounded, and makes the never-re-seed contract structural.
+
+        initial_working_memory is NOT ignored - Mind.reattach reads it directly, and
+        there is no live mind in the reattach branch to take it from - so dropping it is
+        a deliberate choice that a relinked mind starts blank. The creating snapshot is
+        stale by relink time, so replaying it would resurrect old state rather than
+        restore fidelity. See _config_to_record.
         """
         server = MCPServer()
         await server.mcp.call_tool(

@@ -187,12 +187,24 @@ class MCPServer:
     def _config_to_record(config: MindConfig) -> MindConfig:
         """Strip the seed payload from a config before recording it.
 
-        Mind.reattach deliberately ignores initial_long_term_memories (re-seeding on
-        every relink would duplicate the originals) and takes working memory from the
-        live mind, so neither field can influence a future relink. Dropping them keeps
-        each map entry small and bounded rather than pinning every NPC's seed text for
-        the process lifetime - and makes "reattach never re-seeds" structural here
+        The two stripped fields are dropped for different reasons, and only one of them
+        is a no-op.
+
+        initial_long_term_memories is genuinely ignored by Mind.reattach - re-seeding on
+        every relink would duplicate the originals - so dropping it cannot change a
+        rehydrated mind. It is also the only unbounded part of a MindConfig, so dropping
+        it is what keeps each map entry small rather than pinning every NPC's seed text
+        for the process lifetime, and makes "reattach never re-seeds" structural here
         instead of merely conventional.
+
+        initial_working_memory is different: Mind.reattach DOES read it (the
+        `config.initial_working_memory or WorkingMemory()` line in mind.py), and there is
+        no live mind in the branch that calls reattach to take it from. Dropping it is
+        therefore a deliberate behavioral choice - a relinked mind starts from a blank
+        WorkingMemory. Unlike traits or embedding_model, the creating snapshot is stale
+        by relink time: the mind's working memory moved on while it was resident and was
+        discarded at release, so replaying it would resurrect old state rather than
+        restore fidelity. This also preserves the pre-NPC-1023 behavior exactly.
         """
         return config.model_copy(
             update={"initial_long_term_memories": [], "initial_working_memory": None}
@@ -202,10 +214,16 @@ class MCPServer:
         """Resolve the MindConfig to use for a non-resident mind.
 
         Precedence, strongest first:
-          1. The recorded creating config. It is ground truth - it is what the mind
-             was actually built with - so it wins even when the caller also supplies
-             a path. A caller-supplied path that disagrees with it is a client error,
-             not a relocation instruction; this server has no move operation.
+          1. The config this server recorded for the mind. It wins even when the caller
+             also supplies a path: a disagreeing caller path is a client error, not a
+             relocation instruction, because this server has no move operation.
+             The record has two provenances under one authority level. create_mind
+             writes the config the mind was actually built with; relink_mind's restart
+             branch writes back the case-2 reconstruction below (the caller's path plus
+             defaults for everything else). Only the path affects addressing and it is
+             the caller's own value either way, so the distinction is invisible today -
+             but a recorded entry is not always a creating config, and the fidelity
+             caveat on case 2 survives into any entry that came from it.
           2. A default config pointed at the caller-supplied memory_storage_path.
              This is the server-restart path: the map is empty, and the caller is the
              only remaining witness to where the collection lives.
@@ -225,6 +243,14 @@ class MCPServer:
         """
         recorded = self.mind_configs.get(mind_id)
         if recorded is not None:
+            if memory_storage_path and memory_storage_path != recorded.memory_storage_path:
+                # Discarding the caller's path silently would let a destructive
+                # forget_mind report success over a location the caller never named.
+                # The record still wins - this is diagnosable, not negotiable.
+                logger.warning(
+                    f"Ignoring memory_storage_path={memory_storage_path!r} for {mind_id}: "
+                    f"recorded config says {recorded.memory_storage_path!r}"
+                )
             return recorded
 
         return MindConfig(

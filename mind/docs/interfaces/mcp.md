@@ -118,10 +118,13 @@ The destructive counterpart to `cleanup_mind`: deletes the persisted collection 
 
 That record is **process-local**. Across an eviction (`cleanup_mind` then `relink_mind`) it is intact. Across a **server restart** it is empty, and the client becomes the only remaining witness to where the collection lives — hence the optional `memory_storage_path` parameter on both tools.
 
-Two limits worth knowing:
+Three limits worth knowing:
 
 - Supplying the path after a restart restores **addressability, not fidelity**. Only the path crosses the process boundary, so the mind is rehydrated with default `embedding_model`, `llm_model`, `traits`, and `personality_dimensions`. A client that sets a non-default `embedding_model` should not rely on restart-relink: the rehydrated store would embed queries with a different model than wrote the stored vectors, which fails loudly only when the vector widths differ.
 - Omitting the parameter preserves the previous behavior exactly (probe the default path), so a client that does not send it is unaffected.
+- On `forget_mind` the parameter widens the **destructive** reach. When no record exists, `mind_id` and `memory_storage_path` are both client-supplied and combine into a delete of collection `mind_<mind_id>` under that directory — so a restarted server can erase a `mind_*` collection in **any** ChromaDB directory the process can write, not just its own. This is not a new capability class (`create_mind` already accepts an arbitrary `memory_storage_path`, so the write reach was already client-controlled) and the trust model is a local Godot client, but it does convert a server-chosen delete target into a client-chosen one, and the naming is unguessable only by convention. The `relink_mind` side is read-only by comparison: `Mind.reattach` is reached only after the collection is confirmed to exist, so a bogus path cannot even create a directory.
+
+A caller-supplied path that disagrees with a recorded config is **ignored, and logged as a warning** — the record wins, because this server has no move operation. The warning exists so a client acting on a stale path can diagnose it before a destructive call reports success over a location the client never named.
 
 ## MCP Resources
 
