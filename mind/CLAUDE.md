@@ -194,10 +194,14 @@ Two things make the hook work, and both are easy to break:
   root, mypy loads no config at all and reports `Config File: Default`.
 - Every setting lives in `mind/pyproject.toml`'s `[tool.mypy]`, and the hook entry
   passes **no flags**. This is deliberate: `poetry run mypy src/mind` — the obvious
-  thing to run by hand — must behave identically to the hook. `mypy_path = "src"` is
-  the load-bearing one; without it the absolute `from mind.…` imports resolve to
-  nothing and `ignore_missing_imports` quietly degrades them to `Any`, so the check
-  passes by not looking.
+  thing to run by hand — must behave identically to the hook.
+  `mypy_path = "$MYPY_CONFIG_FILE_DIR/src"` is the load-bearing one; without it the
+  absolute `from mind.…` imports resolve to nothing and `ignore_missing_imports`
+  quietly degrades them to `Any`, so the check passes by not looking. Keep the
+  `$MYPY_CONFIG_FILE_DIR` prefix: mypy resolves a relative `mypy_path` against the
+  **working directory**, not against the config file, and an entry pointing at a
+  directory that does not exist is dropped **silently** — so simplifying it back to
+  `"src"` restores the shallow check with no signal that anything changed.
 
 Notebook outputs are stripped by the `nbstripout` **pre-commit hook**, and only by
 that hook. `mind/.gitattributes` no longer declares `filter=nbstripout`, because a
