@@ -6,13 +6,33 @@
 # installed nothing (NPC-1024).
 #
 # Install with:   pre-commit install
-# Verify with:    ls .git/hooks/pre-commit   (a real hook, not just *.sample)
+# Verify with:    ls "$(git rev-parse --git-common-dir)/hooks/pre-commit"
+#                 (a real hook, not just *.sample)
+#
+# Use --git-common-dir, not a literal .git/hooks: in a LINKED WORKTREE .git is a
+# file, so `ls .git/hooks/...` fails with "Not a directory" - which reads like a
+# missing hook rather than a wrong path. Hooks live in the common dir and are
+# therefore shared by every worktree, so one install covers all of them.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+      # The two hooks that REWRITE files are scoped to ^mind/; the read-only checks
+      # below stay global, since they cost nothing on files they pass and there is no
+      # reason to stop checking the root's own tracked files.
+      #
+      # Scoping these keeps the root's archived/** out: 18 of the 28 tracked
+      # archived/**/*.py carry trailing whitespace (114 lines measured), so a one-line
+      # edit to any of them would bury the real change in unrelated churn.
+      #
+      # ^mind/ here is deliberately BROADER than the ruff hooks' ^mind/(src|tests)/ -
+      # these two normalize whitespace, which is benign on the legacy code under
+      # mind/archived/ (8 files affected) in a way that reformatting to a different
+      # style is not.
       - id: trailing-whitespace
+        files: ^mind/
       - id: end-of-file-fixer
+        files: ^mind/
       - id: check-yaml
       - id: check-added-large-files
       - id: check-merge-conflict
@@ -32,44 +52,82 @@ repos:
     # that trails pyproject means the hook and a local `ruff format` disagree about
     # what "formatted" means, and files drift out of format with nothing to catch it.
     #
-    # This pin was raised from v0.8.4, which is how the drift accumulated. 22 files
-    # under mind/ are not v0.14.1-formatted today; the sweep is deliberately NOT in
-    # this change, because it would collide with in-flight edits to server.py and
+    # This pin was raised from v0.8.4, which is how the drift accumulated. Measured at
+    # v0.14.1 with `ruff format --check`: 15 files under mind/src and 7 under
+    # mind/tests are not formatted today. The sweep is deliberately NOT in this change,
+    # because it would collide with in-flight edits to server.py and
     # test_mcp_server.py. Expect ruff-format to rewrite those files the first time a
     # commit touches them until a dedicated formatting pass lands.
     #
-    # Both hooks are scoped to ^mind/, matching mypy's scope below. That scoping is a
-    # separate concern from the pin: ruff discovers settings by walking up from each
-    # file, and the repo root has no pyproject.toml (its only tracked files are
-    # .gitignore, LICENSE and .github/workflows/claude-review.yml). So files under
-    # mind/ get line-length 100 and the configured rule set, while the 28 tracked
-    # archived/**/*.py - and the 4 archived .ipynb, which ruff's hooks also match -
-    # would get ruff's own defaults: line-length 88, E501 not ignored. Unscoped, a
-    # one-line edit to an archived file triggers --fix and reformats legacy code
-    # against a standard this repo uses nowhere.
+    # SCOPE: ^mind/(src|tests)/, i.e. the code we actually maintain - deliberately
+    # narrower than mypy's ^mind/src/ is (tests should be linted) and narrower than a
+    # bare ^mind/. Two separate exclusions, for the same reason:
+    #
+    #   - The repo root has no pyproject.toml (its only tracked files are .gitignore,
+    #     LICENSE, this file, and .github/workflows/claude-review.yml). Ruff discovers
+    #     settings by walking up from each file, so the 28 tracked archived/**/*.py at
+    #     the root - and the 4 archived .ipynb, which ruff's hooks also match - would
+    #     get ruff's OWN defaults: line-length 88, E501 not ignored.
+    #   - mind/archived/ and mind/notebooks/ do resolve mind/pyproject.toml, so they
+    #     get the right settings, but they are equally legacy: measured 163 lint
+    #     findings and 13 unformatted files under mind/archived, plus 45 findings and
+    #     1 unformatted file under mind/notebooks.
+    #
+    # Either way a one-line edit to a legacy file would trigger --fix and rewrite it,
+    # burying the real change in churn. Nobody is normalizing that code; narrow the
+    # hook instead of asking every contributor to remember.
+    #
+    # Note the per-file discovery argument is ruff-specific and does NOT transfer to
+    # mypy, which resolves config from the cwd - see the mypy hook below.
     rev: v0.14.1
     hooks:
-      # Run the linter
-      - id: ruff
+      # Run the linter. `ruff-check` is the current id; plain `ruff` still works at
+      # v0.14.1 but pre-commit reports it as "ruff (legacy alias)".
+      - id: ruff-check
         args: [--fix]
-        files: ^mind/
+        files: ^mind/(src|tests)/
       # Run the formatter
       - id: ruff-format
-        files: ^mind/
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    # Matches the mypy in mind/poetry.lock (1.18.2), which is what pyproject's
-    # ^1.18.2 resolves to locally. A pin that trails the local tool is the same
-    # defect as the ruff pin above: the hook and a local run disagree, and four
-    # minor releases of new checks never fire.
-    rev: v1.18.2
-    hooks:
-      - id: mypy
-        args: [--ignore-missing-imports, --no-strict-optional, --explicit-package-bases]
-        files: ^mind/src/
+        files: ^mind/(src|tests)/
 
   - repo: local
     hooks:
+      # A local hook rather than mirrors-mypy, because this must run from mind/ and
+      # not from the repo root - the same constraint pytest-unit below has.
+      #
+      # mypy resolves its config file from the CWD ONLY (mypy.ini, .mypy.ini,
+      # pyproject.toml, setup.cfg in the current directory, then
+      # ~/.config/mypy/config). It does NOT walk up from each file the way ruff does,
+      # so the per-file scoping argument above does not transfer: `files:` narrows
+      # which files are checked without supplying any settings to check them with.
+      # pre-commit always runs hooks from the repo toplevel, and the root has no
+      # pyproject.toml, so at the root mypy reports `Config File: Default` and
+      # mind/pyproject.toml's [tool.mypy] block is silently never loaded. Confirmed
+      # with a probe that errors only under warn_return_any: run from the root it
+      # passes, run from mind/ it fails. Running at the root also miscomputes module
+      # names under --explicit-package-bases (mind.src.mind.X instead of mind.X), and
+      # poetry's env is what supplies real pydantic/langgraph types rather than Any.
+      #
+      # Held at stage `manual`, so it does NOT run on commit. This hook has never
+      # actually executed - while the config lived in mind/, `files: ^mind/src/` could
+      # not match a path pre-commit renders as `src/...`, the same misplacement that
+      # made `pre-commit install` a no-op. So this is its first real run, and
+      # correctly configured it reports 20 pre-existing errors across 10 files.
+      # Enabling it on commit would block every commit touching mind/src/ on debt this
+      # config-only change did not create. Those errors are not fixed here for the
+      # same reason the 22-file ruff format sweep is deferred: several are in
+      # server.py and vector_db_memory.py, which in-flight #20 is editing. Tracked as
+      # NPC-1034 - promote this out of `stages` once it is clean.
+      #
+      # Run it:  pre-commit run --hook-stage manual mypy --all-files
+      - id: mypy
+        name: mypy
+        entry: bash -c 'cd mind && poetry run mypy --ignore-missing-imports --no-strict-optional --explicit-package-bases src/mind'
+        language: system
+        pass_filenames: false
+        files: ^mind/src/
+        stages: [manual]
+
       - id: pytest-unit
         name: pytest-unit
         entry: bash -c 'cd mind && poetry run pytest tests/unit -q'

@@ -157,13 +157,32 @@ Install and verify from the root:
 ```bash
 cd ..                       # repo root, not mind/
 pre-commit install
-ls .git/hooks/pre-commit    # must be a real hook; only *.sample means nothing installed
+ls "$(git rev-parse --git-common-dir)/hooks/pre-commit"
 ```
 
-**Nothing runs until you do this.** Hooks are machine-local: a fresh clone (or a
-`git worktree add`) installs none, and there is no CI job running ruff or pytest —
-`.github/workflows/` contains only the Claude review action. An uninstalled hook set
-is silent, so confirm the file exists rather than assuming (NPC-1024).
+That must be a real hook; only `*.sample` files means nothing is installed. Use
+`--git-common-dir` rather than a literal `.git/hooks`: in a **linked worktree** `.git`
+is a file, so `ls .git/hooks/pre-commit` fails with `Not a directory`, which reads
+like a missing hook rather than a wrong path. Hooks live in the common dir, so one
+install covers every worktree.
+
+**Nothing runs until you do this.** Hooks are machine-local: a fresh clone installs
+none, and there is no CI job running ruff or pytest — `.github/workflows/` contains
+only the Claude review action. An uninstalled hook set is silent, so confirm the file
+exists rather than assuming (NPC-1024).
+
+**mypy is configured but held at `stages: [manual]`**, so it does not run on commit:
+
+```bash
+pre-commit run --hook-stage manual mypy --all-files
+```
+
+It reports 20 pre-existing errors across 10 files, so gating commits on it would block
+work it did not cause. It is a `local` hook that `cd`s into `mind/` because mypy
+resolves its config from the **current directory only** — unlike ruff, which walks up
+from each file — and pre-commit runs hooks from the repo root, which has no
+`pyproject.toml`. Run from the root it silently loads no config at all. Cleanup is
+tracked as NPC-1034; promote the hook out of `stages` once it is clean.
 
 Notebook outputs are stripped by the `nbstripout` **pre-commit hook**, and only by
 that hook. `mind/.gitattributes` no longer declares `filter=nbstripout`, because a
