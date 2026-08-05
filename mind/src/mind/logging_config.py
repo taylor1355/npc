@@ -1,7 +1,6 @@
 """Logging utilities for the Mind project"""
 
 import inspect
-import os
 import logging
 
 
