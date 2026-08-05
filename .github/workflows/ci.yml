@@ -1,0 +1,86 @@
+# CI for the mind Python project (NPC-1029).
+#
+# PARITY CONTRACT: every gate in this job (ruff lint, ruff format, pytest) has a
+# pre-commit counterpart in .pre-commit-config.yaml at the repo root, and a
+# change to either surface must change the other. The hooks REWRITE (ruff
+# --fix, ruff-format) while this job only VERIFIES - local commits fix, CI
+# gates.
+#
+# Pre-commit hooks that are deliberately LOCAL-ONLY (no gate here):
+#   - trailing-whitespace, end-of-file-fixer, nbstripout: rewriting normalizers;
+#     the maintained Python surface (mind/src, mind/tests) is already gated
+#     here by `ruff format --check`, and the notebook/legacy trees they also
+#     touch are outside CI's gated surface.
+#   - check-yaml, check-added-large-files, check-merge-conflict: commit-time
+#     hygiene on the developer's staged files; GitHub itself rejects
+#     unparseable workflow YAML, and the other two guard the local commit, not
+#     the merged tree.
+#   - mypy: held at stage `manual` locally and absent here until its error
+#     baseline is cleaned up - NPC-1034 tracks promoting it to both surfaces.
+#
+# Version authority: poetry.lock is the ONLY authority for tool versions in
+# this job - ruff and pytest run via `poetry run`, so there is no third pin to
+# drift (the ruff-pre-commit rev is kept in sync per the note in
+# .pre-commit-config.yaml).
+#
+# Test scope: tests/unit plus the two integration files that run without live
+# LLM credentials. The other integration files (test_cognitive_pipeline.py,
+# test_mcp_server.py) call OpenRouter for real and are excluded from both
+# surfaces.
+#
+# mind/src/mind/project_config.py reads credentials/api_keys.cfg (repo root) AT
+# IMPORT TIME, and the import chain reaches it from unit tests - hence the stub
+# step before pytest. Only the two keys indexed at import need to exist.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mind
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pipx install poetry==1.8.2
+
+      - run: poetry config virtualenvs.in-project true
+
+      # torch is ~2.4GB in the lock; caching the venv keyed on poetry.lock is
+      # what keeps this job tractable. huggingface cache holds the
+      # all-MiniLM-L6-v2 embedding model (~90MB) test_vector_db_memory.py loads.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            mind/.venv
+            ~/.cache/huggingface
+          key: venv-${{ runner.os }}-py312-${{ hashFiles('mind/poetry.lock') }}
+
+      - run: poetry install --sync
+
+      - name: Ruff lint
+        run: poetry run ruff check src tests
+
+      - name: Ruff format
+        run: poetry run ruff format --check src tests
+
+      - name: Stub credentials file (read at import time by project_config.py)
+        run: |
+          mkdir -p ../credentials
+          printf "OPENROUTER_API_KEY: 'ci-dummy'\nPERPLEXITY_API_KEY: 'ci-dummy'\n" > ../credentials/api_keys.cfg
+
+      - name: Tests (scope matches the pytest-unit pre-commit hook)
+        run: poetry run pytest tests/unit tests/integration/test_http_endpoints.py tests/integration/test_memory_retrieval.py -q
