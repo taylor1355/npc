@@ -1,12 +1,13 @@
 """Unit tests for base node classes"""
 
+import json
 import logging
 from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import PromptTemplate
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from mind.cognitive_architecture.nodes.base import LLMNode, Node, entity_tag
 from mind.cognitive_architecture.observations import Observation, StatusObservation
@@ -312,7 +313,7 @@ class TestLLMNodeRetryLogic:
             )
         )
 
-        with pytest.raises(Exception):  # JSONDecodeError or ValidationError
+        with pytest.raises((json.JSONDecodeError, ValidationError)):
             await node.call_llm(state, input="test")
 
         assert mock_llm.ainvoke.call_count == 3  # Initial + 2 retries
@@ -388,7 +389,7 @@ class TestLLMNodeRetryLogic:
             )
         )
 
-        with pytest.raises(Exception):
+        with pytest.raises((json.JSONDecodeError, ValidationError)):
             await node.call_llm(state, input="test")
 
         # Should still track tokens: 11 + 12 = 23
