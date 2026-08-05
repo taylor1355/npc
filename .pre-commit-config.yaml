@@ -13,6 +13,13 @@
 # file, so `ls .git/hooks/...` fails with "Not a directory" - which reads like a
 # missing hook rather than a wrong path. Hooks live in the common dir and are
 # therefore shared by every worktree, so one install covers all of them.
+#
+# CI PARITY CONTRACT (NPC-1029): every gate in .github/workflows/ci.yml has a
+# counterpart hook in this file, and a change to either surface must change the
+# other. One asymmetry is deliberate: the ruff hooks below REWRITE (`--fix`,
+# `ruff-format`) while CI only VERIFIES (`ruff check`, `ruff format --check`) -
+# local commits fix, CI gates. Hooks with no CI counterpart are documented as
+# local-only in the workflow file itself.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -141,9 +148,13 @@ repos:
         files: ^mind/src/
         stages: [manual]
 
+      # Scope matches CI's pytest step EXACTLY (parity contract, see header):
+      # tests/unit plus the two integration files that run without live LLM
+      # credentials. The other two integration files (test_cognitive_pipeline.py,
+      # test_mcp_server.py) hit OpenRouter for real and stay out of both surfaces.
       - id: pytest-unit
         name: pytest-unit
-        entry: bash -c 'cd mind && poetry run pytest tests/unit -q'
+        entry: bash -c 'cd mind && poetry run pytest tests/unit tests/integration/test_http_endpoints.py tests/integration/test_memory_retrieval.py -q'
         language: system
         pass_filenames: false
         files: ^mind/(tests|src)/
