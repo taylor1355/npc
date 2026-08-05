@@ -59,19 +59,17 @@ repos:
     # that trails pyproject means the hook and a local `ruff format` disagree about
     # what "formatted" means, and files drift out of format with nothing to catch it.
     #
-    # This pin was raised from v0.8.4, which is how the drift accumulated. Measured at
-    # v0.14.1 with `ruff format --check`: 15 files under mind/src and 7 under
-    # mind/tests are not formatted today. The sweep is deliberately NOT in this change,
-    # because it would collide with in-flight edits to server.py and
-    # test_mcp_server.py. Expect ruff-format to rewrite those files the first time a
-    # commit touches them until a dedicated formatting pass lands.
+    # This pin was raised from v0.8.4, which is how the drift accumulated. The
+    # formatting sweep that repaid it landed with the CI change (NPC-1029):
+    # mind/src and mind/tests are `ruff format --check`-clean, and CI now gates
+    # them on every PR, so drift like that cannot silently accumulate again.
     #
     # SCOPE: ^mind/(src|tests)/, i.e. the code we actually maintain - deliberately
     # narrower than mypy's ^mind/src/ is (tests should be linted) and narrower than a
     # bare ^mind/. Two separate exclusions, for the same reason:
     #
-    #   - The repo root has no pyproject.toml (its only tracked files are .gitignore,
-    #     LICENSE, this file, and .github/workflows/claude-review.yml). Ruff discovers
+    #   - The repo root has no pyproject.toml - it tracks no Python config at all,
+    #     just .gitignore, LICENSE, this file, and .github/workflows/. Ruff discovers
     #     settings by walking up from each file, so the 28 tracked archived/**/*.py at
     #     the root - and the 4 archived .ipynb, which ruff's hooks also match - would
     #     get ruff's OWN defaults: line-length 88, E501 not ignored.
@@ -129,10 +127,8 @@ repos:
       # not match a path pre-commit renders as `src/...`, the same misplacement that
       # made `pre-commit install` a no-op. Correctly configured it reports 41 errors
       # across 12 files; enabling it on commit would block every commit touching
-      # mind/src/ on debt this config-only change did not create. Those errors are not
-      # fixed here for the same reason the ruff format sweep is deferred: several are in
-      # server.py and vector_db_memory.py, which in-flight #20 is editing. Tracked as
-      # NPC-1034 - promote this out of `stages` once it is clean.
+      # mind/src/ on debt this config-only change did not create. Cleanup is
+      # tracked as NPC-1034 - promote this out of `stages` once it is clean.
       #
       # Treat 41 as a floor, not a measure of the debt: it is whatever the current
       # resolution settings surface, and it has already moved once (20 errors in 10
@@ -150,8 +146,13 @@ repos:
 
       # Scope matches CI's pytest step EXACTLY (parity contract, see header):
       # tests/unit plus the two integration files that run without live LLM
-      # credentials. The other two integration files (test_cognitive_pipeline.py,
-      # test_mcp_server.py) hit OpenRouter for real and stay out of both surfaces.
+      # credentials. The OpenRouter-live files stay out of both surfaces:
+      # tests/integration/test_cognitive_pipeline.py and
+      # tests/integration/test_mcp_server.py - path-qualified, because
+      # tests/unit/test_mcp_server.py (mocked) shares the basename and IS run.
+      # A cold machine needs network on first run: tests/unit/test_vector_db_memory.py
+      # downloads the embedding model (~90MB). That was true before the scope
+      # extension too - the two integration files add no new preconditions.
       - id: pytest-unit
         name: pytest-unit
         entry: bash -c 'cd mind && poetry run pytest tests/unit tests/integration/test_http_endpoints.py tests/integration/test_memory_retrieval.py -q'

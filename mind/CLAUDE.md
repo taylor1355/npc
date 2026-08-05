@@ -170,10 +170,11 @@ is a file, so `ls .git/hooks/pre-commit` fails with `Not a directory`, which rea
 like a missing hook rather than a wrong path. Hooks live in the common dir, so one
 install covers every worktree.
 
-**Nothing runs until you do this.** Hooks are machine-local: a fresh clone installs
-none, and there is no CI job running ruff or pytest — `.github/workflows/` contains
-only the Claude review action. An uninstalled hook set is silent, so confirm the file
-exists rather than assuming (NPC-1024).
+**Nothing runs locally until you do this.** Hooks are machine-local: a fresh clone
+installs none. CI (`.github/workflows/ci.yml`, NPC-1029) runs the same gates — ruff
+check, ruff format, and the pytest scope the pytest-unit hook mirrors — on every PR,
+so skipped hooks surface at PR time rather than never. Locally an uninstalled hook
+set is still silent, so confirm the file exists rather than assuming (NPC-1024).
 
 **mypy is configured but held at `stages: [manual]`**, so it does not run on commit:
 
