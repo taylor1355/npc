@@ -23,10 +23,17 @@
 # drift (the ruff-pre-commit rev is kept in sync per the note in
 # .pre-commit-config.yaml).
 #
+# Python version: this job runs 3.12 - the interpreter the project actually
+# develops and runs on (the local venv is 3.12.x) - rather than the ^3.11
+# floor mind/pyproject.toml declares. ruff's target-version = "py311" keeps
+# the syntax floor honest; actually TESTING the floor would need a matrix and
+# reconciling the three 3.11 declarations, deferred from PR #22's review.
+#
 # Test scope: tests/unit plus the two integration files that run without live
-# LLM credentials. The other integration files (test_cognitive_pipeline.py,
-# test_mcp_server.py) call OpenRouter for real and are excluded from both
-# surfaces.
+# LLM credentials. The OpenRouter-live integration files are excluded from
+# both surfaces: tests/integration/test_cognitive_pipeline.py and
+# tests/integration/test_mcp_server.py - path-qualified because
+# tests/unit/test_mcp_server.py (mocked) shares the basename and DOES run here.
 #
 # mind/src/mind/project_config.py reads credentials/api_keys.cfg (repo root) AT
 # IMPORT TIME, and the import chain reaches it from unit tests - hence the stub
@@ -38,13 +45,20 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel superseded runs on PRs only: cancelling a main run would skip the
+# cache-save post steps and leave main's latest status "cancelled" instead of
+# a real conclusion.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: mind
@@ -52,22 +66,43 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v5
+        id: setup-python
         with:
           python-version: "3.12"
 
-      - run: pipx install poetry==1.8.2
+      # pip, not pipx: pipx would run poetry on the runner's SYSTEM Python, so
+      # the project venv would be built on an interpreter setup-python does not
+      # control. Installing with this pip keeps one interpreter authority - the
+      # setup-python interpreter above builds the venv and runs the tests.
+      - run: pip install poetry==1.8.2
 
       - run: poetry config virtualenvs.in-project true
 
-      # torch is ~2.4GB in the lock; caching the venv keyed on poetry.lock is
-      # what keeps this job tractable. huggingface cache holds the
-      # all-MiniLM-L6-v2 embedding model (~90MB) test_vector_db_memory.py loads.
-      - uses: actions/cache@v4
+      # Two caches, split because they version independently:
+      # - The venv is a function of poetry.lock and the interpreter (torch is
+      #   ~2.4GB; restore-keys salvages most wheels when the lock changes). The
+      #   key embeds the FULL patch version from setup-python, so a runner-image
+      #   Python bump can never restore a venv built on a deleted interpreter.
+      # - The huggingface cache is a function of which embedding models the
+      #   tests load (~90MB for all-MiniLM-L6-v2). Its key uses run_id, which
+      #   never hits exactly, so it restores from the newest previous run and
+      #   RE-SAVES every run - a model change updates it instead of freezing it
+      #   at the first snapshot forever.
+      - name: Cache venv
+        uses: actions/cache@v4
         with:
-          path: |
-            mind/.venv
-            ~/.cache/huggingface
-          key: venv-${{ runner.os }}-py312-${{ hashFiles('mind/poetry.lock') }}
+          path: mind/.venv
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('mind/poetry.lock') }}
+          restore-keys: |
+            venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-
+
+      - name: Cache huggingface models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            hf-${{ runner.os }}-
 
       - run: poetry install --sync
 
