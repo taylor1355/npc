@@ -35,7 +35,7 @@ class Action(BaseModel):
     action: ActionType
     parameters: dict = Field(
         default_factory=dict,
-        description="Action parameters as key-value pairs. Use exact parameter names from the action description."
+        description="Action parameters as key-value pairs. Use exact parameter names from the action description.",
     )
 
     def __str__(self) -> str:
@@ -47,7 +47,7 @@ class Action(BaseModel):
         )
         return f"{self.action}({params_str})"
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_executable(self, info: ValidationInfo):
         """Validate action can be executed given pipeline state.
 
@@ -57,7 +57,7 @@ class Action(BaseModel):
         if not info.context:
             raise ValueError("Action validation requires context with 'state'")
 
-        state = info.context.get('state')
+        state = info.context.get("state")
         if not state:
             raise ValueError("Action validation requires 'state' in context")
 
@@ -153,8 +153,7 @@ class Action(BaseModel):
             # Check if these are bid IDs or entity IDs
             pending_bid_ids = set(state.pending_incoming_bids.keys())
             pending_entity_ids = {
-                event.payload.get("bidder_id")
-                for event in state.pending_incoming_bids.values()
+                event.payload.get("bidder_id") for event in state.pending_incoming_bids.values()
             }
 
             # Validate each item is either a valid bid_id or entity_id
@@ -178,10 +177,10 @@ class Action(BaseModel):
         if not observation.is_interacting():
             raise ValueError("ACT_IN_INTERACTION requires an active interaction")
 
-        interaction_name = observation.status.current_interaction.get('interaction_name', '')
+        interaction_name = observation.status.current_interaction.get("interaction_name", "")
 
         # For conversations, message parameter is required
-        if interaction_name == 'conversation':
+        if interaction_name == "conversation":
             message = self.parameters.get("message")
             if not message:
                 raise MissingRequiredParameterError("message", self.action)

@@ -7,7 +7,6 @@ import os
 import signal
 import time
 from collections import deque
-from typing import Optional
 
 # Disable tqdm progress bars to prevent BrokenPipeError in SSE context
 os.environ["TQDM_DISABLE"] = "1"
@@ -50,7 +49,7 @@ class InMemoryLogHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
-    def get_logs(self, since: Optional[float] = None, limit: int = 100) -> list[dict]:
+    def get_logs(self, since: float | None = None, limit: int = 100) -> list[dict]:
         """
         Retrieve stored log entries, newest first.
 
@@ -127,7 +126,9 @@ def create_starlette_app(mcp_server, *, debug: bool = False) -> Starlette:
             log_limit = int(limit)
         except (ValueError, TypeError):
             return JSONResponse(
-                {"error": "Invalid parameters. 'since' must be a number, 'limit' must be an integer."},
+                {
+                    "error": "Invalid parameters. 'since' must be a number, 'limit' must be an integer."
+                },
                 status_code=400,
             )
 
@@ -174,7 +175,7 @@ def main():
     root_logger.setLevel(logging.WARNING)
 
     # Set mind application logger to DEBUG for detailed observability
-    mind_logger = logging.getLogger('mind')
+    mind_logger = logging.getLogger("mind")
     mind_logger.setLevel(logging.DEBUG)
 
     # Create the server instance

@@ -1,10 +1,8 @@
 """Memory query generation node"""
 
 from pathlib import Path
-from pprint import pformat
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 
 from mind.cognitive_architecture.nodes.base import LLMNode, entity_tag
@@ -34,9 +32,11 @@ class MemoryQueryNode(LLMNode):
             state,
             working_memory=str(state.working_memory),
             observation=str(state.observation),
-            format_instructions=self.get_format_instructions()
+            format_instructions=self.get_format_instructions(),
         )
 
         state.memory_queries = output.queries
-        logger.debug(f"{entity_tag(state)} Generated {len(output.queries)} memory queries: {output.queries}")
+        logger.debug(
+            f"{entity_tag(state)} Generated {len(output.queries)} memory queries: {output.queries}"
+        )
         return state

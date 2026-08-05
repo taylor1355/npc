@@ -189,14 +189,21 @@ class Mind:
                 bid_id = event.payload.get("bid_id")
                 if bid_id and bid_id in self.pending_incoming_bids:
                     del self.pending_incoming_bids[bid_id]
-                    logger.debug(f"[{self.entity_id}] Removed canceled bid {bid_id} from pending bids")
+                    logger.debug(
+                        f"[{self.entity_id}] Removed canceled bid {bid_id} from pending bids"
+                    )
 
-            elif event.event_type in (MindEventType.INTERACTION_FINISHED, MindEventType.INTERACTION_CANCELED):
+            elif event.event_type in (
+                MindEventType.INTERACTION_FINISHED,
+                MindEventType.INTERACTION_CANCELED,
+            ):
                 # Clean up conversation history for ended interactions
                 interaction_id = event.payload.get("interaction_id")
                 if interaction_id and interaction_id in self.conversation_histories:
                     del self.conversation_histories[interaction_id]
-                    logger.debug(f"[{self.entity_id}] Cleaned up conversation history for {interaction_id}")
+                    logger.debug(
+                        f"[{self.entity_id}] Cleaned up conversation history for {interaction_id}"
+                    )
 
         self.event_buffer.extend(new_events)
 
@@ -204,6 +211,8 @@ class Mind:
         retained = [e for e in self.event_buffer if e.timestamp > cutoff_time]
 
         if len(retained) > EVENT_BUFFER_MAX_SIZE:
-            retained = sorted(retained, key=lambda e: e.timestamp, reverse=True)[:EVENT_BUFFER_MAX_SIZE]
+            retained = sorted(retained, key=lambda e: e.timestamp, reverse=True)[
+                :EVENT_BUFFER_MAX_SIZE
+            ]
 
         self.event_buffer = retained

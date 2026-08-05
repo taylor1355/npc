@@ -7,9 +7,9 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from mind.cognitive_architecture.actions import Action, ActionType, AvailableAction
-from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.nodes.action_selection.node import ActionSelectionNode
 from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
+from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.state import PipelineState
 
 
@@ -135,7 +135,10 @@ class TestActionSelectionNode:
         result = await node.process(basic_state)
 
         assert result.chosen_action.action == ActionType.INTERACT_WITH
-        assert result.chosen_action.parameters == {"entity_id": "anvil_001", "interaction_name": "use"}
+        assert result.chosen_action.parameters == {
+            "entity_id": "anvil_001",
+            "interaction_name": "use",
+        }
 
     async def test_handles_empty_personality_traits(self, node, mock_llm):
         """Should handle state with no personality traits"""

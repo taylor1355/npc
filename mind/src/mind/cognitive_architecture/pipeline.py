@@ -61,11 +61,13 @@ class CognitivePipeline:
         result_dict = await self.chain.ainvoke(state)
         # Convert LangGraph's AddableValuesDict back to our Pydantic model
         # Pass original state as validation context for Action validation (needs state.observation)
-        result = PipelineState.model_validate(result_dict, context={'state': state})
+        result = PipelineState.model_validate(result_dict, context={"state": state})
 
         # Log pipeline completion summary
         total_time = sum(result.time_ms.values())
         total_tokens = sum(result.tokens_used.values())
-        logger.debug(f"{entity_tag(state)} Pipeline completed in {total_time}ms, {total_tokens} tokens")
+        logger.debug(
+            f"{entity_tag(state)} Pipeline completed in {total_time}ms, {total_tokens} tokens"
+        )
 
         return result

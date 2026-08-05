@@ -3,8 +3,8 @@
 import pytest
 
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory, VectorDBQuery
-from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.nodes.memory_retrieval.node import MemoryRetrievalNode
+from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.state import PipelineState
 
 
@@ -50,9 +50,9 @@ async def test_memory_deduplication():
 
     # Each memory should have a unique ID
     for memory in result_state.retrieved_memories:
-        assert memory.id.startswith(
-            "memory_"
-        ), f"Memory ID should start with 'memory_' but got: {memory.id}"
+        assert memory.id.startswith("memory_"), (
+            f"Memory ID should start with 'memory_' but got: {memory.id}"
+        )
 
     print(f"✓ Retrieved {len(result_state.retrieved_memories)} unique memories")
     print(f"✓ All memories have unique IDs: {memory_ids}")

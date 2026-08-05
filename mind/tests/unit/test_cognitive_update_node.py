@@ -7,12 +7,12 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from mind.cognitive_architecture.memory import Memory
-from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.nodes.cognitive_update.models import (
     NewMemory,
     WorkingMemory,
 )
 from mind.cognitive_architecture.nodes.cognitive_update.node import CognitiveUpdateNode
+from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.state import PipelineState
 
 
@@ -258,7 +258,9 @@ class TestCognitiveUpdateNode:
                 f"Unattributed log record: {record.getMessage()!r}"
             )
 
-    async def test_working_memory_logged_as_single_record(self, node, mock_llm, basic_state, caplog):
+    async def test_working_memory_logged_as_single_record(
+        self, node, mock_llm, basic_state, caplog
+    ):
         """Working-memory fields land in one record: one Events-tab entry per thought"""
         with caplog.at_level(logging.DEBUG, logger="mind"):
             await node.process(basic_state)

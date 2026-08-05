@@ -49,12 +49,14 @@ class CognitiveUpdateNode(LLMNode):
         )
 
         # Build world knowledge from centralized knowledge files
-        world_knowledge = KnowledgeBase.get([
-            KnowledgeFile.NEEDS,
-            KnowledgeFile.INTERACTIONS,
-            KnowledgeFile.MOVEMENT,
-            KnowledgeFile.ACTIVITY,
-        ])
+        world_knowledge = KnowledgeBase.get(
+            [
+                KnowledgeFile.NEEDS,
+                KnowledgeFile.INTERACTIONS,
+                KnowledgeFile.MOVEMENT,
+                KnowledgeFile.ACTIVITY,
+            ]
+        )
 
         # Ground the "am I interacting?" belief in the fresh observation so a
         # stale working-memory belief ("I'm in a conversation") gets corrected
@@ -72,7 +74,7 @@ class CognitiveUpdateNode(LLMNode):
             interaction_status=interaction_status,
             recent_events=pformat(state.recent_events),
             world_knowledge=world_knowledge,
-            format_instructions=self.get_format_instructions()
+            format_instructions=self.get_format_instructions(),
         )
 
         # Update state with new working memory
@@ -95,8 +97,7 @@ class CognitiveUpdateNode(LLMNode):
 
         # Log new memories as a single record for the same reason
         memory_lines = "".join(
-            f"\n  [importance={mem.importance}] {mem.content}"
-            for mem in output.new_memories
+            f"\n  [importance={mem.importance}] {mem.content}" for mem in output.new_memories
         )
         logger.debug(f"{tag} Storing {len(output.new_memories)} new memories{memory_lines}")
 

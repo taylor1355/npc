@@ -16,13 +16,13 @@ def get_logger(name: str | None = None) -> logging.Logger:
     if name is None:
         # Get caller's module name automatically
         frame = inspect.currentframe().f_back
-        name = frame.f_globals.get('__name__', 'mind')
+        name = frame.f_globals.get("__name__", "mind")
 
     # Ensure it's in the mind namespace
-    if not name.startswith('mind'):
-        if name == '__main__':
-            name = 'mind'
+    if not name.startswith("mind"):
+        if name == "__main__":
+            name = "mind"
         else:
-            name = f'mind.{name.removeprefix("mind.")}'
+            name = f"mind.{name.removeprefix('mind.')}"
 
     return logging.getLogger(name)
