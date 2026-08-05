@@ -31,9 +31,7 @@ def format_personality(
     traits_text = ", ".join(traits) if traits else "No specific traits"
 
     if dimensions:
-        dims_text = "\n".join(
-            f"{name}: {value:.2f}" for name, value in sorted(dimensions.items())
-        )
+        dims_text = "\n".join(f"{name}: {value:.2f}" for name, value in sorted(dimensions.items()))
     else:
         dims_text = "No personality dimensions provided"
 
@@ -53,7 +51,9 @@ def format_interaction_status(observation: Observation | None) -> str:
     partial — a missing field never reads as "interacting".
     """
     if observation is not None and observation.is_interacting():
-        interaction_name = observation.status.current_interaction.get("interaction_name", "interaction")
+        interaction_name = observation.status.current_interaction.get(
+            "interaction_name", "interaction"
+        )
         return (
             f"You ARE currently in an interaction ({interaction_name}). "
             "Interaction-participation actions are valid."

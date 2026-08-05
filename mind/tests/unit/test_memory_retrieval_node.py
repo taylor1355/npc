@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mind.cognitive_architecture.memory import Memory
-from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.nodes.memory_retrieval.node import MemoryRetrievalNode
+from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.state import PipelineState
 
 
@@ -139,8 +139,9 @@ class TestMemoryRetrievalNode:
         assert result.personality_traits == ["brave", "honest"]
         assert result.observation == state.observation
 
-
-    async def test_all_log_records_carry_entity_id(self, node, mock_memory_store, basic_state, caplog):
+    async def test_all_log_records_carry_entity_id(
+        self, node, mock_memory_store, basic_state, caplog
+    ):
         """Every record from process() must carry the entity id so the simulation's
         log forwarder can attribute it to the NPC's Events tab (NPC-789)"""
         mock_memory_store.search.return_value = [

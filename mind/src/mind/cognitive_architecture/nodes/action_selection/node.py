@@ -51,12 +51,14 @@ class ActionSelectionNode(LLMNode):
         )
 
         # Build world knowledge from centralized knowledge files
-        world_knowledge = KnowledgeBase.get([
-            KnowledgeFile.NEEDS,
-            KnowledgeFile.INTERACTIONS,
-            KnowledgeFile.MOVEMENT,
-            KnowledgeFile.ACTIVITY,
-        ])
+        world_knowledge = KnowledgeBase.get(
+            [
+                KnowledgeFile.NEEDS,
+                KnowledgeFile.INTERACTIONS,
+                KnowledgeFile.MOVEMENT,
+                KnowledgeFile.ACTIVITY,
+            ]
+        )
 
         # Call LLM with prompt variables
         try:
@@ -69,10 +71,12 @@ class ActionSelectionNode(LLMNode):
                 interaction_status=_format_interaction_status(state.observation),
                 recent_events=pformat(state.recent_events),
                 world_knowledge=world_knowledge,
-                format_instructions=self.get_format_instructions()
+                format_instructions=self.get_format_instructions(),
             )
         except (ValidationError, json.JSONDecodeError) as e:
-            logger.warning(f"{entity_tag(state)} Action selection failed after retries, falling back to wait: {e}")
+            logger.warning(
+                f"{entity_tag(state)} Action selection failed after retries, falling back to wait: {e}"
+            )
             # Use model_construct to bypass validation - WAIT is always safe
             fallback_action = Action.model_construct(action=ActionType.WAIT, parameters={})
             output = ActionSelectionOutput.model_construct(chosen_action=fallback_action)
@@ -86,7 +90,7 @@ class ActionSelectionNode(LLMNode):
             payload={
                 "action": output.chosen_action.action,
                 "parameters": output.chosen_action.parameters,
-            }
+            },
         )
         state.recent_events.append(action_event)
 

@@ -3,6 +3,7 @@
 
 class ActionValidationError(ValueError):
     """Base exception for action validation failures that should trigger retry"""
+
     pass
 
 

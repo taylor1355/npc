@@ -68,7 +68,7 @@ class LLMNode(Node):
         llm: BaseChatModel,
         prompt: PromptTemplate,
         output_model: type[BaseModel] | None = None,
-        max_retries: int = 0
+        max_retries: int = 0,
     ):
         """
         Args:
@@ -81,7 +81,9 @@ class LLMNode(Node):
             ValueError: If max_retries > 0 but output_model is None
         """
         if max_retries > 0 and output_model is None:
-            raise ValueError("max_retries > 0 requires output_model (cannot retry raw string output)")
+            raise ValueError(
+                "max_retries > 0 requires output_model (cannot retry raw string output)"
+            )
 
         self.llm = llm
         self.prompt = prompt
@@ -106,11 +108,7 @@ class LLMNode(Node):
             f"IMPORTANT: Output ONLY raw JSON. Do NOT wrap in markdown code fences like ```json."
         )
 
-    async def call_llm(
-        self,
-        state: PipelineState,
-        **prompt_vars
-    ) -> BaseModel | str:
+    async def call_llm(self, state: PipelineState, **prompt_vars) -> BaseModel | str:
         """Call LLM with automatic token tracking and optional retry
 
         Args:
@@ -131,7 +129,9 @@ class LLMNode(Node):
             tokens = self._extract_tokens(response)
             if tokens:
                 state.tokens_used[self.step_name] = tokens
-            logger.debug(f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, {tokens} tokens")
+            logger.debug(
+                f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, {tokens} tokens"
+            )
             return response.content
 
         # Structured output with retry
@@ -161,15 +161,23 @@ class LLMNode(Node):
                 elapsed_ms = int((time.time() - start_time) * 1000)
                 if total_tokens:
                     state.tokens_used[self.step_name] = total_tokens
-                logger.debug(f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, {total_tokens} tokens")
+                logger.debug(
+                    f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, {total_tokens} tokens"
+                )
                 return validated
 
             except (json.JSONDecodeError, ValidationError) as e:
                 last_error = e
                 if attempt < max_attempts - 1:
                     # Log retry
-                    error_type = "JSONDecodeError" if isinstance(e, json.JSONDecodeError) else "ValidationError"
-                    logger.debug(f"{entity_tag(state)} [{self.step_name}] Retry {attempt + 1}/{self.max_retries}: {error_type}")
+                    error_type = (
+                        "JSONDecodeError"
+                        if isinstance(e, json.JSONDecodeError)
+                        else "ValidationError"
+                    )
+                    logger.debug(
+                        f"{entity_tag(state)} [{self.step_name}] Retry {attempt + 1}/{self.max_retries}: {error_type}"
+                    )
 
                     messages.append(AIMessage(content=response.content))
 
@@ -193,6 +201,6 @@ class LLMNode(Node):
 
     def _extract_tokens(self, response: AIMessage) -> int:
         """Extract token count from response.usage_metadata"""
-        if hasattr(response, 'usage_metadata') and response.usage_metadata:
-            return response.usage_metadata.get('total_tokens', 0)
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            return response.usage_metadata.get("total_tokens", 0)
         return 0

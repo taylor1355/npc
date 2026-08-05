@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory
 from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
+from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.state import PipelineState
 
 

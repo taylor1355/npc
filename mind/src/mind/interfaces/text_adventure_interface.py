@@ -1,7 +1,7 @@
+from mind.simulators.text_adventure import TextAdventureSimulator
 from pydantic import Field
 
 from mind.interfaces import SimulatorInterface, SimulatorRequest, SimulatorResponse
-from mind.simulators.text_adventure import TextAdventureSimulator
 
 
 class TextAdventureRequest(SimulatorRequest):

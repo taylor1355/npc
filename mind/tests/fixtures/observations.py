@@ -4,6 +4,7 @@ These fixtures mirror real Godot simulation observations that would be
 sent to the Mind server via MCP.
 """
 
+from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.observations import (
     ConversationMessage,
     ConversationObservation,
@@ -13,7 +14,6 @@ from mind.cognitive_architecture.observations import (
     StatusObservation,
     VisionObservation,
 )
-from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_SMALL_MODEL
 from mind.interfaces.mcp.models import MindConfig
 

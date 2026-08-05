@@ -1,16 +1,11 @@
 """Unit tests for action models"""
 
-import pytest
-from pydantic import ValidationError
 from unittest.mock import Mock
 
+import pytest
+from pydantic import ValidationError
+
 from mind.cognitive_architecture.actions import Action
-from mind.cognitive_architecture.actions.exceptions import (
-    InvalidEntityError,
-    InvalidInteractionError,
-    MissingRequiredParameterError,
-    MovementLockedError,
-)
 from mind.cognitive_architecture.observations import (
     EntityData,
     Observation,
@@ -121,9 +116,7 @@ class TestActionValidation:
         state = self._create_mock_state(observation)
 
         with pytest.raises(ValidationError) as exc_info:
-            Action.model_validate(
-                {"action": "move_to", "parameters": {}}, context={"state": state}
-            )
+            Action.model_validate({"action": "move_to", "parameters": {}}, context={"state": state})
 
         # Check that it's wrapped MissingRequiredParameterError
         assert "destination" in str(exc_info.value)
@@ -155,9 +148,7 @@ class TestActionValidation:
         state = self._create_mock_state(observation)
 
         with pytest.raises(ValidationError) as exc_info:
-            Action.model_validate(
-                {"action": "wander", "parameters": {}}, context={"state": state}
-            )
+            Action.model_validate({"action": "wander", "parameters": {}}, context={"state": state})
 
         assert "Movement actions not available" in str(exc_info.value)
 
@@ -321,7 +312,10 @@ class TestBidResponseValidation:
         state = self._create_mock_state_with_bids({"bid_789": bid_event})
 
         action = Action.model_validate(
-            {"action": "respond_to_interaction_bid", "parameters": {"bid_id": "bid_789", "accept": True}},
+            {
+                "action": "respond_to_interaction_bid",
+                "parameters": {"bid_id": "bid_789", "accept": True},
+            },
             context={"state": state},
         )
 
@@ -365,14 +359,22 @@ class TestBidResponseValidation:
         bid_event = MindEvent(
             timestamp=100,
             event_type=MindEventType.INTERACTION_BID_RECEIVED,
-            payload={"bid_id": "bid_111", "bidder_id": "eve_001", "bidder_name": "Eve", "interaction_name": "trade"},
+            payload={
+                "bid_id": "bid_111",
+                "bidder_id": "eve_001",
+                "bidder_name": "Eve",
+                "interaction_name": "trade",
+            },
         )
 
         state = self._create_mock_state_with_bids({"bid_111": bid_event})
 
         with pytest.raises(ValidationError) as exc_info:
             Action.model_validate(
-                {"action": "respond_to_interaction_bid", "parameters": {"bid_id": "bid_111", "accept": False}},
+                {
+                    "action": "respond_to_interaction_bid",
+                    "parameters": {"bid_id": "bid_111", "accept": False},
+                },
                 context={"state": state},
             )
 
@@ -412,7 +414,12 @@ class TestBidResponseValidation:
         bid_event = MindEvent(
             timestamp=100,
             event_type=MindEventType.INTERACTION_BID_RECEIVED,
-            payload={"bid_id": "bid_222", "bidder_id": "frank_001", "bidder_name": "Frank", "interaction_name": "sit"},
+            payload={
+                "bid_id": "bid_222",
+                "bidder_id": "frank_001",
+                "bidder_name": "Frank",
+                "interaction_name": "sit",
+            },
         )
 
         state = self._create_mock_state_with_bids({"bid_222": bid_event})

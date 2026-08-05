@@ -63,9 +63,11 @@ class MemoryRetrievalNode(Node):
 
         # Log retrieved memories
         tag = entity_tag(state)
-        logger.debug(f"{tag} Retrieved {len(deduplicated_memories)} memories from {len(state.memory_queries)} queries")
+        logger.debug(
+            f"{tag} Retrieved {len(deduplicated_memories)} memories from {len(state.memory_queries)} queries"
+        )
         for i, mem in enumerate(deduplicated_memories[:3]):  # Show top 3
             content_preview = mem.content[:100] + "..." if len(mem.content) > 100 else mem.content
-            logger.debug(f"{tag}   [{i+1}] {content_preview}")
+            logger.debug(f"{tag}   [{i + 1}] {content_preview}")
 
         return state

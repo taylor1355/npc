@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 
 from .actions import Action, AvailableAction
 from .memory import Memory
-from .observations import ConversationMessage, MindEvent, Observation
 from .nodes.cognitive_update.models import NewMemory, WorkingMemory
+from .observations import ConversationMessage, MindEvent, Observation
 
 
 def merge_dicts(left: dict, right: dict) -> dict:

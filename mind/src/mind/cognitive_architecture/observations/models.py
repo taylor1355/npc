@@ -197,7 +197,7 @@ class Observation(BaseModel):
 
             # Show activity state
             if self.status.activity_state:
-                state_name = self.status.activity_state.get('state_name', 'unknown')
+                state_name = self.status.activity_state.get("state_name", "unknown")
                 parts.append(f"Currently: {state_name}")
 
         if self.needs:
@@ -208,7 +208,9 @@ class Observation(BaseModel):
             # Show entity details with IDs and interactions (critical for action selection)
             parts.append("Visible entities:")
             for entity in self.vision.visible_entities:
-                entity_parts = [f"  - {entity.display_name} (ID: {entity.entity_id}, Position: {entity.position})"]
+                entity_parts = [
+                    f"  - {entity.display_name} (ID: {entity.entity_id}, Position: {entity.position})"
+                ]
 
                 if entity.interactions:
                     interaction_strs = []
@@ -249,8 +251,12 @@ class Observation(BaseModel):
                 parts.append(f"Conversation:\n{msgs_str}")
             elif conv.initiator_id:
                 # No messages yet - show who initiated to provide context
-                initiator_context = "you" if conv.initiator_id == self.entity_id else conv.initiator_id
-                parts.append(f"Conversation: (just started by {initiator_context}, no messages yet)")
+                initiator_context = (
+                    "you" if conv.initiator_id == self.entity_id else conv.initiator_id
+                )
+                parts.append(
+                    f"Conversation: (just started by {initiator_context}, no messages yet)"
+                )
 
         return "\n\n".join(parts) if parts else "No observations"
 
@@ -277,8 +283,12 @@ class Observation(BaseModel):
         if pending_incoming_bids:
             # Add batch reject action when there are multiple bids
             if len(pending_incoming_bids) >= 2:
-                bid_list = ", ".join([f"{bid_id[:8]} from {event.payload.get('bidder_name', 'unknown')}"
-                                      for bid_id, event in pending_incoming_bids.items()])
+                bid_list = ", ".join(
+                    [
+                        f"{bid_id[:8]} from {event.payload.get('bidder_name', 'unknown')}"
+                        for bid_id, event in pending_incoming_bids.items()
+                    ]
+                )
                 actions.append(
                     AvailableAction(
                         name=ActionType.BATCH_REJECT_INTERACTION_BIDS,
@@ -340,8 +350,8 @@ class Observation(BaseModel):
 
         # Conditional: continue action when movement or interaction is in progress
         if self.status and self.status.activity_state:
-            state_name = self.status.activity_state.get('state_name', '')
-            if state_name == 'moving':
+            state_name = self.status.activity_state.get("state_name", "")
+            if state_name == "moving":
                 actions.append(
                     AvailableAction(
                         name=ActionType.CONTINUE,
@@ -349,7 +359,9 @@ class Observation(BaseModel):
                     )
                 )
             elif self.is_interacting():
-                interaction_name = self.status.current_interaction.get('interaction_name', 'interaction')
+                interaction_name = self.status.current_interaction.get(
+                    "interaction_name", "interaction"
+                )
                 actions.append(
                     AvailableAction(
                         name=ActionType.CONTINUE,
@@ -362,14 +374,14 @@ class Observation(BaseModel):
         # Grounding here (not just current_interaction presence) prevents emitting
         # act_in_interaction during interaction teardown — the NPC-688 desync loop.
         if self.is_interacting():
-            interaction_name = self.status.current_interaction.get('interaction_name', 'interaction')
+            interaction_name = self.status.current_interaction.get(
+                "interaction_name", "interaction"
+            )
 
             # Add action to participate in the interaction (e.g., send message in conversation)
             params = {}
-            if interaction_name == 'conversation':
-                params = {
-                    "message": "The message to send in the conversation"
-                }
+            if interaction_name == "conversation":
+                params = {"message": "The message to send in the conversation"}
 
             actions.append(
                 AvailableAction(
@@ -391,7 +403,9 @@ class Observation(BaseModel):
             for entity in self.vision.visible_entities:
                 for interaction_name, interaction_data in entity.interactions.items():
                     # Extract interaction details
-                    desc = interaction_data.get("description", f"Interact with {entity.display_name}")
+                    desc = interaction_data.get(
+                        "description", f"Interact with {entity.display_name}"
+                    )
 
                     # Build parameter descriptions
                     params = {
