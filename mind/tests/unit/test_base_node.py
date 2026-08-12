@@ -146,7 +146,7 @@ class TestLLMNodeRawStringOutput:
 
         await node.call_llm(state, input="test")
 
-        assert state.tokens_used["test_step"] == 30
+        assert state.tokens_used["test_step"].total_tokens == 30
 
 
 class TestLLMNodeStructuredOutput:
@@ -211,7 +211,7 @@ class TestLLMNodeStructuredOutput:
 
         await node.call_llm(state, input="test")
 
-        assert state.tokens_used["test_step"] == 20
+        assert state.tokens_used["test_step"].total_tokens == 20
 
 
 class TestLLMNodeRetryLogic:
@@ -356,7 +356,7 @@ class TestLLMNodeRetryLogic:
         await node.call_llm(state, input="test")
 
         # Should sum all attempts: 11 + 14 + 18 = 43
-        assert state.tokens_used["test_step"] == 43
+        assert state.tokens_used["test_step"].total_tokens == 43
 
     @pytest.mark.asyncio
     async def test_retry_tracks_tokens_even_on_failure(self):
@@ -393,50 +393,210 @@ class TestLLMNodeRetryLogic:
             await node.call_llm(state, input="test")
 
         # Should still track tokens: 11 + 12 = 23
-        assert state.tokens_used["test_step"] == 23
+        assert state.tokens_used["test_step"].total_tokens == 23
 
 
-class TestTokenExtraction:
-    """Test _extract_tokens edge cases"""
+class TestUsageExtraction:
+    """_extract_usage edge cases.
 
-    def test_extract_tokens_with_usage_metadata(self):
-        """Should extract tokens from usage_metadata"""
-        mock_llm = AsyncMock()
-        prompt = PromptTemplate.from_template("{input}")
-        node = LLMNode(llm=mock_llm, prompt=prompt)
+    The through-line: a zero this code reports must always be a zero somebody
+    measured. "The provider said nothing" is a different answer and gets a
+    different representation (None here, unreported_calls downstream).
+    """
 
+    def _node(self):
+        return LLMNode(llm=AsyncMock(), prompt=PromptTemplate.from_template("{input}"))
+
+    def test_extract_usage_preserves_prompt_and_completion_split(self):
+        """The split arrives in usage_metadata and must survive extraction"""
         response = AIMessage(
             content="test",
             usage_metadata={"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
         )
 
-        tokens = node._extract_tokens(response)
-        assert tokens == 8
+        usage = self._node()._extract_usage(response)
 
-    def test_extract_tokens_without_usage_metadata(self):
-        """Should return 0 when no usage_metadata"""
-        mock_llm = AsyncMock()
-        prompt = PromptTemplate.from_template("{input}")
-        node = LLMNode(llm=mock_llm, prompt=prompt)
+        assert usage.prompt_tokens == 5
+        assert usage.completion_tokens == 3
+        assert usage.total_tokens == 8
+        assert usage.model_calls == 1
+        assert usage.unreported_calls == 0
 
-        response = AIMessage(content="test")
+    def test_extract_usage_returns_none_when_provider_reported_nothing(self):
+        """None, not a zeroed record - the two mean different things"""
+        assert self._node()._extract_usage(AIMessage(content="test")) is None
 
-        tokens = node._extract_tokens(response)
-        assert tokens == 0
-
-    def test_extract_tokens_with_missing_total_tokens(self):
-        """Should return 0 when total_tokens is missing from usage_metadata"""
-        mock_llm = AsyncMock()
-        prompt = PromptTemplate.from_template("{input}")
-        node = LLMNode(llm=mock_llm, prompt=prompt)
-
+    def test_extract_usage_reports_a_measured_zero_as_a_record(self):
+        """A provider that reports zero is measured data, not missing data"""
         response = AIMessage(
             content="test",
-            usage_metadata={"input_tokens": 5, "output_tokens": 3, "total_tokens": 0},
+            usage_metadata={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
         )
 
-        tokens = node._extract_tokens(response)
-        assert tokens == 0
+        usage = self._node()._extract_usage(response)
+
+        assert usage is not None, "a reported zero must not be collapsed into None"
+        assert usage.total_tokens == 0
+        assert usage.model_calls == 1
+
+    def test_cache_read_tokens_are_captured(self):
+        """cache_read rides input_token_details and is free to read through"""
+        response = AIMessage(
+            content="test",
+            usage_metadata={
+                "input_tokens": 100,
+                "output_tokens": 10,
+                "total_tokens": 110,
+                "input_token_details": {"cache_read": 80},
+            },
+        )
+
+        usage = self._node()._extract_usage(response)
+
+        assert usage.cached_prompt_tokens == 80
+        assert usage.cache_reporting is True
+
+    def test_absent_cache_details_are_not_reported_as_zero_cache_hits(self):
+        """input_token_details is NotRequired; absent != zero hits"""
+        response = AIMessage(
+            content="test",
+            usage_metadata={"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+        )
+
+        usage = self._node()._extract_usage(response)
+
+        assert usage.cache_reporting is False, (
+            "no cache accounting reported must stay distinguishable from zero hits"
+        )
+
+
+class TestUsageRecordingSentinels:
+    """call_llm must never let an absent key or a zero impersonate the other."""
+
+    def _state(self):
+        return PipelineState(
+            observation=Observation(
+                entity_id="test",
+                current_simulation_time=0,
+                status=StatusObservation(position=(0, 0), movement_locked=False),
+            )
+        )
+
+    @pytest.mark.asyncio
+    async def test_step_that_cost_zero_tokens_is_recorded_not_omitted(self):
+        """'ran and was free' must not collapse into 'never ran'"""
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.return_value = AIMessage(
+            content="Response",
+            usage_metadata={"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        )
+
+        node = LLMNode(
+            llm=mock_llm, prompt=PromptTemplate.from_template("{input}"), output_model=None
+        )
+        node.step_name = "test_step"
+        state = self._state()
+
+        await node.call_llm(state, input="test")
+
+        assert "test_step" in state.tokens_used, (
+            "a step that legitimately cost zero must still get a key"
+        )
+        assert state.tokens_used["test_step"].total_tokens == 0
+        assert state.tokens_used["test_step"].model_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_missing_usage_metadata_records_unreported_not_zero(self):
+        """A silent provider is recorded as an unreported call, not a free one"""
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.return_value = AIMessage(content="Response")
+
+        node = LLMNode(
+            llm=mock_llm, prompt=PromptTemplate.from_template("{input}"), output_model=None
+        )
+        node.step_name = "test_step"
+        state = self._state()
+
+        await node.call_llm(state, input="test")
+
+        usage = state.tokens_used["test_step"]
+        assert usage.model_calls == 1
+        assert usage.unreported_calls == 1
+        assert usage.is_fully_unreported()
+
+    @pytest.mark.asyncio
+    async def test_every_provider_call_including_retries_is_counted(self):
+        """Three round-trips for one decision must be countable as three"""
+
+        class TestOutput(BaseModel):
+            value: str
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.side_effect = [
+            AIMessage(
+                content="bad",
+                usage_metadata={"input_tokens": 10, "output_tokens": 1, "total_tokens": 11},
+            ),
+            AIMessage(
+                content="also bad",
+                usage_metadata={"input_tokens": 12, "output_tokens": 2, "total_tokens": 14},
+            ),
+            AIMessage(
+                content='{"value": "good"}',
+                usage_metadata={"input_tokens": 14, "output_tokens": 4, "total_tokens": 18},
+            ),
+        ]
+
+        node = LLMNode(
+            llm=mock_llm,
+            prompt=PromptTemplate.from_template("{input}"),
+            output_model=TestOutput,
+            max_retries=2,
+        )
+        node.step_name = "test_step"
+        state = self._state()
+
+        await node.call_llm(state, input="test")
+
+        usage = state.tokens_used["test_step"]
+        assert usage.model_calls == 3, "retries are real spend and must stay countable"
+        assert usage.total_tokens == 43
+        assert usage.prompt_tokens == 36
+        assert usage.completion_tokens == 7
+
+    @pytest.mark.asyncio
+    async def test_retry_exhaustion_still_records_the_calls_it_made(self):
+        """The raise escapes past any handler that can reach PipelineState"""
+
+        class TestOutput(BaseModel):
+            value: str
+
+        mock_llm = AsyncMock()
+        mock_llm.ainvoke.side_effect = [
+            AIMessage(
+                content="bad1",
+                usage_metadata={"input_tokens": 10, "output_tokens": 1, "total_tokens": 11},
+            ),
+            AIMessage(
+                content="bad2",
+                usage_metadata={"input_tokens": 11, "output_tokens": 1, "total_tokens": 12},
+            ),
+        ]
+
+        node = LLMNode(
+            llm=mock_llm,
+            prompt=PromptTemplate.from_template("{input}"),
+            output_model=TestOutput,
+            max_retries=1,
+        )
+        node.step_name = "test_step"
+        state = self._state()
+
+        with pytest.raises((json.JSONDecodeError, ValidationError)):
+            await node.call_llm(state, input="test")
+
+        assert state.tokens_used["test_step"].model_calls == 2
+        assert state.tokens_used["test_step"].total_tokens == 23
 
 
 class TestEntityTagAttribution:

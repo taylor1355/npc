@@ -78,7 +78,7 @@ class TestMemoryQueryNode:
         result = await node.process(basic_state)
 
         assert "memory_query" in result.tokens_used
-        assert result.tokens_used["memory_query"] == 190
+        assert result.tokens_used["memory_query"].total_tokens == 190
 
     async def test_tracks_timing(self, node, mock_llm, basic_state):
         """Should track execution time in state"""

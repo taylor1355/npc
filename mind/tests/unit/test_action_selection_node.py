@@ -94,7 +94,7 @@ class TestActionSelectionNode:
         result = await node.process(basic_state)
 
         assert "action_selection" in result.tokens_used
-        assert result.tokens_used["action_selection"] == 230
+        assert result.tokens_used["action_selection"].total_tokens == 230
 
     async def test_tracks_timing(self, node, mock_llm, basic_state):
         """Should track execution time in state"""

@@ -117,7 +117,7 @@ class TestCognitiveUpdateNode:
 
         # Should have token usage tracked
         assert "cognitive_update" in result.tokens_used
-        assert result.tokens_used["cognitive_update"] == 150
+        assert result.tokens_used["cognitive_update"].total_tokens == 150
 
     async def test_tracks_timing(self, node, mock_llm, basic_state):
         """Should track execution time in state"""
