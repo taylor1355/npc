@@ -15,6 +15,7 @@ from mind.cognitive_architecture.nodes.formatting import (
 )
 from mind.cognitive_architecture.nodes.formatting import (
     format_personality,
+    format_substrate_goal,
 )
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
@@ -69,6 +70,9 @@ class ActionSelectionNode(LLMNode):
                 personality_dimensions=dims_text,
                 available_actions=actions_text,
                 interaction_status=_format_interaction_status(state.observation),
+                substrate_goal=format_substrate_goal(
+                    state.observation.goal if state.observation else None
+                ),
                 recent_events=pformat(state.recent_events),
                 world_knowledge=world_knowledge,
                 format_instructions=self.get_format_instructions(),

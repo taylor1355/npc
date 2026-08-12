@@ -138,6 +138,97 @@ class NeedsObservation(BaseModel):
     max_value: float = 100.0
 
 
+class GoalDetail(BaseModel):
+    """One goal produced by the simulation's substrate goal system.
+
+    ``urgency`` is deliberately unbounded. The simulation's effective-urgency
+    domain is wider than [0, 1] (preference alignment scales the template curve
+    up), and the percent-of-maximum display conversion is owned by the
+    simulation tier. Bounding or percent-formatting the value here would fork
+    that scale, so the raw number is carried and rendered plainly.
+    """
+
+    label: str
+    urgency: float
+    drive_source: str = ""
+    template_id: str = ""
+
+
+class GoalObservation(BaseModel):
+    """Substrate goal state: what the NPC's drives have settled on.
+
+    The simulation has sent this every cycle since the goal system shipped; it
+    was discarded at this boundary because ``Observation`` never declared the
+    field (pydantic's default ``extra="ignore"``). Declaring it is what makes
+    the substrate's own answer to "why act?" visible to the LLM instead of
+    leaving it to re-derive intent from raw need percentages.
+    """
+
+    active_goal: GoalDetail | None = None
+    candidate_count: int = 0
+
+
+class ValenceBand(StrEnum):
+    """Circumplex valence band, matching Godot SubstrateState.valence_band()."""
+
+    NEG = "neg"
+    MID = "mid"
+    POS = "pos"
+
+
+class ArousalBand(StrEnum):
+    """Circumplex arousal band, matching Godot SubstrateState.arousal_band()."""
+
+    LOW = "low"
+    MID = "mid"
+    HIGH = "high"
+
+
+class MoodObservation(BaseModel):
+    """Valence-arousal circumplex mood.
+
+    Structure fails loud, copy fails soft. The bands are a StrEnum because the
+    3x3 grid is structure: a fourth band is a genuine breaking change and
+    deserves a ValidationError. ``label`` is a free ``str`` because the nine
+    mood words are copy — the simulation has already relabelled two of them, and
+    a copy change must never break decisions. Never branch on ``label``; branch
+    on the bands.
+
+    ``valence``/``arousal`` are deliberately unbounded. Their nominal domains are
+    [-1, 1] and [0, 1], and every stimulus path clamps to them, but the
+    baseline-drift path integrates ``rate * elapsed_minutes`` without a clamp, so
+    a long gap between decision cycles can overshoot. Bounding here would convert
+    a cosmetic numeric excursion into a ValidationError, and in this pipeline a
+    ValidationError collapses the cycle into the WAIT fallback — an NPC that
+    silently stops acting. The bands stay correct either way.
+    """
+
+    valence: float
+    arousal: float
+    valence_band: ValenceBand
+    arousal_band: ArousalBand
+    label: str
+    valence_baseline: float = 0.0
+    arousal_baseline: float = 0.5
+
+
+class RelationshipState(BaseModel):
+    """Observer's relationship with one visible entity.
+
+    Named ``RelationshipState`` rather than mirroring the simulation's
+    ``RelationshipData`` so the two names cannot be confused across the boundary.
+    Raw numbers only: there is no familiarity/sentiment band vocabulary in the
+    simulation to reuse, and inventing one inside a serializer would put prompt
+    copy in the simulation tier. The rendering below owns the words.
+
+    Bounded, unlike mood: every registry write clamps these to their domains.
+    """
+
+    familiarity: float = Field(ge=0.0, le=1.0)
+    sentiment: float = Field(ge=-1.0, le=1.0)
+    interaction_count: int = 0
+
+
 class EntityData(BaseModel):
     """Visible entity with interaction affordances"""
 
@@ -145,6 +236,7 @@ class EntityData(BaseModel):
     display_name: str
     position: tuple[int, int]
     interactions: dict[str, dict] = Field(default_factory=dict)
+    relationship: RelationshipState | None = None
 
 
 class VisionObservation(BaseModel):
@@ -180,6 +272,8 @@ class Observation(BaseModel):
 
     status: StatusObservation | None = None
     needs: NeedsObservation | None = None
+    goal: GoalObservation | None = None
+    mood: MoodObservation | None = None
     vision: VisionObservation | None = None
     conversations: list[ConversationObservation] = Field(default_factory=list)
 
@@ -204,6 +298,23 @@ class Observation(BaseModel):
             needs_parts = [f"{k}: {v:.0f}%" for k, v in self.needs.needs.items()]
             parts.append(f"Needs: {', '.join(needs_parts)}")
 
+        # Rendered only when the substrate actually settled on a goal, so an
+        # observation without one is byte-identical to the pre-goal rendering.
+        if self.goal and self.goal.active_goal:
+            active = self.goal.active_goal
+            drive_clause = f", from your {active.drive_source} drive" if active.drive_source else ""
+            parts.append(
+                f"Subconscious pull: {active.label} (urgency {active.urgency:.2f}{drive_clause})"
+            )
+
+        if self.mood:
+            parts.append(
+                f"Mood: {self.mood.label} "
+                f"(valence {self.mood.valence:+.2f} against a resting "
+                f"{self.mood.valence_baseline:+.2f}; arousal {self.mood.arousal:.2f} "
+                f"against a resting {self.mood.arousal_baseline:.2f})"
+            )
+
         if self.vision and self.vision.visible_entities:
             # Show entity details with IDs and interactions (critical for action selection)
             parts.append("Visible entities:")
@@ -211,6 +322,16 @@ class Observation(BaseModel):
                 entity_parts = [
                     f"  - {entity.display_name} (ID: {entity.entity_id}, Position: {entity.position})"
                 ]
+
+                # Omitted entirely for strangers, so the line's presence is
+                # itself the signal that there is shared history.
+                if entity.relationship:
+                    rel = entity.relationship
+                    entity_parts.append(
+                        f"    Relationship: familiarity {rel.familiarity:.2f}, "
+                        f"sentiment {rel.sentiment:+.2f}, "
+                        f"{rel.interaction_count} shared interactions"
+                    )
 
                 if entity.interactions:
                     interaction_strs = []

@@ -280,3 +280,64 @@ class TestCognitiveUpdateNode:
         storing_records = [r for r in caplog.records if "Storing" in r.getMessage()]
         assert len(storing_records) == 1
         assert "Started sword commission" in storing_records[0].getMessage()
+
+
+@pytest.mark.asyncio
+class TestObservationEnrichmentArms:
+    """cognitive_update must format in both arms of the enrichment A/B"""
+
+    @pytest.fixture
+    def mock_llm(self):
+        mock = AsyncMock()
+        mock.ainvoke.return_value = AIMessage(
+            content="""{
+                "situation_assessment": "Currently at the forge",
+                "current_goals": ["Complete sword order"],
+                "emotional_state": "Focused",
+                "updated_working_memory": {
+                    "situation_assessment": "Working on sword commission",
+                    "active_goals": ["Finish blade"],
+                    "emotional_state": "Determined"
+                },
+                "new_memories": []
+            }""",
+            usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+        )
+        return mock
+
+    @pytest.fixture
+    def node(self, mock_llm):
+        return CognitiveUpdateNode(mock_llm)
+
+    async def test_formats_an_unenriched_observation(self, node):
+        state = PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(0, 0), movement_locked=False),
+            ),
+            working_memory=WorkingMemory(
+                situation_assessment="idle", active_goals=[], emotional_state="steady"
+            ),
+        )
+
+        result = await node.process(state)
+
+        assert result.working_memory is not None
+
+    async def test_enriched_observation_reaches_the_prompt(self, node, mock_llm):
+        from tests.fixtures.observations import create_enriched_observation
+
+        state = PipelineState(
+            observation=create_enriched_observation(),
+            working_memory=WorkingMemory(
+                situation_assessment="idle", active_goals=[], emotional_state="calm"
+            ),
+        )
+
+        await node.process(state)
+
+        prompt_text = str(mock_llm.ainvoke.call_args[0][0])
+        assert "Mood: stressed" in prompt_text
+        assert "Subconscious pull: Find something to eat" in prompt_text
+        assert "familiarity 0.62" in prompt_text

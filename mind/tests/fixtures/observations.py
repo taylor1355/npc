@@ -6,12 +6,18 @@ sent to the Mind server via MCP.
 
 from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.observations import (
+    ArousalBand,
     ConversationMessage,
     ConversationObservation,
     EntityData,
+    GoalDetail,
+    GoalObservation,
+    MoodObservation,
     NeedsObservation,
     Observation,
+    RelationshipState,
     StatusObservation,
+    ValenceBand,
     VisionObservation,
 )
 from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_SMALL_MODEL
@@ -388,6 +394,70 @@ def create_risk_scenario_observation(simulation_time: int = 100) -> Observation:
                             "needs_drained": ["energy"],
                         }
                     },
+                ),
+            ]
+        ),
+        conversations=[],
+    )
+
+
+def create_enriched_observation(simulation_time: int = 100) -> Observation:
+    """The enriched arm of the observation A/B.
+
+    Every other fixture in this module is deliberately left unenriched so it
+    keeps acting as a control-arm regression: the fields added by observation
+    enrichment are all optional, and an observation that omits them must render
+    exactly as it did before they existed.
+    """
+    return Observation(
+        entity_id="enriched_npc",
+        current_simulation_time=simulation_time,
+        status=StatusObservation(position=(12, 8), movement_locked=False),
+        needs=NeedsObservation(
+            needs={"hunger": 22.0, "energy": 41.0, "stimulation": 60.0, "social": 35.0},
+            max_value=100.0,
+        ),
+        goal=GoalObservation(
+            active_goal=GoalDetail(
+                label="Find something to eat",
+                urgency=1.18,
+                drive_source="hunger",
+                template_id="satisfy_hunger",
+            ),
+            candidate_count=5,
+        ),
+        mood=MoodObservation(
+            valence=-0.42,
+            arousal=0.81,
+            valence_band=ValenceBand.NEG,
+            arousal_band=ArousalBand.HIGH,
+            label="stressed",
+            valence_baseline=-0.05,
+            arousal_baseline=0.5,
+        ),
+        vision=VisionObservation(
+            visible_entities=[
+                EntityData(
+                    entity_id="alice_npc",
+                    display_name="Alice",
+                    position=(13, 8),
+                    interactions={
+                        "conversation": {
+                            "name": "conversation",
+                            "description": "Talk with Alice",
+                            "needs_filled": ["social"],
+                            "needs_drained": [],
+                        }
+                    },
+                    relationship=RelationshipState(
+                        familiarity=0.62, sentiment=0.31, interaction_count=14
+                    ),
+                ),
+                EntityData(
+                    entity_id="stranger_npc",
+                    display_name="Unfamiliar Traveller",
+                    position=(10, 9),
+                    interactions={},
                 ),
             ]
         ),

@@ -9,7 +9,13 @@ from langchain_core.messages import AIMessage
 from mind.cognitive_architecture.actions import Action, ActionType, AvailableAction
 from mind.cognitive_architecture.nodes.action_selection.node import ActionSelectionNode
 from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
-from mind.cognitive_architecture.observations import Observation, StatusObservation
+from mind.cognitive_architecture.nodes.formatting import format_substrate_goal
+from mind.cognitive_architecture.observations import (
+    GoalDetail,
+    GoalObservation,
+    Observation,
+    StatusObservation,
+)
 from mind.cognitive_architecture.state import PipelineState
 
 
@@ -302,3 +308,99 @@ class TestActionSelectionNode:
             assert "test_npc" in record.getMessage(), (
                 f"Unattributed log record: {record.getMessage()!r}"
             )
+
+
+class TestSubstrateGoalPromptVariable:
+    """`{substrate_goal}` must be formattable in BOTH arms.
+
+    LangChain's PromptTemplate raises at format time on any declared variable
+    that is missing, and this node catches the resulting error and falls back to
+    WAIT. A helper that returned None for "no active goal" would therefore turn
+    every goal-less cycle into a permanently waiting NPC — a silent failure that
+    reads as an NPC that stopped doing things.
+    """
+
+    def test_absent_goal_formats_to_a_sentinel_string(self):
+        rendered = format_substrate_goal(None)
+
+        assert isinstance(rendered, str)
+        assert rendered.strip()
+
+    def test_goal_without_active_goal_formats_to_the_same_sentinel(self):
+        assert format_substrate_goal(GoalObservation(candidate_count=4)) == format_substrate_goal(
+            None
+        )
+
+    def test_active_goal_formats_as_an_advisory_pull(self):
+        rendered = format_substrate_goal(
+            GoalObservation(
+                active_goal=GoalDetail(
+                    label="Find something to eat", urgency=1.21, drive_source="hunger"
+                )
+            )
+        )
+
+        assert "Find something to eat" in rendered
+        assert "1.21" in rendered
+        assert "hunger" in rendered
+
+
+@pytest.mark.asyncio
+class TestActionSelectionSubstrateGoalArms:
+    """The node must render successfully with and without a substrate goal"""
+
+    @pytest.fixture
+    def mock_llm(self):
+        mock = AsyncMock()
+        mock.ainvoke.return_value = AIMessage(
+            content='{"chosen_action": {"action": "wait", "parameters": {}}}',
+            usage_metadata={"input_tokens": 200, "output_tokens": 30, "total_tokens": 230},
+        )
+        return mock
+
+    @pytest.fixture
+    def node(self, mock_llm):
+        return ActionSelectionNode(mock_llm)
+
+    def _state(self, goal):
+        return PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(5, 10), movement_locked=False),
+                goal=goal,
+            ),
+            working_memory=WorkingMemory(
+                situation_assessment="At the forge",
+                active_goals=[],
+                emotional_state="Focused",
+            ),
+            available_actions=[AvailableAction(name="wait", description="Wait and observe")],
+        )
+
+    async def test_formats_without_a_goal(self, node):
+        result = await node.process(self._state(None))
+
+        assert result.chosen_action.action == ActionType.WAIT
+
+    async def test_formats_with_a_goal(self, node):
+        state = self._state(
+            GoalObservation(
+                active_goal=GoalDetail(label="Rest", urgency=0.8, drive_source="energy"),
+                candidate_count=3,
+            )
+        )
+
+        result = await node.process(state)
+
+        assert result.chosen_action.action == ActionType.WAIT
+
+    async def test_prompt_receives_the_rendered_pull(self, node, mock_llm):
+        state = self._state(
+            GoalObservation(active_goal=GoalDetail(label="Seek company", urgency=0.7))
+        )
+
+        await node.process(state)
+
+        prompt_text = str(mock_llm.ainvoke.call_args[0][0])
+        assert "Seek company" in prompt_text

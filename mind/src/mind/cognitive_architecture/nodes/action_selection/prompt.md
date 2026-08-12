@@ -17,6 +17,15 @@ You are modeling a person making moment-to-moment decisions in a simulated world
 ### Personality Dimensions (0.0 = low, 1.0 = high)
 {personality_dimensions}
 
+### Subconscious Pull
+{substrate_goal}
+
+This is a felt inclination from below conscious thought, not a decision already
+made and not an instruction. People routinely act against their pull: they put
+off eating to finish a conversation, or stay put while restless. Weigh it
+alongside personality, working memory, and what just happened, and do not
+narrate it as though it were a plan.
+
 ### Recent Events
 {recent_events}
 
