@@ -445,6 +445,17 @@ class MCPServer:
                 )
 
                 if result.chosen_action is None:
+                    # The one error branch where the cost is NOT unrecoverable: `result`
+                    # is a completed PipelineState and `result.tokens_used` is populated,
+                    # so _error_response's "genuinely unknown" rationale does not hold
+                    # here. It is not plumbed through anyway, because the client maps
+                    # ANY error response to UNREPORTED -- attaching telemetry to this one
+                    # would need a matching client change or the counts would be read as
+                    # unknown regardless. Unreachable today: ActionSelectionNode.process
+                    # catches its own ValidationError/JSONDecodeError and falls back to a
+                    # WAIT action, so chosen_action is always set. If that fallback ever
+                    # goes away, real measured telemetry starts disappearing through here.
+                    # Tracked as [NPC-1195] with the retry-exhaustion loss -- same class.
                     logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")
                     return _error_response(request_id, "Pipeline did not select an action")
 

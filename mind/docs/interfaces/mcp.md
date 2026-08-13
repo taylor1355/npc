@@ -75,6 +75,23 @@ Processes a structured observation and recent events through the cognitive pipel
 4. Runs cognitive pipeline: query memories → retrieve → update working memory → select action
 5. Returns action dict or error
 
+**Response fields:** every response carries `status`, `request_id` and
+`protocol_version` (an int; bumped when the response shape changes in a way a
+client must know about). A **success** response also carries `action` and a
+`telemetry` object: `provenance` (`metered` | `unreported`), the
+`prompt_tokens` / `completion_tokens` / `total_tokens` split,
+`cached_prompt_tokens` with a `cache_reporting` flag distinguishing "no cache
+hits" from "the provider does not report them", `model_calls` (provider
+round-trips, retries included), `unreported_calls`, `model`, `server_ms`, and
+per-step breakdowns.
+
+An **error** response carries no `telemetry`, and a client must read that
+absence as *unknown cost*, never as zero — the two are different facts, and on
+the retry-exhaustion path the attempt genuinely spent tokens that no longer
+reach this boundary. `provenance: "unreported"` on a *success* response means
+the pipeline ran but no step reported usage, which distinguishes a silent
+provider from a cheap decision.
+
 **Event Types:** `INTERACTION_BID_REJECTED`, `INTERACTION_BID_RECEIVED`, `INTERACTION_STARTED`, `INTERACTION_FINISHED`, `INTERACTION_CANCELED`, `INTERACTION_OBSERVATION`, `ERROR`
 
 ### consolidate_memories
