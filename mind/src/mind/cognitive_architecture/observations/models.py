@@ -153,6 +153,23 @@ class GoalDetail(BaseModel):
     drive_source: str = ""
     template_id: str = ""
 
+    def urgency_clause(self) -> str:
+        """The parenthesised "(urgency N, arising from your X drive)" tail.
+
+        Shared by every surface that renders this goal, because two independent
+        builds of the same clause drift: they already had differed wording before
+        this was factored out. The leading phrase is deliberately NOT included --
+        cognitive_update frames it as a subconscious pull and action_selection as
+        a direction to move toward, and that framing difference is intentional
+        where the clause itself must not be.
+
+        Urgency stays the raw simulation value; the percent-of-maximum conversion
+        belongs to the simulation tier and re-deriving it here would fork the
+        display scale.
+        """
+        drive = f", arising from your {self.drive_source} drive" if self.drive_source else ""
+        return f"(urgency {self.urgency:.2f}{drive})"
+
 
 class GoalObservation(BaseModel):
     """Substrate goal state: what the NPC's drives have settled on.
@@ -302,10 +319,7 @@ class Observation(BaseModel):
         # observation without one is byte-identical to the pre-goal rendering.
         if self.goal and self.goal.active_goal:
             active = self.goal.active_goal
-            drive_clause = f", from your {active.drive_source} drive" if active.drive_source else ""
-            parts.append(
-                f"Subconscious pull: {active.label} (urgency {active.urgency:.2f}{drive_clause})"
-            )
+            parts.append(f"Subconscious pull: {active.label} {active.urgency_clause()}")
 
         if self.mood:
             parts.append(

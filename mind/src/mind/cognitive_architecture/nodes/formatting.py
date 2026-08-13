@@ -85,5 +85,4 @@ def format_substrate_goal(goal: GoalObservation | None) -> str:
         return "Nothing in particular; your drives have not settled on a pull right now."
 
     active = goal.active_goal
-    drive_clause = f", arising from your {active.drive_source} drive" if active.drive_source else ""
-    return f"Toward: {active.label} (urgency {active.urgency:.2f}{drive_clause})."
+    return f"Toward: {active.label} {active.urgency_clause()}."
