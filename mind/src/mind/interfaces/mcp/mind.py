@@ -28,6 +28,12 @@ class Mind:
     pipeline: CognitivePipeline
     memory_store: VectorDBMemory
     working_memory: WorkingMemory
+
+    # The model slug this mind was CONFIGURED with. Deterministic and testable
+    # without a live call, which is why telemetry reports it rather than
+    # whatever the provider actually served: OpenRouter may route a request to a
+    # variant, so this is the requested model, not necessarily the served one.
+    llm_model: str
     personality_dimensions: dict[str, float] = field(default_factory=dict)
     daily_memories: list[NewMemory] = field(default_factory=list)
 
@@ -81,6 +87,7 @@ class Mind:
             pipeline=pipeline,
             memory_store=memory_store,
             working_memory=working_memory,
+            llm_model=config.llm_model,
         )
 
     @classmethod
@@ -129,6 +136,7 @@ class Mind:
             pipeline=pipeline,
             memory_store=memory_store,
             working_memory=working_memory,
+            llm_model=config.llm_model,
         )
 
     def update_conversations(self, conversations: list) -> None:

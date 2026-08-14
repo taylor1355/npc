@@ -79,7 +79,7 @@ class TestCognitivePipelineIntegration:
             node in result.tokens_used
             for node in ["memory_query", "cognitive_update", "action_selection"]
         )
-        assert all(t > 0 for t in result.tokens_used.values())
+        assert all(u.total_tokens > 0 for u in result.tokens_used.values())
 
         # Assert: Daily memories have valid structure
         for mem in result.daily_memories:

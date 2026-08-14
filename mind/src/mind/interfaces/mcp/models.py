@@ -5,9 +5,8 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from mind.apis.langchain_llm import LangChainModel
-from mind.cognitive_architecture.actions import Action
 from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
-from mind.cognitive_architecture.observations import Observation
+from mind.cognitive_architecture.state import PipelineState, StepTokenUsage
 from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_MEMORY_STORAGE_PATH
 
 # === Configuration Models ===
@@ -46,19 +45,67 @@ class MindConfig(BaseModel):
 # === Protocol: Simulation → Mind ===
 
 
-class SimulationRequest(BaseModel):
-    """Request from simulation to mind for action decision"""
+class DecisionTelemetry(BaseModel):
+    """What one decide_action call cost, as measured on the mind side.
 
-    mind_id: str  # MCP routing key (PK); deliberately independent of the driven entity_id
-    observation: Observation  # Structured observation
+    Rides the success response so the simulation can build a per-decision cost
+    ledger. Deliberately has no "zero means missing" field: when nothing was
+    reported, `provenance` says so explicitly and the counts are to be read as
+    unknown rather than as free.
+    """
 
+    # "metered"    -- at least one round-trip reported usage; counts are real.
+    # "unreported" -- calls were made but every one came back silent.
+    provenance: str
 
-class MindResponse(BaseModel):
-    """Response from mind to simulation with chosen action"""
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cached_prompt_tokens: int
 
-    status: str  # "success" | "error"
-    action: Action | None = None
-    error_message: str | None = None
+    # False means "no provider told us about cache reads", which is a different
+    # fact from cached_prompt_tokens == 0 ("told us, and there were none").
+    cache_reporting: bool
+
+    model_calls: int
+    unreported_calls: int
+
+    # Requested model slug, not necessarily the one the provider served.
+    model: str
+
+    # Mind-side pipeline wall time. Excludes transport and queueing, which only
+    # the client can see.
+    server_ms: int
+
+    per_step: dict[str, StepTokenUsage] = Field(default_factory=dict)
+    per_step_ms: dict[str, int] = Field(default_factory=dict)
+
+    @classmethod
+    def from_pipeline_state(cls, result: PipelineState, model: str) -> "DecisionTelemetry":
+        """Fold a completed pipeline's per-step usage into one decision record."""
+        folded = StepTokenUsage()
+        for step_usage in result.tokens_used.values():
+            folded = folded.merged_with(step_usage)
+
+        # Unreported iff calls were made and not one of them reported usage. An
+        # empty tokens_used (no LLM step ran at all, or the state never reached
+        # one) is also unreported: we cannot claim a measurement we never took.
+        metered = folded.model_calls > 0 and not folded.is_fully_unreported()
+
+        return cls(
+            provenance="metered" if metered else "unreported",
+            prompt_tokens=folded.prompt_tokens,
+            completion_tokens=folded.completion_tokens,
+            total_tokens=folded.total_tokens,
+            cached_prompt_tokens=folded.cached_prompt_tokens,
+            cache_reporting=folded.cache_reporting,
+            model_calls=folded.model_calls,
+            unreported_calls=folded.unreported_calls,
+            model=model,
+            server_ms=sum(result.time_ms.values()),
+            per_step=dict(result.tokens_used),
+            per_step_ms=dict(result.time_ms),
+        )
 
 
 # === MCP Tool Response Models ===

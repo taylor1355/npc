@@ -15,6 +15,59 @@ def merge_dicts(left: dict, right: dict) -> dict:
     return {**left, **right}
 
 
+class StepTokenUsage(BaseModel):
+    """Provider-reported token usage for one pipeline step.
+
+    Records what was measured, never what was assumed. A step that ran and cost
+    zero tokens is a real measurement and gets a record of zeros; a step whose
+    provider returned no usage at all is counted under ``unreported_calls``, so
+    "ran but the provider was silent" can never be read as "ran and was free".
+    That distinction is the point of surfacing these numbers at all -- a cost
+    model fit on fabricated zeros is worse than no cost model.
+    """
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+    # Subset of prompt_tokens the provider served from its own cache.
+    cached_prompt_tokens: int = 0
+
+    # True iff at least one response carried input_token_details. OpenRouter
+    # passthrough of cache accounting is provider-dependent, so a 0 in
+    # cached_prompt_tokens means "no cache hits" only when this is True;
+    # otherwise it means "nobody told us".
+    cache_reporting: bool = False
+
+    # Provider round-trips, retries INCLUDED. A decision burning three attempts
+    # is real spend with no extra cognitive product, and must stay countable.
+    model_calls: int = 0
+
+    # Round-trips that came back with no usage_metadata at all.
+    unreported_calls: int = 0
+
+    @classmethod
+    def unreported_call(cls) -> "StepTokenUsage":
+        """One round-trip the provider reported nothing for."""
+        return cls(model_calls=1, unreported_calls=1)
+
+    def merged_with(self, other: "StepTokenUsage") -> "StepTokenUsage":
+        """Sum two records. Counts add; cache_reporting is a logical OR."""
+        return StepTokenUsage(
+            prompt_tokens=self.prompt_tokens + other.prompt_tokens,
+            completion_tokens=self.completion_tokens + other.completion_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+            cached_prompt_tokens=self.cached_prompt_tokens + other.cached_prompt_tokens,
+            cache_reporting=self.cache_reporting or other.cache_reporting,
+            model_calls=self.model_calls + other.model_calls,
+            unreported_calls=self.unreported_calls + other.unreported_calls,
+        )
+
+    def is_fully_unreported(self) -> bool:
+        """True when every round-trip this record covers came back without usage."""
+        return self.model_calls > 0 and self.unreported_calls == self.model_calls
+
+
 class PipelineState(BaseModel):
     """State that flows through the cognitive pipeline"""
 
@@ -46,5 +99,5 @@ class PipelineState(BaseModel):
     chosen_action: Action | None = None
 
     # Metadata for observability (use merge function to accumulate values)
-    tokens_used: Annotated[dict[str, int], merge_dicts] = Field(default_factory=dict)
+    tokens_used: Annotated[dict[str, StepTokenUsage], merge_dicts] = Field(default_factory=dict)
     time_ms: Annotated[dict[str, int], merge_dicts] = Field(default_factory=dict)

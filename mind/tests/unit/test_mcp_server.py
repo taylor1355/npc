@@ -1386,3 +1386,176 @@ class TestRecordedConfigFidelity:
         assert recorded.initial_working_memory is None
         # The fields that DO drive a rebuild are kept.
         assert recorded.traits == ["curious"]
+
+
+class TestDecideActionTelemetry:
+    """decide_action reports what the decision cost (NPC-175).
+
+    The pipeline is mocked throughout - no LLM, no network. What is under test
+    is the wire boundary: that the numbers the pipeline already tracks reach the
+    response, and that an absence is reported as an absence.
+    """
+
+    OBSERVATION = {
+        "entity_id": "entity_test",
+        "current_simulation_time": 100,
+        "status": {
+            "position": [5, 5],
+            "movement_locked": False,
+            "current_interaction": {},
+            "controller_state": {},
+        },
+        "needs": {"needs": {"hunger": 75.0}, "max_value": 100.0},
+        "vision": {"visible_entities": []},
+        "conversations": [],
+    }
+
+    async def _server_with_mind(self, llm_model=None):
+        server = MCPServer()
+        config = {"traits": ["curious"], "initial_long_term_memories": []}
+        if llm_model is not None:
+            config["llm_model"] = llm_model
+        await server.mcp.call_tool(
+            "create_mind",
+            {"mind_id": "mind_test", "entity_id": "entity_test", "config": config},
+        )
+        return server
+
+    async def _decide_with_usage(self, server, tokens_used, time_ms=None):
+        """Run decide_action with a pipeline stubbed to report `tokens_used`."""
+        from mind.cognitive_architecture.actions import Action
+        from mind.cognitive_architecture.state import PipelineState
+
+        mind = server.minds["mind_test"]
+        original_process = mind.pipeline.process
+
+        async def mock_process(state: PipelineState) -> PipelineState:
+            state.chosen_action = Action.model_construct(action="wait", parameters={})
+            state.tokens_used = dict(tokens_used)
+            state.time_ms = dict(time_ms or {})
+            return state
+
+        mind.pipeline.process = mock_process
+        try:
+            result = await server.mcp.call_tool(
+                "decide_action",
+                {"mind_id": "mind_test", "observation": self.OBSERVATION},
+            )
+        finally:
+            mind.pipeline.process = original_process
+        return parse_response(result)
+
+    async def test_decide_action_response_carries_token_telemetry(self):
+        """The split, the cache figure and the call count all reach the wire"""
+        from mind.cognitive_architecture.state import StepTokenUsage
+
+        server = await self._server_with_mind()
+        response = await self._decide_with_usage(
+            server,
+            {
+                "memory_query": StepTokenUsage(
+                    prompt_tokens=100,
+                    completion_tokens=20,
+                    total_tokens=120,
+                    cached_prompt_tokens=40,
+                    cache_reporting=True,
+                    model_calls=1,
+                ),
+                "action_selection": StepTokenUsage(
+                    prompt_tokens=200,
+                    completion_tokens=30,
+                    total_tokens=230,
+                    model_calls=2,
+                ),
+            },
+            time_ms={"memory_query": 300, "action_selection": 700},
+        )
+
+        assert response["status"] == "success"
+        telemetry = response["telemetry"]
+        assert telemetry["provenance"] == "metered"
+        assert telemetry["prompt_tokens"] == 300
+        assert telemetry["completion_tokens"] == 50
+        assert telemetry["total_tokens"] == 350
+        assert telemetry["cached_prompt_tokens"] == 40
+        assert telemetry["cache_reporting"] is True
+        assert telemetry["model_calls"] == 3, "retries must survive to the wire"
+        assert telemetry["unreported_calls"] == 0
+        assert telemetry["server_ms"] == 1000
+        assert set(telemetry["per_step"]) == {"memory_query", "action_selection"}
+        assert telemetry["per_step_ms"] == {"memory_query": 300, "action_selection": 700}
+
+    async def test_telemetry_reports_the_configured_model(self):
+        """Reporting the requested slug is deterministic and needs no live call"""
+        from mind.cognitive_architecture.state import StepTokenUsage
+
+        server = await self._server_with_mind(llm_model="google/gemini-2.5-flash-lite")
+        response = await self._decide_with_usage(
+            server, {"memory_query": StepTokenUsage(total_tokens=5, model_calls=1)}
+        )
+
+        assert response["telemetry"]["model"] == "google/gemini-2.5-flash-lite"
+
+    async def test_telemetry_is_unreported_when_no_step_reported_usage(self):
+        """A live-but-silent provider must not read as a free decision"""
+        from mind.cognitive_architecture.state import StepTokenUsage
+
+        server = await self._server_with_mind()
+        response = await self._decide_with_usage(
+            server,
+            {
+                "memory_query": StepTokenUsage.unreported_call(),
+                "action_selection": StepTokenUsage.unreported_call(),
+            },
+        )
+
+        telemetry = response["telemetry"]
+        assert telemetry["provenance"] == "unreported"
+        assert telemetry["model_calls"] == 2
+        assert telemetry["unreported_calls"] == 2
+
+    async def test_a_measured_zero_is_metered_not_unreported(self):
+        """The mirror case: a provider that reported zero DID report"""
+        from mind.cognitive_architecture.state import StepTokenUsage
+
+        server = await self._server_with_mind()
+        response = await self._decide_with_usage(
+            server, {"memory_query": StepTokenUsage(total_tokens=0, model_calls=1)}
+        )
+
+        assert response["telemetry"]["provenance"] == "metered"
+        assert response["telemetry"]["total_tokens"] == 0
+
+    async def test_error_response_carries_no_telemetry(self):
+        """Contract lock: an error path must never report zeros as a measurement.
+
+        Green today by construction. Without it, a later "always include
+        telemetry" change would silently start reporting an unrecoverable cost
+        as zero, which is exactly the failure the whole design forbids.
+        """
+        server = MCPServer()
+
+        result = await server.mcp.call_tool(
+            "decide_action",
+            {"mind_id": "does_not_exist", "observation": self.OBSERVATION},
+        )
+        response = parse_response(result)
+
+        assert response["status"] == "error"
+        assert "telemetry" not in response
+
+    async def test_both_response_branches_carry_the_protocol_version(self):
+        """Absence of telemetry must be attributable to a stale server"""
+        from mind.cognitive_architecture.state import StepTokenUsage
+
+        server = await self._server_with_mind()
+        success = await self._decide_with_usage(
+            server, {"memory_query": StepTokenUsage(total_tokens=5, model_calls=1)}
+        )
+        assert success["protocol_version"] == 1
+
+        error_result = await MCPServer().mcp.call_tool(
+            "decide_action",
+            {"mind_id": "does_not_exist", "observation": self.OBSERVATION},
+        )
+        assert parse_response(error_result)["protocol_version"] == 1

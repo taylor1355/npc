@@ -11,7 +11,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, ValidationError
 
-from mind.cognitive_architecture.state import PipelineState
+from mind.cognitive_architecture.state import PipelineState, StepTokenUsage
 from mind.logging_config import get_logger
 
 logger = get_logger()
@@ -126,11 +126,14 @@ class LLMNode(Node):
             start_time = time.time()
             response = await self.llm.ainvoke([HumanMessage(content=prompt_text)])
             elapsed_ms = int((time.time() - start_time) * 1000)
-            tokens = self._extract_tokens(response)
-            if tokens:
-                state.tokens_used[self.step_name] = tokens
+            usage = self._extract_usage(response) or StepTokenUsage.unreported_call()
+            # Recorded unconditionally: a step that legitimately cost zero tokens
+            # must still get a key, or "ran and was free" is indistinguishable
+            # from "never ran".
+            state.tokens_used[self.step_name] = usage
             logger.debug(
-                f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, {tokens} tokens"
+                f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, "
+                f"{usage.total_tokens} tokens"
             )
             return response.content
 
@@ -138,7 +141,7 @@ class LLMNode(Node):
         messages = [HumanMessage(content=prompt_text)]
         last_error = None
         max_attempts = self.max_retries + 1
-        total_tokens = 0
+        usage = StepTokenUsage()
         start_time = time.time()
 
         for attempt in range(max_attempts):
@@ -146,8 +149,12 @@ class LLMNode(Node):
                 # Call LLM
                 response = await self.llm.ainvoke(messages)
 
-                # Track tokens from this attempt
-                total_tokens += self._extract_tokens(response)
+                # Track usage from this attempt. Every round-trip is counted,
+                # including the ones that failed validation -- retries are real
+                # spend with no extra cognitive product.
+                usage = usage.merged_with(
+                    self._extract_usage(response) or StepTokenUsage.unreported_call()
+                )
 
                 # Parse JSON (json_repair handles common formatting issues)
                 data = json_repair_loads(response.content)
@@ -159,10 +166,10 @@ class LLMNode(Node):
 
                 # Success! Track total tokens and return
                 elapsed_ms = int((time.time() - start_time) * 1000)
-                if total_tokens:
-                    state.tokens_used[self.step_name] = total_tokens
+                state.tokens_used[self.step_name] = usage
                 logger.debug(
-                    f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, {total_tokens} tokens"
+                    f"{entity_tag(state)} [{self.step_name}] Completed in {elapsed_ms}ms, "
+                    f"{usage.total_tokens} tokens"
                 )
                 return validated
 
@@ -194,13 +201,37 @@ class LLMNode(Node):
 
                     messages.append(HumanMessage(content=error_msg))
 
-        # All retries exhausted - still track tokens
-        if total_tokens:
-            state.tokens_used[self.step_name] = total_tokens
+        # All retries exhausted - still record what was spent. The raise below
+        # escapes to a handler that cannot reach PipelineState, so this write is
+        # the last chance to attribute the spend at all.
+        state.tokens_used[self.step_name] = usage
         raise last_error
 
-    def _extract_tokens(self, response: AIMessage) -> int:
-        """Extract token count from response.usage_metadata"""
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            return response.usage_metadata.get("total_tokens", 0)
-        return 0
+    def _extract_usage(self, response: AIMessage) -> StepTokenUsage | None:
+        """Provider-reported usage for one call, or None if nothing was reported.
+
+        None and a zeroed record are deliberately different answers: None means
+        "the provider told us nothing", a zeroed record means "the provider told
+        us zero". Callers turn None into an explicit unreported round-trip
+        rather than into a free one.
+
+        The prompt/completion split and cache_read arrive in usage_metadata
+        already (langchain-core UsageMetadata / InputTokenDetails); this reads
+        them through instead of collapsing everything to total_tokens.
+        """
+        usage = getattr(response, "usage_metadata", None)
+        if not usage:
+            return None
+
+        # NotRequired on UsageMetadata: absent means the provider does not report
+        # cache accounting, which is not the same fact as zero cache hits.
+        details = usage.get("input_token_details")
+
+        return StepTokenUsage(
+            prompt_tokens=usage.get("input_tokens", 0),
+            completion_tokens=usage.get("output_tokens", 0),
+            total_tokens=usage.get("total_tokens", 0),
+            cached_prompt_tokens=(details or {}).get("cache_read", 0),
+            cache_reporting=details is not None,
+            model_calls=1,
+        )

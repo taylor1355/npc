@@ -65,7 +65,7 @@ class CognitivePipeline:
 
         # Log pipeline completion summary
         total_time = sum(result.time_ms.values())
-        total_tokens = sum(result.tokens_used.values())
+        total_tokens = sum(u.total_tokens for u in result.tokens_used.values())
         logger.debug(
             f"{entity_tag(state)} Pipeline completed in {total_time}ms, {total_tokens} tokens"
         )

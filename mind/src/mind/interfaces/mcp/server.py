@@ -23,6 +23,7 @@ from mind.logging_config import get_logger
 from .mind import Mind
 from .models import (
     ConsolidationResponse,
+    DecisionTelemetry,
     MindConfig,
     MindInfoResponse,
     MindStateResponse,
@@ -31,26 +32,43 @@ from .models import (
 logger = get_logger()
 
 
+## Wire-format version for decide_action responses. Bumped when the response
+## shape changes in a way a client must know about. Emitted on BOTH branches so
+## a client can distinguish "this server is older than telemetry" from "this
+## server ran and reported nothing" -- two facts that would otherwise collapse
+## into the same absent field.
+PROTOCOL_VERSION = 1
+
+
 def _error_response(request_id: str, error_message: str, details: str = None) -> dict:
-    """Helper to construct error response dict"""
+    """Helper to construct error response dict.
+
+    Carries no telemetry by design. An error means the cost of the attempt is
+    genuinely unrecoverable here (retry exhaustion raises past any handler that
+    can still reach PipelineState), and the client maps absent telemetry to
+    "unknown", never to zero.
+    """
     response = {
         "status": "error",
         "action": None,
         "error_message": error_message,
         "request_id": request_id,
+        "protocol_version": PROTOCOL_VERSION,
     }
     if details:
         response["details"] = details
     return response
 
 
-def _success_response(request_id: str, action: dict) -> dict:
+def _success_response(request_id: str, action: dict, telemetry: dict) -> dict:
     """Helper to construct success response dict"""
     return {
         "status": "success",
         "action": action,
         "error_message": None,
         "request_id": request_id,
+        "protocol_version": PROTOCOL_VERSION,
+        "telemetry": telemetry,
     }
 
 
@@ -427,13 +445,27 @@ class MCPServer:
                 )
 
                 if result.chosen_action is None:
+                    # The one error branch where the cost is NOT unrecoverable: `result`
+                    # is a completed PipelineState and `result.tokens_used` is populated,
+                    # so _error_response's "genuinely unknown" rationale does not hold
+                    # here. It is not plumbed through anyway, because the client maps
+                    # ANY error response to UNREPORTED -- attaching telemetry to this one
+                    # would need a matching client change or the counts would be read as
+                    # unknown regardless. Unreachable today: ActionSelectionNode.process
+                    # catches its own ValidationError/JSONDecodeError and falls back to a
+                    # WAIT action, so chosen_action is always set. If that fallback ever
+                    # goes away, real measured telemetry starts disappearing through here.
+                    # Tracked as [NPC-1195] with the retry-exhaustion loss -- same class.
                     logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")
                     return _error_response(request_id, "Pipeline did not select an action")
 
                 logger.info(
                     f"[{request_id}] Successfully processed decision for {mind_id}: {result.chosen_action.action}"
                 )
-                return _success_response(request_id, result.chosen_action.model_dump())
+                telemetry = DecisionTelemetry.from_pipeline_state(result, mind.llm_model)
+                return _success_response(
+                    request_id, result.chosen_action.model_dump(), telemetry.model_dump()
+                )
 
             except ValidationError as e:
                 logger.warning(
