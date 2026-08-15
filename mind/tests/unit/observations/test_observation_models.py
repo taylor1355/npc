@@ -1,14 +1,23 @@
 """Unit tests for observation models"""
 
+import pytest
+from pydantic import ValidationError
+
 from mind.cognitive_architecture.observations import (
+    ArousalBand,
     ConversationMessage,
     ConversationObservation,
     EntityData,
+    GoalDetail,
+    GoalObservation,
     MindEvent,
     MindEventType,
+    MoodObservation,
     NeedsObservation,
     Observation,
+    RelationshipState,
     StatusObservation,
+    ValenceBand,
     VisionObservation,
 )
 
@@ -283,3 +292,203 @@ class TestBidActionGeneration:
         # Should have no bid response actions
         bid_actions = [a for a in actions if a.name == ActionType.RESPOND_TO_INTERACTION_BID]
         assert len(bid_actions) == 0
+
+
+class TestSubstrateGoal:
+    """The `goal` key the simulation has always sent, and used to lose.
+
+    Before this field was declared, ``Observation`` had six fields and pydantic's
+    default ``extra="ignore"`` dropped ``goal`` on every cycle, so the
+    substrate's active goal never reached a prompt. These pin that it survives
+    validation and that its absence stays harmless.
+    """
+
+    def test_goal_key_survives_validation(self):
+        """Should keep the goal payload the simulation sends, not discard it"""
+        obs = Observation.model_validate(
+            {
+                "entity_id": "test_npc",
+                "current_simulation_time": 100,
+                "status": {"position": (0, 0), "movement_locked": False},
+                "goal": {
+                    "active_goal": {
+                        "label": "Find something to eat",
+                        "urgency": 1.21,
+                        "drive_source": "hunger",
+                        "template_id": "satisfy_hunger",
+                    },
+                    "candidate_count": 5,
+                },
+            }
+        )
+
+        assert obs.goal is not None
+        assert obs.goal.active_goal is not None
+        assert obs.goal.active_goal.label == "Find something to eat"
+        assert obs.goal.active_goal.drive_source == "hunger"
+        assert obs.goal.active_goal.template_id == "satisfy_hunger"
+        assert obs.goal.candidate_count == 5
+
+    def test_goal_absent_is_valid(self):
+        """Should treat a goal-less observation as valid with goal None"""
+        obs = Observation(
+            entity_id="test_npc",
+            current_simulation_time=100,
+            status=StatusObservation(position=(0, 0), movement_locked=False),
+        )
+
+        assert obs.goal is None
+        assert str(obs)  # rendering must not raise
+
+    def test_goal_without_active_goal_is_valid(self):
+        """Should accept the shape the sim sends when no goal is active"""
+        obs = Observation.model_validate(
+            {
+                "entity_id": "test_npc",
+                "current_simulation_time": 100,
+                "goal": {"candidate_count": 0},
+            }
+        )
+
+        assert obs.goal is not None
+        assert obs.goal.active_goal is None
+
+    def test_urgency_is_not_clamped_to_one(self):
+        """Should carry the simulation's wider-than-unit urgency domain intact
+
+        Effective urgency is the template curve scaled by preference alignment,
+        so a well-aligned homeostatic goal legitimately exceeds 1.0. Bounding it
+        here would reject real payloads.
+        """
+        detail = GoalDetail(label="Eat", urgency=1.29)
+
+        assert detail.urgency == 1.29
+
+    def test_goal_requires_a_label(self):
+        """Should fail loudly on a malformed goal rather than substituting one"""
+        with pytest.raises(ValidationError):
+            GoalObservation.model_validate({"active_goal": {"urgency": 0.5}})
+
+
+class TestMoodObservation:
+    """Mood crosses as band tokens plus a display word.
+
+    Structure fails loud (bands are a StrEnum), copy fails soft (the label is a
+    free str). These two behaviours together are the whole contract.
+    """
+
+    def test_mood_survives_validation(self):
+        obs = Observation.model_validate(
+            {
+                "entity_id": "test_npc",
+                "current_simulation_time": 100,
+                "mood": {
+                    "valence": -0.42,
+                    "arousal": 0.81,
+                    "valence_band": "neg",
+                    "arousal_band": "high",
+                    "label": "stressed",
+                    "valence_baseline": -0.05,
+                    "arousal_baseline": 0.5,
+                },
+            }
+        )
+
+        assert obs.mood is not None
+        assert obs.mood.valence_band is ValenceBand.NEG
+        assert obs.mood.arousal_band is ArousalBand.HIGH
+        assert obs.mood.label == "stressed"
+        assert obs.mood.valence_baseline == -0.05
+
+    def test_unknown_band_is_rejected(self):
+        """Structure fails loud: a fourth band is a breaking change, not a nuance"""
+        with pytest.raises(ValidationError):
+            MoodObservation(
+                valence=0.0,
+                arousal=0.5,
+                valence_band="lukewarm",
+                arousal_band="mid",
+                label="calm",
+            )
+
+    def test_unseen_label_is_accepted(self):
+        """Copy fails soft: relabelling a mood word must not break decisions"""
+        mood = MoodObservation(
+            valence=0.0,
+            arousal=0.5,
+            valence_band=ValenceBand.MID,
+            arousal_band=ArousalBand.MID,
+            label="equanimous",
+        )
+
+        assert mood.label == "equanimous"
+
+    def test_out_of_domain_mood_values_are_accepted(self):
+        """A numeric overshoot must not collapse the cycle into the WAIT fallback
+
+        The simulation's baseline-drift path integrates rate * elapsed without a
+        clamp, so a long gap between decision cycles can push valence past its
+        nominal domain. Rejecting that would silently stop the NPC acting; the
+        bands stay correct regardless.
+        """
+        mood = MoodObservation(
+            valence=-1.4,
+            arousal=1.2,
+            valence_band=ValenceBand.NEG,
+            arousal_band=ArousalBand.HIGH,
+            label="stressed",
+        )
+
+        assert mood.valence == -1.4
+
+    def test_mood_absent_is_valid(self):
+        obs = Observation(entity_id="test_npc", current_simulation_time=100)
+
+        assert obs.mood is None
+        assert str(obs)
+
+
+class TestRelationshipEnrichment:
+    """Relationships ride the visible entity they describe, never a second list"""
+
+    def test_relationship_survives_validation(self):
+        obs = Observation.model_validate(
+            {
+                "entity_id": "test_npc",
+                "current_simulation_time": 100,
+                "vision": {
+                    "visible_entities": [
+                        {
+                            "entity_id": "alice_npc",
+                            "display_name": "Alice",
+                            "position": (1, 2),
+                            "interactions": {},
+                            "relationship": {
+                                "familiarity": 0.62,
+                                "sentiment": 0.31,
+                                "interaction_count": 14,
+                            },
+                        }
+                    ]
+                },
+            }
+        )
+
+        entity = obs.vision.visible_entities[0]
+        assert entity.relationship is not None
+        assert entity.relationship.familiarity == 0.62
+        assert entity.relationship.sentiment == 0.31
+        assert entity.relationship.interaction_count == 14
+
+    def test_entity_without_relationship_is_a_stranger(self):
+        entity = EntityData(entity_id="x", display_name="X", position=(0, 0))
+
+        assert entity.relationship is None
+
+    def test_out_of_domain_relationship_values_are_rejected(self):
+        """Unlike mood, every registry write clamps these — so a violation is a bug"""
+        with pytest.raises(ValidationError):
+            RelationshipState(familiarity=1.4, sentiment=0.0)
+
+        with pytest.raises(ValidationError):
+            RelationshipState(familiarity=0.5, sentiment=-2.0)

@@ -34,6 +34,12 @@ Given the person's current state, memories, and observation, update their workin
 
 This status is the ground truth from the simulation. If it says you are NOT in an interaction, then any prior belief or plan about being mid-interaction (e.g. "in a conversation") is stale — update the situation assessment, goals, and plan to reflect that the interaction has ended.
 
+When the observation carries a mood reading, the valence and arousal figures are likewise ground truth: they are what this person actually feels, and you cannot write against them. Do not describe someone as fine while their valence is strongly negative, or as subdued while their arousal is high. What is owed is consistency with the figures, not a copy of the single word attached to them — that word is a coarse summary of two numbers, and the numbers carry the resolution the word loses.
+
+The reading says what this person feels. Saying *why* is your work, and it is where the writing should go. Build the explanation out of their memories, what has just happened, the people in front of them, and who they are: the same figures are a different story for someone who has just been rebuffed by a friend than for someone who has been hungry for hours. Write the emotional state as that explanation, reconciled with the figures rather than replacing them.
+
+Read the figures as levels rather than verdicts. Each is given against that person's own resting value, so a negative valence sitting close to its baseline is an ordinary day for someone habitually gloomy, while the same figure far from a positive baseline means something has gone wrong. Where a relationship line appears beneath a visible entity it is shared history rather than an instruction — its absence means a stranger and not an enemy, and a sentiment near zero means indifference rather than hostility.
+
 Update the working memory with:
 1. **Situation assessment** - Your understanding of what's currently happening
 2. **Active goals** - What they're trying to accomplish right now based on their needs and situation
