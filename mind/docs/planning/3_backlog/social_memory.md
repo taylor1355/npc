@@ -1,64 +1,71 @@
-# Social Memory and Relationships
+# Relationship-Weighted Memory Retrieval
 
-## Problem Statement
+## Scope
 
-NPCs treat every interaction as if meeting for the first time. They don't remember past conversations, shared experiences, or relationship history. This makes social interactions feel hollow and prevents meaningful relationship development.
+Relationship *state* is not the mind's to hold. The Godot substrate owns per-pair
+relationship state in `RelationshipRegistry` and ships it inside every observation.
+This document covers only what the mind does with it.
 
-## Design Goals
+An earlier version of this file proposed a mind-side relationship record —
+interaction count, recency, emotional valence, topics discussed, shared experiences,
+trust/friendship levels — on the premise that NPCs "treat every interaction as if
+meeting for the first time". That premise held when it was written and does not hold
+now, so the proposal is retracted. Interaction count, recency, emotional valence and
+friendship level already ship in the substrate; topics discussed and shared
+experiences are assigned to a substrate store; trust was rejected there on the record.
+The governing split is NPC-399: the simulation defines the canonical interface; the
+backend coordinates separately.
 
-- Track interaction history with each NPC
-- Remember conversation topics and emotional context
-- Build relationship models over time
-- Enable reference to shared experiences
+## What the substrate owns
 
-## Technical Approach
+`RelationshipData` (npc-simulation, `relationship_data.gd`) is per-pair and holds four
+scalars — `familiarity`, `sentiment`, `last_interaction_time`, `interaction_count`.
+`RelationshipRegistry` is the single writer, decay and save/load included.
 
-### Relationship Records
+Three of the four cross the wire. `entity_data.gd::to_dict` omits
+`last_interaction_time` deliberately: a raw game-minute stamp with a not-set sentinel,
+meaningless to a reader that has no frame of reference for the simulation clock. So
+this repo's mirror, `observations/models.py::RelationshipState`, *matches* the wire
+contract rather than falling short of it. The whole relationship key is omitted for
+strangers, which makes its presence the signal that shared history exists at all.
 
-Per-NPC tracking:
-- Interaction count and recency
-- Emotional valence of interactions
-- Topics discussed
-- Shared experiences
-- Trust/friendship levels
+**Topics discussed and shared experiences** belong to the substrate's topic library —
+per-pair records stored alongside `RelationshipRegistry`, familiarity-gated
+(npc-simulation, `conversation-semantic-layer.md`, "The topic library"). Designed; no
+code yet. The mind must not grow a second one.
 
-### Memory Integration
+**Trust is not a relationship field.** The same document rejects it twice under "Trust
+is per-record, not per-pair" — as a sentiment proxy (you can dislike someone and still
+believe them) and as a third relationship float. The accepted alternative derives
+credibility per record from the teller's track record. Out of scope here.
 
-Social memories get special handling:
-- Higher retrieval weight for memories involving current conversation partner
-- Automatic tagging with participant IDs
-- Cross-referencing between NPCs' memories of same event
+## What the mind adds on top
 
-### Conversation Context
+- **Relationship-weighted retrieval** (NPC-401). Scores retrieved memories using the
+  relationship fields the observation already carries; stores nothing. Blocked by
+  NPC-400.
+- **Participant tagging** (NPC-1013). Filtering retrieval by who was present.
+  `Memory.tags` and `VectorDBQuery.tags` exist as a storage column with no producer
+  and no consumer, so the field is inert today.
+- **Rendering shared history.** Partly shipped: `Observation.__str__` already emits
+  familiarity, sentiment, and shared-interaction count per visible entity. Missing is
+  the retrieved *episodes* with that partner, which the two items above supply.
 
-When starting conversations:
-- Retrieve recent interactions with this NPC
-- Include relationship status in context
-- Reference shared history naturally
+## Open questions
 
-## Benefits
+- **Cross-referencing two NPCs' memories of the same event.** Whether that shares a
+  mechanism with "where I learned this, and from whom" is NPC-1302's decision, not
+  this document's. Deliberately left open in both directions.
+- Whether participant tags are chosen by the query LLM or derived from context —
+  NPC-1013.
 
-- **Relationship Depth**: NPCs build meaningful connections
-- **Conversation Continuity**: Can reference past discussions
-- **Social Dynamics**: Friendships and rivalries emerge
-- **Player Investment**: Relationships feel real and worth cultivating
+## Priority rationale
 
-## Dependencies
+**Obviousness**: Moderate. The store this used to propose already exists; what remains
+is one weighting term.
 
-- Basic memory system
-- Conversation system
-- NPC identification/registry
+**Development velocity**: Neutral. It adds a term to a scoring function that does not
+exist yet, and no new state anywhere.
 
-## Priority Rationale
-
-**Obviousness**: High - Clearly needed for any social depth.
-
-**Development Velocity**: Slightly positive
-- Short-term: Adds relationship tracking and memory tagging
-- Tech tree: Enables group dynamics, social influence, reputation systems
-- Complexity: Must handle relationship state across multiple NPCs
-- Net: Slightly positive - foundational for other social features
-
-**Concreteness**: Very high - Players immediately notice when NPCs remember them, reference past conversations, and treat friends differently than strangers.
-
-This transforms NPCs from strangers to potential friends.
+**Concreteness**: High. An NPC recalling the specific thing you did together is
+visible immediately; the relationship numbers behind it already reach the prompt.

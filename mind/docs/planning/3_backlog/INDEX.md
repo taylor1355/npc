@@ -16,7 +16,7 @@ Design documents for future features. Prioritized by **obviousness x velocity x 
 | [Event Memory Integration](event_memory_integration.md) | Design | Medium | Short-term to long-term transfer |
 | [Memory Types](memory_types.md) | Design | Low | Episodic vs semantic distinction |
 | [Emotional Memory](emotional_memory.md) | Design | Low | Emotion-colored recall |
-| [Social Memory](social_memory.md) | Design | Low | Relationship tracking |
+| [Relationship-Weighted Memory](social_memory.md) | Design | Low | Retrieval weighting; relationship state is substrate-side |
 | [Knowledge Graphs](knowledge_graphs.md) | Design | Low | Interconnected memory structure |
 
 ## Planning & Behavior
