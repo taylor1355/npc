@@ -23,6 +23,7 @@ import mind.cognitive_architecture.actions.models as action_models
 import mind.cognitive_architecture.nodes.formatting as formatting_module
 import mind.cognitive_architecture.observations.models as observation_models
 from mind.cognitive_architecture.actions import Action, ActionType
+from mind.cognitive_architecture.actions.exceptions import NoAdvertisedParameterError
 from mind.cognitive_architecture.nodes.formatting import format_interaction_status
 from mind.cognitive_architecture.observations import (
     UNNAMED_INTERACTION,
@@ -268,6 +269,26 @@ class TestValidationReachability:
         message = str(exc_info.value)
         assert "message" in message
         assert "is_farewell" in message
+
+    def test_rejection_carries_the_advertised_names_as_a_list(self):
+        """The disjunction is a set, so it must not be packed into a single-name field.
+
+        MissingRequiredParameterError.param_name is typed for one parameter; joining
+        several into it makes the attribute lie to anything reading it programmatically
+        rather than rendering it. NoAdvertisedParameterError carries the set as a set.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            Action.model_validate(
+                {"action": "act_in_interaction", "parameters": {}},
+                context={"state": self._state(wire_conversation_interaction())},
+            )
+
+        # Pydantic wraps the domain exception; reach the original to assert on the
+        # attribute rather than on its rendering.
+        original = exc_info.value.errors()[0]["ctx"]["error"]
+        assert isinstance(original, NoAdvertisedParameterError)
+        assert original.param_names == ["message", "is_farewell"]
+        assert not hasattr(original, "param_name")
 
 
 # The functions that offer or validate an act. None of them may name a specific

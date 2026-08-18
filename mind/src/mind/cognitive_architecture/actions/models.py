@@ -9,6 +9,7 @@ from mind.cognitive_architecture.actions.exceptions import (
     InvalidInteractionError,
     MissingRequiredParameterError,
     MovementLockedError,
+    NoAdvertisedParameterError,
 )
 
 
@@ -196,7 +197,7 @@ class Action(BaseModel):
             return
 
         if not any(name in self.parameters for name in advertised):
-            raise MissingRequiredParameterError(" or ".join(advertised), self.action)
+            raise NoAdvertisedParameterError(list(advertised), self.action)
 
 
 class AvailableAction(BaseModel):
