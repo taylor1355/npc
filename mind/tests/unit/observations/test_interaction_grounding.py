@@ -21,13 +21,14 @@ from mind.cognitive_architecture.observations import (
     StatusObservation,
 )
 from mind.cognitive_architecture.state import PipelineState
+from tests.fixtures.observations import wire_conversation_interaction
 
 
 def _interacting_status() -> StatusObservation:
     return StatusObservation(
         position=(10, 10),
         movement_locked=True,
-        current_interaction={"interaction_id": "conv_1", "interaction_name": "conversation"},
+        current_interaction=wire_conversation_interaction(),
         activity_state={"state_name": "interacting"},
     )
 
@@ -41,7 +42,7 @@ def _torn_down_status() -> StatusObservation:
     return StatusObservation(
         position=(10, 10),
         movement_locked=False,
-        current_interaction={"interaction_id": "conv_1", "interaction_name": "conversation"},
+        current_interaction=wire_conversation_interaction(),
         activity_state={"state_name": "idle"},
     )
 
@@ -81,7 +82,7 @@ class TestIsInteractingGrounding:
         # NOT report interacting (avoids spurious act_in_interaction).
         status = StatusObservation(
             position=(0, 0),
-            current_interaction={"interaction_id": "x", "interaction_name": "conversation"},
+            current_interaction=wire_conversation_interaction(),
         )
         assert status.activity_state == {}
         assert status.is_interacting() is False

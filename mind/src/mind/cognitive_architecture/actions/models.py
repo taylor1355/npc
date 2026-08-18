@@ -173,17 +173,30 @@ class Action(BaseModel):
         working-memory belief that "I'm in a conversation" can no longer pass
         validation once the observation says the interaction has ended
         (NPC-688). Missing status defaults to rejected.
+
+        The parameter check is schema-derived: whatever the interaction
+        advertises is what an act may carry, and an act must carry at least one
+        of them. This names no interaction and no parameter, so a new
+        interaction registered in the simulation is validated here with no
+        Python change (NPC-1278). The predecessor keyed on a hardcoded
+        interaction name read from a wire key that does not exist, so it never
+        fired for anything.
+
+        "At least one" rather than "all": the simulation's PropertySpec layer
+        supplies defaults for anything omitted, so a partial act is legitimate,
+        while a bare ``{}`` is the wasted turn worth converting into a visible,
+        retryable error.
         """
         if not observation.is_interacting():
             raise ValueError("ACT_IN_INTERACTION requires an active interaction")
 
-        interaction_name = observation.status.current_interaction.get("interaction_name", "")
+        advertised = observation.status.act_parameter_hints()
+        if not advertised:
+            # A parameterless interaction accepts a bare act; nothing to check.
+            return
 
-        # For conversations, message parameter is required
-        if interaction_name == "conversation":
-            message = self.parameters.get("message")
-            if not message:
-                raise MissingRequiredParameterError("message", self.action)
+        if not any(name in self.parameters for name in advertised):
+            raise MissingRequiredParameterError(" or ".join(advertised), self.action)
 
 
 class AvailableAction(BaseModel):

@@ -7,6 +7,8 @@ matter how faithfully it crosses the wire.
 
 from mind.cognitive_architecture.observations import (
     ArousalBand,
+    ConversationMessage,
+    ConversationObservation,
     EntityData,
     GoalDetail,
     GoalObservation,
@@ -201,6 +203,126 @@ class TestRelationshipRendering:
         )
 
         assert "sentiment -0.20" in str(obs)
+
+
+def _conversation(*messages) -> ConversationObservation:
+    return ConversationObservation(
+        interaction_id="conv_1",
+        interaction_name="conversation",
+        participants=["explorer_npc", "alice_npc"],
+        conversation_history=list(messages),
+    )
+
+
+class TestMessageDeclarationRendering:
+    """A speaker's declarations must reach the prompt, not merely survive validation.
+
+    NPC-1278: the mind has never perceived a farewell. The simulation has always
+    carried the speaker's own annotation on the message, this model never
+    declared the field, and pydantic's default ``extra="ignore"`` dropped it
+    silently — so an NPC could be told goodbye and read only the words.
+
+    Declarations render by their ``kind`` key verbatim. There is deliberately no
+    kind vocabulary in Python: a kind registered in the simulation must reach the
+    LLM with no change here.
+    """
+
+    def test_declaration_renders_as_its_kind_verbatim(self):
+        obs = _base_observation(
+            conversations=[
+                _conversation(
+                    ConversationMessage(
+                        speaker_id="alice_npc",
+                        speaker_name="Alice",
+                        message="Well, I should be going.",
+                        declarations=[{"kind": "farewell"}],
+                    )
+                )
+            ]
+        )
+
+        assert "Alice: Well, I should be going. [farewell]" in str(obs)
+
+    def test_an_unknown_kind_needs_no_python_change(self):
+        obs = _base_observation(
+            conversations=[
+                _conversation(
+                    ConversationMessage(
+                        speaker_id="alice_npc",
+                        speaker_name="Alice",
+                        message="Do you agree?",
+                        declarations=[{"kind": "question"}],
+                    )
+                )
+            ]
+        )
+
+        assert "[question]" in str(obs)
+
+    def test_system_and_declarations_render_together(self):
+        obs = _base_observation(
+            conversations=[
+                _conversation(
+                    ConversationMessage(
+                        speaker_id="sim",
+                        speaker_name="System",
+                        message="Bob left.",
+                        is_system=True,
+                        declarations=[{"kind": "farewell"}],
+                    )
+                )
+            ]
+        )
+
+        assert "System: Bob left. [system] [farewell]" in str(obs)
+
+    def test_own_message_keeps_its_you_marker(self):
+        obs = _base_observation(
+            conversations=[
+                _conversation(
+                    ConversationMessage(
+                        speaker_id="explorer_npc",
+                        speaker_name="Bob",
+                        message="Goodbye then.",
+                        declarations=[{"kind": "farewell"}],
+                    )
+                )
+            ]
+        )
+
+        assert "[YOU] Bob: Goodbye then. [farewell]" in str(obs)
+
+    def test_undeclared_message_renders_exactly_as_before(self):
+        obs = _base_observation(
+            conversations=[
+                _conversation(
+                    ConversationMessage(
+                        speaker_id="alice_npc", speaker_name="Alice", message="Hello."
+                    )
+                )
+            ]
+        )
+
+        assert "Alice: Hello." in str(obs)
+        assert "[" not in str(obs).split("Conversation:")[1]
+
+    def test_malformed_declaration_is_skipped_rather_than_raising(self):
+        # Never raise on the prompt path: a malformed entry costs one marker,
+        # not the whole decision cycle.
+        obs = _base_observation(
+            conversations=[
+                _conversation(
+                    ConversationMessage(
+                        speaker_id="alice_npc",
+                        speaker_name="Alice",
+                        message="Bye.",
+                        declarations=[{"no_kind": True}, {"kind": ""}, {"kind": "farewell"}],
+                    )
+                )
+            ]
+        )
+
+        assert "Alice: Bye. [farewell]" in str(obs)
 
 
 class TestFullyEnrichedArm:

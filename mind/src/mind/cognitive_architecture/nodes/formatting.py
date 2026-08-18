@@ -49,11 +49,14 @@ def format_interaction_status(observation: Observation | None) -> str:
 
     Defaults to "NOT currently in any interaction" when status is absent or
     partial — a missing field never reads as "interacting".
+
+    The name comes from ``StatusObservation.interaction_display_name()``, the
+    one canonical reader of that wire key. Reading the dict directly here is
+    what made this line render the literal word "interaction" for every
+    interaction the NPC ever had (NPC-1278).
     """
     if observation is not None and observation.is_interacting():
-        interaction_name = observation.status.current_interaction.get(
-            "interaction_name", "interaction"
-        )
+        interaction_name = observation.status.interaction_display_name()
         return (
             f"You ARE currently in an interaction ({interaction_name}). "
             "Interaction-participation actions are valid."

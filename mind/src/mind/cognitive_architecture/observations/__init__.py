@@ -1,6 +1,12 @@
 """Observation models for the cognitive architecture"""
 
 from .models import (
+    UNNAMED_INTERACTION,
+    WIRE_KEY_ACT_PARAMETERS,
+    WIRE_KEY_INTERACTION_NAME,
+    WIRE_KEY_PARAM_DEFAULT,
+    WIRE_KEY_PARAM_DESCRIPTION,
+    WIRE_KEY_PARAM_TYPE,
     ArousalBand,
     ConversationMessage,
     ConversationObservation,
@@ -19,6 +25,12 @@ from .models import (
 )
 
 __all__ = [
+    "UNNAMED_INTERACTION",
+    "WIRE_KEY_ACT_PARAMETERS",
+    "WIRE_KEY_INTERACTION_NAME",
+    "WIRE_KEY_PARAM_DEFAULT",
+    "WIRE_KEY_PARAM_DESCRIPTION",
+    "WIRE_KEY_PARAM_TYPE",
     "ArousalBand",
     "ConversationMessage",
     "ConversationObservation",
