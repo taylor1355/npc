@@ -148,6 +148,7 @@ src/mind/
 ## Documentation
 
 - [cognitive_architecture/overview.md](cognitive_architecture/overview.md) - Detailed pipeline architecture
+- [cognitive_architecture/belief_records.md](cognitive_architecture/belief_records.md) - What a belief record is, and who owns its definition
 - [interfaces/mcp.md](interfaces/mcp.md) - MCP protocol and tools
 - [planning/roadmap.md](planning/roadmap.md) - Development roadmap
 - [meta/style-guide.md](meta/style-guide.md) - Documentation standards

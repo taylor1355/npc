@@ -101,6 +101,11 @@ Alongside unstructured episodic memories:
 - **World State Cache**: Last known state of important objects
 - **Social Graph**: Relationship network and reputation
 
+The "World State Cache" entry has since acquired a definition and an owner: what
+an NPC durably knows about a subject is a **belief record**, whose shared
+properties — and the questions still open about where such records live — are
+specified in [belief_records.md](belief_records.md).
+
 #### Continuous Organization
 
 **Tag Daemon** background process:
