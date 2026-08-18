@@ -44,7 +44,6 @@ Design documents for future features. Prioritized by **obviousness x velocity x 
 | [MCP Debugging](mcp_debugging.md) | Design | Medium | Mental state visibility |
 | [MCP Tools](mcp_tools.md) | Design | Low | Active perception via tools |
 | [Simulation Metadata Tool](simulation_metadata_tool.md) | Design | Low | Runtime simulation info |
-| [Godot Integration](godot_integration.md) | Reference | - | Current integration contract |
 
 ## Unsorted
 
