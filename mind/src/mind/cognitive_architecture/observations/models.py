@@ -1,8 +1,57 @@
 """Observation models for the cognitive architecture"""
 
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
+
+from mind.logging_config import get_logger
+
+logger = get_logger()
+
+# Wire keys on ``StatusObservation.current_interaction``. That dict is the Godot
+# ``Interaction.to_dict()`` payload verbatim, whose keys are exactly: name,
+# description, needs_filled, needs_drained, need_rates,
+# act_in_interaction_parameters. There is NO "interaction_name" key, so every
+# reader that asked for one silently took its fallback on every decision cycle
+# (NPC-1278) — which is why these live as named constants rather than inline
+# literals scattered across four call sites.
+WIRE_KEY_INTERACTION_NAME = "name"
+WIRE_KEY_ACT_PARAMETERS = "act_in_interaction_parameters"
+
+# Sub-keys of one ``act_in_interaction_parameters`` entry. Each entry is a Godot
+# ``PropertySpec.to_dict()``: {"type": <string>, "default": <value>,
+# "description": <string>}.
+WIRE_KEY_PARAM_TYPE = "type"
+WIRE_KEY_PARAM_DEFAULT = "default"
+WIRE_KEY_PARAM_DESCRIPTION = "description"
+
+# Rendered when the wire carries no usable interaction name. A generic English
+# noun, deliberately not any interaction's identifier — nothing in this package
+# may name a specific interaction.
+UNNAMED_INTERACTION = "interaction"
+
+
+def _format_parameter_hint(param_name: str, spec: dict) -> str:
+    """Render one wire parameter spec as the prose hint the LLM reads.
+
+    ``AvailableAction.parameters`` is a flat ``name -> prose`` mapping, so the
+    structured spec has to be flattened. Type and default are carried because
+    the simulation rejects an act whose parameters fail ``PropertySpec``
+    validation, and the LLM cannot satisfy a contract it cannot see.
+    """
+    description = str(spec.get(WIRE_KEY_PARAM_DESCRIPTION) or "").strip()
+    text = description or f"The {param_name} parameter"
+
+    qualifiers = []
+    type_name = str(spec.get(WIRE_KEY_PARAM_TYPE) or "").strip()
+    if type_name:
+        qualifiers.append(f"type: {type_name}")
+    # Membership, not truthiness: ``false`` and ``0`` are legitimate defaults.
+    if WIRE_KEY_PARAM_DEFAULT in spec:
+        qualifiers.append(f"default: {spec[WIRE_KEY_PARAM_DEFAULT]!r}")
+
+    return f"{text} ({', '.join(qualifiers)})" if qualifiers else text
 
 
 class MindEventType(StrEnum):
@@ -30,7 +79,17 @@ class MindEvent(BaseModel):
     payload: dict  # Serialized observation data from Godot
 
     def __str__(self) -> str:
-        """Format event as natural language for LLM"""
+        """Format event as natural language for LLM.
+
+        The ``payload["interaction_name"]`` reads below are CORRECT — do not
+        sweep them into ``WIRE_KEY_INTERACTION_NAME``. Event payloads are a
+        different wire source from ``StatusObservation.current_interaction``:
+        the Godot bid/interaction observation serializers genuinely emit an
+        ``interaction_name`` key, while ``Interaction.to_dict()`` (which is what
+        ``current_interaction`` carries) spells the same thing ``name``. Rule of
+        thumb for any future sweep: ``payload[...]`` readers are right,
+        ``current_interaction[...]`` readers were the NPC-1278 bug.
+        """
         event_type = self.event_type
         payload = self.payload
 
@@ -129,6 +188,90 @@ class StatusObservation(BaseModel):
             return False
         state_name = (self.activity_state or {}).get("state_name", "")
         return state_name == "interacting"
+
+    def interaction_display_name(self) -> str:
+        """The current interaction's name, as the simulation spells it.
+
+        The single reader of ``WIRE_KEY_INTERACTION_NAME``. Four sites used to
+        read a key the wire never carried, so every one of them rendered the
+        literal word "interaction" to the LLM regardless of what the NPC was
+        actually doing (NPC-1278).
+
+        Falls back to a generic noun rather than raising: this runs on the
+        prompt path every decision cycle, and an exception here collapses the
+        cycle into the WAIT fallback — an NPC that silently stops acting.
+        """
+        if not self.current_interaction:
+            return UNNAMED_INTERACTION
+
+        name = self.current_interaction.get(WIRE_KEY_INTERACTION_NAME)
+        if not isinstance(name, str) or not name.strip():
+            logger.warning(
+                "current_interaction carries no usable '%s'; falling back to a generic label. "
+                "Keys present: %s",
+                WIRE_KEY_INTERACTION_NAME,
+                sorted(self.current_interaction.keys()),
+            )
+            return UNNAMED_INTERACTION
+
+        return name.strip()
+
+    def act_parameter_hints(self) -> dict[str, str]:
+        """Project the interaction's advertised act parameters onto prose hints.
+
+        The simulation is the sole authority on what ``act_in_interaction``
+        accepts: each interaction declares ``act_in_interaction_parameters`` and
+        ships it across the wire as ``{name: PropertySpec.to_dict()}``. Deriving
+        the hints from that payload is what lets a NEW interaction — or a new
+        parameter on an existing one — reach the LLM's action menu with zero
+        changes here. Nothing in this module may name an interaction or a
+        parameter.
+
+        Never raises. It runs every decision cycle on the prompt path, so a
+        malformed payload degrades to fewer hints plus a loud log, never to a
+        dead NPC. Degradation:
+
+        * no current interaction -> ``{}``, silent (nothing to advertise)
+        * key absent from a non-empty interaction -> ``{}`` + warning (the
+          simulation always emits the key, so its absence is a contract break)
+        * key present but empty -> ``{}``, silent (a parameterless interaction
+          is legitimate — ``sit`` advertises nothing)
+        * key present but not a dict -> ``{}`` + warning
+        * one malformed entry -> that entry skipped + warning, the good ones kept
+        """
+        if not self.current_interaction:
+            return {}
+
+        if WIRE_KEY_ACT_PARAMETERS not in self.current_interaction:
+            logger.warning(
+                "current_interaction is missing '%s'; act_in_interaction will be offered with no "
+                "parameter hints. Keys present: %s",
+                WIRE_KEY_ACT_PARAMETERS,
+                sorted(self.current_interaction.keys()),
+            )
+            return {}
+
+        raw: Any = self.current_interaction[WIRE_KEY_ACT_PARAMETERS]
+        if not isinstance(raw, dict):
+            logger.warning(
+                "'%s' is %s, expected a dict of parameter specs; offering no parameter hints.",
+                WIRE_KEY_ACT_PARAMETERS,
+                type(raw).__name__,
+            )
+            return {}
+
+        hints: dict[str, str] = {}
+        for param_name, spec in raw.items():
+            if not isinstance(spec, dict):
+                logger.warning(
+                    "Skipping malformed spec for act parameter '%s': expected a dict, got %s.",
+                    param_name,
+                    type(spec).__name__,
+                )
+                continue
+            hints[str(param_name)] = _format_parameter_hint(str(param_name), spec)
+
+        return hints
 
 
 class NeedsObservation(BaseModel):
@@ -263,12 +406,44 @@ class VisionObservation(BaseModel):
 
 
 class ConversationMessage(BaseModel):
-    """Single conversation message"""
+    """Single conversation message.
+
+    ``declarations`` carries the speaker's own annotations on the message —
+    "I meant this as a goodbye" and whatever kinds follow it. It is a list of
+    plain dicts, each with a ``kind`` key, because the vocabulary of kinds is
+    owned by the simulation: a kind registered there must reach the LLM with no
+    Python change, so nothing here may enumerate or branch on kind values. The
+    field is absent from the wire whenever it is empty, hence the default.
+
+    There is deliberately no ``is_farewell`` field. The simulation's pre-wave-0
+    payload carried one, but this model never declared it, so the mind has never
+    perceived a farewell — that omission IS the bug. Reading only the
+    post-migration shape therefore loses nothing: before the simulation change
+    lands perception stays exactly as dark as it already was, and after it lands
+    it works. A legacy field would be dead the day it merged.
+    """
 
     speaker_id: str
     speaker_name: str
     message: str
     timestamp: int | None = None
+    is_system: bool = False
+    declarations: list[dict] = Field(default_factory=list)
+
+    def render_markers(self) -> str:
+        """Trailing ``[system] [farewell]``-style markers, or "" when there are none.
+
+        Each declaration renders as its ``kind`` key verbatim; there is no kind
+        vocabulary in Python (see the class docstring).
+        """
+        markers = ["[system]"] if self.is_system else []
+        for declaration in self.declarations:
+            if not isinstance(declaration, dict):
+                continue
+            kind = declaration.get("kind")
+            if isinstance(kind, str) and kind.strip():
+                markers.append(f"[{kind.strip()}]")
+        return " ".join(markers)
 
 
 class ConversationObservation(BaseModel):
@@ -375,11 +550,13 @@ class Observation(BaseModel):
         for conv in self.conversations:
             messages = []
             for m in conv.conversation_history:
+                markers = m.render_markers()
+                suffix = f" {markers}" if markers else ""
                 if m.speaker_id == self.entity_id:
                     # Mark own messages clearly to prevent self-responding
-                    messages.append(f"[YOU] {m.speaker_name}: {m.message}")
+                    messages.append(f"[YOU] {m.speaker_name}: {m.message}{suffix}")
                 else:
-                    messages.append(f"{m.speaker_name}: {m.message}")
+                    messages.append(f"{m.speaker_name}: {m.message}{suffix}")
 
             if messages:
                 msgs_str = "\n".join(messages)
@@ -494,13 +671,13 @@ class Observation(BaseModel):
                     )
                 )
             elif self.is_interacting():
-                interaction_name = self.status.current_interaction.get(
-                    "interaction_name", "interaction"
-                )
                 actions.append(
                     AvailableAction(
                         name=ActionType.CONTINUE,
-                        description=f"Wait/pause in the current {interaction_name} for a short moment.",
+                        description=(
+                            f"Wait/pause in the current {self.status.interaction_display_name()} "
+                            "for a short moment."
+                        ),
                     )
                 )
 
@@ -509,20 +686,17 @@ class Observation(BaseModel):
         # Grounding here (not just current_interaction presence) prevents emitting
         # act_in_interaction during interaction teardown — the NPC-688 desync loop.
         if self.is_interacting():
-            interaction_name = self.status.current_interaction.get(
-                "interaction_name", "interaction"
-            )
-
-            # Add action to participate in the interaction (e.g., send message in conversation)
-            params = {}
-            if interaction_name == "conversation":
-                params = {"message": "The message to send in the conversation"}
-
+            # Both the label and the parameter hints come from the wire. Naming
+            # an interaction here — as the hardcoded `== "conversation"` branch
+            # used to — makes every other interaction's parameters unreachable
+            # and freezes the menu against the simulation's own schema.
             actions.append(
                 AvailableAction(
                     name=ActionType.ACT_IN_INTERACTION,
-                    description=f"Participate in the current {interaction_name}",
-                    parameters=params,
+                    description=(
+                        f"Participate in the current {self.status.interaction_display_name()}"
+                    ),
+                    parameters=self.status.act_parameter_hints(),
                 )
             )
 

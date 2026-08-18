@@ -40,6 +40,23 @@ class MissingRequiredParameterError(ActionValidationError):
         super().__init__(f"Required parameter '{param_name}' missing for action '{action_type}'")
 
 
+class NoAdvertisedParameterError(ActionValidationError):
+    """An act carried none of the parameters its interaction advertises.
+
+    Distinct from MissingRequiredParameterError, whose `param_name` is one
+    parameter. Here the requirement is a disjunction over the advertised set, so
+    the set is carried as a list rather than packed into a single-name field.
+    """
+
+    def __init__(self, param_names: list[str], action_type: str):
+        self.param_names = param_names
+        self.action_type = action_type
+        super().__init__(
+            f"Action '{action_type}' supplied none of the advertised parameters: "
+            f"{', '.join(param_names)}"
+        )
+
+
 class MovementLockedError(ActionValidationError):
     """Movement action attempted while movement is locked"""
 

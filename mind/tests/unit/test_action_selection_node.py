@@ -17,6 +17,7 @@ from mind.cognitive_architecture.observations import (
     StatusObservation,
 )
 from mind.cognitive_architecture.state import PipelineState
+from tests.fixtures.observations import wire_current_interaction, wire_property_spec
 
 
 @pytest.mark.asyncio
@@ -253,10 +254,16 @@ class TestActionSelectionNode:
         # Set up an active interaction so act_in_interaction is valid.
         # NPC-688: validity is grounded in BOTH current_interaction AND
         # activity_state == interacting, so set both authoritative signals.
-        basic_state.observation.status.current_interaction = {
-            "interaction_id": "conversation_123",
-            "interaction_name": "chat",
-        }
+        # NPC-1278: the payload must be the real wire shape, and the act must
+        # carry one of the parameters that shape advertises — an act naming only
+        # invented parameters is now rejected.
+        basic_state.observation.status.current_interaction = wire_current_interaction(
+            "negotiation",
+            act_parameters={
+                "response": wire_property_spec("string", "", "What you say in reply"),
+                "intensity": wire_property_spec("float", 0.5, "How forcefully you press"),
+            },
+        )
         basic_state.observation.status.activity_state = {"state_name": "interacting"}
 
         mock_llm.ainvoke.return_value = AIMessage(

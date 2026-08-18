@@ -24,13 +24,70 @@ from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_SMALL_MODEL
 from mind.interfaces.mcp.models import MindConfig
 
 
+def wire_property_spec(type_name: str, default, description: str) -> dict:
+    """One entry of ``act_in_interaction_parameters``, verbatim from the wire.
+
+    This IS the Godot ``PropertySpec.to_dict()`` shape — ``{"type", "default",
+    "description"}`` and nothing else. Tests build parameter payloads through
+    this helper so a simulation-side shape change breaks in one place rather
+    than in every fixture that happened to guess right.
+    """
+    return {"type": type_name, "default": default, "description": description}
+
+
+def wire_current_interaction(
+    name: str,
+    description: str = "",
+    act_parameters: dict | None = None,
+    needs_filled: list[str] | None = None,
+    needs_drained: list[str] | None = None,
+) -> dict:
+    """A ``StatusObservation.current_interaction`` payload, verbatim from the wire.
+
+    This IS the Godot ``Interaction.to_dict()`` contract: the key set below is
+    exactly what crosses the boundary, and there is deliberately no
+    ``interaction_name`` key — asking for one is what made the mind blind to
+    every interaction's identity and parameters (NPC-1278). Fixtures that
+    invented their own shape were why the bug survived a full test suite, so
+    every test that needs a current interaction builds it here.
+    """
+    return {
+        "name": name,
+        "description": description or f"The {name} interaction",
+        "needs_filled": needs_filled or [],
+        "needs_drained": needs_drained or [],
+        "need_rates": {},
+        "act_in_interaction_parameters": act_parameters or {},
+    }
+
+
+def wire_conversation_interaction() -> dict:
+    """The conversation interaction as the simulation actually advertises it.
+
+    Mirrors ``conversation_interaction.gd``'s two declared act parameters.
+    """
+    return wire_current_interaction(
+        name="conversation",
+        description="Multi-party conversation",
+        act_parameters={
+            "message": wire_property_spec("string", "", "Message text to send in conversation"),
+            "is_farewell": wire_property_spec(
+                "bool",
+                False,
+                "Whether the speaker intends this message to end the conversation",
+            ),
+        },
+        needs_filled=["social"],
+    )
+
+
 def create_blacksmith_observation(simulation_time: int = 100) -> Observation:
     """Blacksmith NPC at forge with low energy, seeing tools and customers"""
     return Observation(
         entity_id="blacksmith_npc",
         current_simulation_time=simulation_time,
         status=StatusObservation(
-            position=(15, 20), movement_locked=False, current_interaction={}, controller_state={}
+            position=(15, 20), movement_locked=False, current_interaction={}, activity_state={}
         ),
         needs=NeedsObservation(
             needs={"hunger": 65.0, "energy": 30.0, "fun": 40.0, "hygiene": 70.0, "social": 55.0},
@@ -167,7 +224,8 @@ def create_conversation_observation(simulation_time: int = 100) -> Observation:
         status=StatusObservation(
             position=(20, 15),
             movement_locked=True,  # Locked during conversation
-            current_interaction={"interaction_id": "chat_with_alice", "type": "conversation"},
+            current_interaction=wire_conversation_interaction(),
+            activity_state={"state_name": "interacting"},
         ),
         needs=NeedsObservation(
             needs={"hunger": 70.0, "energy": 80.0, "fun": 85.0, "hygiene": 90.0, "social": 95.0}
