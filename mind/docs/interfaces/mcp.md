@@ -168,6 +168,10 @@ The Godot simulation connects through a layered client system:
 - Observation dict → validated `Observation` Pydantic model
 - `Action.model_dump()` → action dict for Godot
 
+For what the simulation puts in that dict, which vocabulary is owned on its side,
+and how to check a piece of simulation state is reaching this server, see
+[simulation_boundary.md](simulation_boundary.md).
+
 ## HTTP Endpoints
 
 Beyond MCP protocol endpoints, the server provides standard HTTP endpoints for lifecycle management and monitoring.

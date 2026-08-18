@@ -149,6 +149,7 @@ src/mind/
 
 - [cognitive_architecture/overview.md](cognitive_architecture/overview.md) - Detailed pipeline architecture
 - [interfaces/mcp.md](interfaces/mcp.md) - MCP protocol and tools
+- [interfaces/simulation_boundary.md](interfaces/simulation_boundary.md) - What the Godot simulation sends, and how to check it arrives
 - [planning/roadmap.md](planning/roadmap.md) - Development roadmap
 - [meta/style-guide.md](meta/style-guide.md) - Documentation standards
 
