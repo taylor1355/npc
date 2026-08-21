@@ -33,7 +33,14 @@ class StepTokenUsage(BaseModel):
     # Subset of prompt_tokens the provider served from its own cache.
     cached_prompt_tokens: int = 0
 
-    # True iff at least one response carried input_token_details. OpenRouter
+    # Tokens the provider WROTE into its cache on this call. Anthropic bills
+    # cache writes at a 1.25x premium, so without this figure the first-call
+    # cost of enabling prompt caching is invisible and "caching saved money"
+    # cannot be checked against what it cost to prime.
+    cache_write_tokens: int = 0
+
+    # True iff at least one response carried real provider cache accounting
+    # (prompt_tokens_details.cached_tokens in the raw usage dict). OpenRouter
     # passthrough of cache accounting is provider-dependent, so a 0 in
     # cached_prompt_tokens means "no cache hits" only when this is True;
     # otherwise it means "nobody told us".
@@ -58,6 +65,7 @@ class StepTokenUsage(BaseModel):
             completion_tokens=self.completion_tokens + other.completion_tokens,
             total_tokens=self.total_tokens + other.total_tokens,
             cached_prompt_tokens=self.cached_prompt_tokens + other.cached_prompt_tokens,
+            cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
             cache_reporting=self.cache_reporting or other.cache_reporting,
             model_calls=self.model_calls + other.model_calls,
             unreported_calls=self.unreported_calls + other.unreported_calls,

@@ -215,23 +215,44 @@ class LLMNode(Node):
         us zero". Callers turn None into an explicit unreported round-trip
         rather than into a free one.
 
-        The prompt/completion split and cache_read arrive in usage_metadata
-        already (langchain-core UsageMetadata / InputTokenDetails); this reads
-        them through instead of collapsing everything to total_tokens.
+        cache_reporting is answered from the RAW provider usage dict
+        (``response_metadata["token_usage"]``), never from the normalized
+        ``usage_metadata["input_token_details"]``: langchain_openai >= 1.0
+        always emits input_token_details (as ``{}`` when the provider said
+        nothing), so its presence is a fact about the library, not the
+        provider. Reading it as "the provider reported cache accounting" made
+        cache_reporting True on every metered call, destroying exactly the
+        "told us zero" vs "told us nothing" distinction this field exists to
+        preserve (NPC-1319).
         """
         usage = getattr(response, "usage_metadata", None)
         if not usage:
             return None
 
-        # NotRequired on UsageMetadata: absent means the provider does not report
-        # cache accounting, which is not the same fact as zero cache hits.
-        details = usage.get("input_token_details")
+        # The provider's own usage dict, stashed verbatim by langchain_openai.
+        # Only its prompt_tokens_details can prove cache accounting was
+        # actually reported; OpenRouter adds cache_write_tokens there too.
+        response_metadata = getattr(response, "response_metadata", None) or {}
+        raw = response_metadata.get("token_usage")
+        raw_details = raw.get("prompt_tokens_details") if isinstance(raw, dict) else None
+        cache_reporting = isinstance(raw_details, dict) and "cached_tokens" in raw_details
+
+        if cache_reporting:
+            cached_prompt_tokens = raw_details.get("cached_tokens") or 0
+            cache_write_tokens = raw_details.get("cache_write_tokens") or 0
+        else:
+            # Best-effort read-through of the normalized field. Without raw
+            # accounting a zero here can never be claimed as measured, so
+            # cache_reporting stays False.
+            cached_prompt_tokens = (usage.get("input_token_details") or {}).get("cache_read", 0)
+            cache_write_tokens = 0
 
         return StepTokenUsage(
             prompt_tokens=usage.get("input_tokens", 0),
             completion_tokens=usage.get("output_tokens", 0),
             total_tokens=usage.get("total_tokens", 0),
-            cached_prompt_tokens=(details or {}).get("cache_read", 0),
-            cache_reporting=details is not None,
+            cached_prompt_tokens=cached_prompt_tokens,
+            cache_write_tokens=cache_write_tokens,
+            cache_reporting=cache_reporting,
             model_calls=1,
         )

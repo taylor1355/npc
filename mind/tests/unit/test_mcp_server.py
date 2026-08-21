@@ -1461,14 +1461,15 @@ class TestDecideActionTelemetry:
                     cache_reporting=True,
                     model_calls=1,
                 ),
-                "action_selection": StepTokenUsage(
+                "reflection": StepTokenUsage(
                     prompt_tokens=200,
                     completion_tokens=30,
                     total_tokens=230,
+                    cache_write_tokens=2370,
                     model_calls=2,
                 ),
             },
-            time_ms={"memory_query": 300, "action_selection": 700},
+            time_ms={"memory_query": 300, "reflection": 700},
         )
 
         assert response["status"] == "success"
@@ -1478,12 +1479,15 @@ class TestDecideActionTelemetry:
         assert telemetry["completion_tokens"] == 50
         assert telemetry["total_tokens"] == 350
         assert telemetry["cached_prompt_tokens"] == 40
+        assert telemetry["cache_write_tokens"] == 2370, (
+            "the cache-write premium must reach the wire or first-call cost is invisible"
+        )
         assert telemetry["cache_reporting"] is True
         assert telemetry["model_calls"] == 3, "retries must survive to the wire"
         assert telemetry["unreported_calls"] == 0
         assert telemetry["server_ms"] == 1000
-        assert set(telemetry["per_step"]) == {"memory_query", "action_selection"}
-        assert telemetry["per_step_ms"] == {"memory_query": 300, "action_selection": 700}
+        assert set(telemetry["per_step"]) == {"memory_query", "reflection"}
+        assert telemetry["per_step_ms"] == {"memory_query": 300, "reflection": 700}
 
     async def test_telemetry_reports_the_configured_model(self):
         """Reporting the requested slug is deterministic and needs no live call"""
@@ -1505,7 +1509,7 @@ class TestDecideActionTelemetry:
             server,
             {
                 "memory_query": StepTokenUsage.unreported_call(),
-                "action_selection": StepTokenUsage.unreported_call(),
+                "reflection": StepTokenUsage.unreported_call(),
             },
         )
 

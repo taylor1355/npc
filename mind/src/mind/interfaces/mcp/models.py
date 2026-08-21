@@ -63,6 +63,11 @@ class DecisionTelemetry(BaseModel):
     total_tokens: int
     cached_prompt_tokens: int
 
+    # Tokens written into the provider's prompt cache this decision. Anthropic
+    # bills cache writes at a 1.25x premium; without this the first-call cost of
+    # caching is invisible on the cost ledger.
+    cache_write_tokens: int
+
     # False means "no provider told us about cache reads", which is a different
     # fact from cached_prompt_tokens == 0 ("told us, and there were none").
     cache_reporting: bool
@@ -98,6 +103,7 @@ class DecisionTelemetry(BaseModel):
             completion_tokens=folded.completion_tokens,
             total_tokens=folded.total_tokens,
             cached_prompt_tokens=folded.cached_prompt_tokens,
+            cache_write_tokens=folded.cache_write_tokens,
             cache_reporting=folded.cache_reporting,
             model_calls=folded.model_calls,
             unreported_calls=folded.unreported_calls,
