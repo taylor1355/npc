@@ -79,13 +79,14 @@ class ReflectionNode(LLMNode):
                 KnowledgeFile.ACTIVITY,
             ]
         )
-        self.static_prefix = (
-            LLMNode.build_static_prefix(
-                static_text,
-                world_knowledge=world_knowledge,
-                format_instructions=self.get_format_instructions(),
-            )
-            + CACHE_BREAKPOINT_MARKER
+        # The marker is the SPLIT POINT only -- it is not appended to the
+        # sent bytes, so no implementation-detail string reaches the model
+        # (review nit, PR #31). Cache identity is unaffected: the prefix is
+        # still byte-identical across calls.
+        self.static_prefix = LLMNode.build_static_prefix(
+            static_text,
+            world_knowledge=world_knowledge,
+            format_instructions=self.get_format_instructions(),
         )
         self.cache_control = True
 
