@@ -14,7 +14,7 @@ This document collects potential features and improvements for the NPC cognitive
 
 ### 2. Hierarchical Planning Architecture
 **Description**: Reduce token usage by 90% through plans that are generated rarely but executed frequently
-**Motivation**: Current implementation uses ~2,300 tokens per NPC decision (5 separate LLM calls)
+**Motivation**: Reduce per-decision token cost well below the measured baseline (NPC-1318: 5,367 tokens/cycle pre-merge; NPC-1319 merged the two decision calls into one reflection call)
 **Implementation Notes**:
 - NPCs as behavioral programmers writing/revising plans at multiple timescales
 - Plans executed many times before regeneration

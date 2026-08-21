@@ -439,8 +439,12 @@ class TestUsageExtraction:
         assert usage.total_tokens == 0
         assert usage.model_calls == 1
 
-    def test_cache_read_tokens_are_captured(self):
-        """cache_read rides input_token_details and is free to read through"""
+    def test_cache_read_tokens_are_captured_without_claiming_reporting(self):
+        """Normalized cache_read is read through, but it is not cache accounting.
+
+        Without the raw provider dict there is no way to tell a real zero from
+        silence, so the value is captured while cache_reporting stays False.
+        """
         response = AIMessage(
             content="test",
             usage_metadata={
@@ -454,7 +458,7 @@ class TestUsageExtraction:
         usage = self._node()._extract_usage(response)
 
         assert usage.cached_prompt_tokens == 80
-        assert usage.cache_reporting is True
+        assert usage.cache_reporting is False
 
     def test_absent_cache_details_are_not_reported_as_zero_cache_hits(self):
         """input_token_details is NotRequired; absent != zero hits"""
@@ -468,6 +472,120 @@ class TestUsageExtraction:
         assert usage.cache_reporting is False, (
             "no cache accounting reported must stay distinguishable from zero hits"
         )
+
+
+class TestCacheAccountingExtraction:
+    """cache_reporting must answer "did the PROVIDER report cache accounting?".
+
+    langchain_openai >= 1.0 always emits a normalized input_token_details ({}
+    when the provider said nothing), so its presence is a fact about the
+    library, not the provider. Only the raw usage dict the library stashes at
+    response_metadata["token_usage"] carries the provider's own
+    prompt_tokens_details, and only that can distinguish "told us zero" from
+    "told us nothing" (NPC-1319).
+    """
+
+    def _node(self):
+        return LLMNode(llm=AsyncMock(), prompt=PromptTemplate.from_template("{input}"))
+
+    @staticmethod
+    def _response(raw_usage: dict | None) -> AIMessage:
+        """An AIMessage shaped the way langchain_openai >= 1.0 actually builds it."""
+        kwargs = {}
+        if raw_usage is not None:
+            kwargs["response_metadata"] = {"token_usage": raw_usage}
+        return AIMessage(
+            content="test",
+            usage_metadata={
+                "input_tokens": 100,
+                "output_tokens": 10,
+                "total_tokens": 110,
+                # Always present in langchain_openai >= 1.0, even when the
+                # provider reported nothing about caching.
+                "input_token_details": {},
+                "output_token_details": {},
+            },
+            **kwargs,
+        )
+
+    def test_missing_raw_token_usage_means_not_reported(self):
+        usage = self._node()._extract_usage(self._response(None))
+
+        assert usage.cache_reporting is False
+        assert usage.cached_prompt_tokens == 0
+        assert usage.cache_write_tokens == 0
+
+    def test_plain_provider_usage_dict_is_not_cache_reporting(self):
+        """THE BUG FIX: a 3-field usage dict means nobody said anything about
+        caching, even though the normalized input_token_details is present."""
+        raw = {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110}
+
+        usage = self._node()._extract_usage(self._response(raw))
+
+        assert usage.cache_reporting is False
+        assert usage.cached_prompt_tokens == 0
+
+    def test_raw_cached_tokens_zero_is_a_measured_zero(self):
+        raw = {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+            "prompt_tokens_details": {"cached_tokens": 0},
+        }
+
+        usage = self._node()._extract_usage(self._response(raw))
+
+        assert usage.cache_reporting is True
+        assert usage.cached_prompt_tokens == 0
+
+    def test_raw_cached_tokens_are_captured(self):
+        raw = {
+            "prompt_tokens": 2500,
+            "completion_tokens": 10,
+            "total_tokens": 2510,
+            "prompt_tokens_details": {"cached_tokens": 1800},
+        }
+
+        usage = self._node()._extract_usage(self._response(raw))
+
+        assert usage.cache_reporting is True
+        assert usage.cached_prompt_tokens == 1800
+
+    def test_cache_write_tokens_are_captured(self):
+        raw = {
+            "prompt_tokens": 2500,
+            "completion_tokens": 10,
+            "total_tokens": 2510,
+            "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 2370},
+        }
+
+        usage = self._node()._extract_usage(self._response(raw))
+
+        assert usage.cache_write_tokens == 2370
+
+    def test_no_usage_metadata_is_still_none(self):
+        """The unreported-call sentinel path is unchanged by the raw-dict read"""
+        response = AIMessage(
+            content="test",
+            response_metadata={
+                "token_usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 10,
+                    "total_tokens": 110,
+                }
+            },
+        )
+
+        assert self._node()._extract_usage(response) is None
+
+    def test_merged_with_sums_cache_write_tokens(self):
+        from mind.cognitive_architecture.state import StepTokenUsage
+
+        merged = StepTokenUsage(cache_write_tokens=2370, model_calls=1).merged_with(
+            StepTokenUsage(cache_write_tokens=130, model_calls=1)
+        )
+
+        assert merged.cache_write_tokens == 2500
 
 
 class TestUsageRecordingSentinels:

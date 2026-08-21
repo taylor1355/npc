@@ -1,4 +1,10 @@
-"""Models for cognitive update node"""
+"""Working-memory models shared across the cognitive architecture.
+
+WorkingMemory is the mind's persistent between-cycles state and NewMemory the
+unit of memory formation. They are consumed well beyond the node that writes
+them (pipeline state, the MCP wire models, the Mind runtime), so they live at
+the architecture level rather than inside any single node package.
+"""
 
 from pydantic import BaseModel, Field
 
@@ -35,23 +41,3 @@ class WorkingMemory(BaseModel):
         if self.emotional_state:
             parts.append(f"Emotional State: {self.emotional_state}")
         return "\n".join(parts) if parts else "No working memory"
-
-
-class CognitiveUpdateInput(BaseModel):
-    """Input for cognitive context update"""
-
-    working_memory: WorkingMemory = Field(description="Current working memory state")
-    retrieved_memories: list[str] = Field(description="Memories retrieved from long-term storage")
-    observation_text: str = Field(description="Current observation from the environment")
-
-
-class CognitiveUpdateOutput(BaseModel):
-    """Output from cognitive context update"""
-
-    updated_working_memory: WorkingMemory = Field(
-        description="Updated working memory incorporating current situation, goals, emotional state, and events"
-    )
-    new_memories: list[NewMemory] = Field(
-        default_factory=list,
-        description="New memories to store from this experience (can be empty if nothing significant)",
-    )

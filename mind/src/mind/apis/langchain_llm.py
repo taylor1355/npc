@@ -19,6 +19,17 @@ class LangChainModel:
     GEMINI_FLASH_LITE = constants.GEMINI_FLASH_LITE
 
 
+def supports_cache_control(model: str) -> bool:
+    """Whether this model slug may receive explicit cache_control breakpoints.
+
+    Allowlist-based and deliberately conservative: an unknown slug (or a test
+    double whose model name is not a real slug) gets no breakpoint, because a
+    provider that rejects an unrecognised content-block key would otherwise
+    take the whole decision down.
+    """
+    return model in constants.CACHE_CONTROL_MODELS
+
+
 def get_llm(model: str, temperature: float = 0) -> ChatOpenAI:
     """Get a configured LangChain LLM via OpenRouter
 

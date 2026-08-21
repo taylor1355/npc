@@ -1,8 +1,8 @@
 """Shared prompt-input formatting helpers for cognitive pipeline nodes.
 
 Lives outside base.py so the LLMNode base stays free of domain-specific
-rendering logic. Imported by any node that surfaces personality to the LLM
-(cognitive_update, action_selection) so the representation stays identical.
+rendering logic. Imported by any node that surfaces this state to the LLM
+(reflection today) so the representation stays identical if more ever do.
 """
 
 from __future__ import annotations
@@ -19,10 +19,8 @@ def format_personality(
 ) -> tuple[str, str]:
     """Format personality traits and dimensions for prompt rendering.
 
-    Shared by nodes that surface personality to the LLM (cognitive_update,
-    action_selection) so the rendered representation stays identical across the
-    pipeline. Returns sentinel strings when personality is absent because
-    LangChain PromptTemplate requires every declared variable to be present.
+    Returns sentinel strings when personality is absent because LangChain
+    PromptTemplate requires every declared variable to be present.
 
     Returns:
         (traits_text, dimensions_text). Dimensions are sorted by name for
@@ -44,8 +42,8 @@ def format_interaction_status(observation: Observation | None) -> str:
     Grounds the LLM's "am I interacting?" belief in the current observation
     (current_interaction + activity_state), so a stale working-memory belief
     can be corrected each cycle rather than driving the NPC-688 desync loop.
-    Shared by cognitive_update and action_selection so both nodes see an
-    identical, single-source-of-truth rendering.
+    A single-source-of-truth rendering: every prompt surface that states the
+    interaction status goes through here.
 
     Defaults to "NOT currently in any interaction" when status is absent or
     partial — a missing field never reads as "interacting".
@@ -70,15 +68,16 @@ def format_interaction_status(observation: Observation | None) -> str:
 def format_substrate_goal(goal: GoalObservation | None) -> str:
     """Render the substrate's active goal as an advisory pull for prompts.
 
-    action_selection never receives ``observation_text``, so without this the
-    substrate's own answer to "why act?" reaches the node that actually picks
-    actions only laundered through working memory, or not at all.
+    The reflection prompt gives the pull its own dedicated section (with a
+    standing advisory on how to weigh it) rather than leaving it buried inside
+    ``observation_text``; the observation's own "Subconscious pull" line is the
+    same datum echoed, and the prompt says so.
 
     Returns a sentinel string when no goal is present. This is mandatory, not
     defensive: LangChain PromptTemplate raises at format time on any declared
-    variable that is missing, and in this node that exception is caught and
-    collapses the cycle into the WAIT fallback. A None-returning helper would
-    turn "this NPC has no active goal" into "this NPC never acts".
+    variable that is missing, and in the reflection node that exception would
+    burn every retry before the salvage fallback caught it. A None-returning
+    helper would turn "this NPC has no active goal" into "this NPC never acts".
 
     Urgency is rendered as the raw simulation value rather than a percentage —
     the percent-of-maximum conversion belongs to the simulation tier, and

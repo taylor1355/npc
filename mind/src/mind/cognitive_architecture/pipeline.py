@@ -6,11 +6,10 @@ from langgraph.graph import END, StateGraph
 from mind.logging_config import get_logger
 
 from .memory.vector_db_memory import VectorDBMemory
-from .nodes.action_selection.node import ActionSelectionNode
 from .nodes.base import entity_tag
-from .nodes.cognitive_update.node import CognitiveUpdateNode
 from .nodes.memory_query.node import MemoryQueryNode
 from .nodes.memory_retrieval.node import MemoryRetrievalNode
+from .nodes.reflection.node import ReflectionNode
 from .state import PipelineState
 
 logger = get_logger()
@@ -26,8 +25,7 @@ class CognitivePipeline:
         # Initialize nodes
         self.memory_query_node = MemoryQueryNode(llm)
         self.memory_retrieval_node = MemoryRetrievalNode(memory_store)
-        self.cognitive_update_node = CognitiveUpdateNode(llm)
-        self.action_selection_node = ActionSelectionNode(llm)
+        self.reflection_node = ReflectionNode(llm)
 
         # Build the graph
         self.graph = self._build_graph()
@@ -42,15 +40,13 @@ class CognitivePipeline:
         # Add nodes
         workflow.add_node("memory_query", self.memory_query_node.process)
         workflow.add_node("memory_retrieval", self.memory_retrieval_node.process)
-        workflow.add_node("cognitive_update", self.cognitive_update_node.process)
-        workflow.add_node("action_selection", self.action_selection_node.process)
+        workflow.add_node("reflection", self.reflection_node.process)
 
         # Define edges
         workflow.set_entry_point("memory_query")
         workflow.add_edge("memory_query", "memory_retrieval")
-        workflow.add_edge("memory_retrieval", "cognitive_update")
-        workflow.add_edge("cognitive_update", "action_selection")
-        workflow.add_edge("action_selection", END)
+        workflow.add_edge("memory_retrieval", "reflection")
+        workflow.add_edge("reflection", END)
 
         return workflow
 

@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mind.cognitive_architecture.nodes.cognitive_update.models import (
+from mind.cognitive_architecture.working_memory import (
     NewMemory,
     WorkingMemory,
 )

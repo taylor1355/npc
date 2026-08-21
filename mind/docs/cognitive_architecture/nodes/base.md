@@ -27,8 +27,10 @@ Supports Pydantic models (structured output with validation) or raw strings (no 
 **Optional**:
 - `output_model: type[BaseModel] | None = None` - Pydantic model (None for raw strings)
 - `max_retries: int = 0` - Retry attempts on validation failure
+- `static_prefix: str | None = None` - Fully-formatted text prepended before every rendered prompt. Build it once with `LLMNode.build_static_prefix(template_text, **static_vars)`, which raises `ValueError` if the template declares a variable outside `static_vars` — anything above a cache breakpoint must be byte-identical across calls.
+- `cache_control: bool = False` - Request a provider cache breakpoint after the static prefix
 
-**Constraints**: If `max_retries > 0`, must provide `output_model`
+**Constraints**: If `max_retries > 0`, must provide `output_model`. If `cache_control`, must provide `static_prefix`.
 
 ## Usage
 
@@ -47,8 +49,8 @@ class MyNode(LLMNode):
 ```
 
 **Production Examples**:
-- [action_selection/node.py](../../src/mind/cognitive_architecture/nodes/action_selection/node.py) - With validation retry
-- [memory_query/node.py](../../src/mind/cognitive_architecture/nodes/memory_query/node.py) - Simple output
+- [reflection/node.py](../../../src/mind/cognitive_architecture/nodes/reflection/node.py) - With validation retry, salvage fallback, and prompt caching
+- [memory_query/node.py](../../../src/mind/cognitive_architecture/nodes/memory_query/node.py) - Simple output
 
 ## Context-Aware Validation
 
@@ -66,7 +68,7 @@ class MyOutput(BaseModel):
         return self
 ```
 
-**Production Example**: [actions/models.py](../../src/mind/cognitive_architecture/actions/models.py)
+**Production Example**: [actions/models.py](../../../src/mind/cognitive_architecture/actions/models.py)
 
 ## Retry Mechanism
 
@@ -74,11 +76,26 @@ Each retry sends:
 1. Previous AI response (as `AIMessage`)
 2. Error message (as `HumanMessage`)
 
-This gives the LLM context to fix its mistake. Tokens from all attempts are summed and tracked.
+This gives the LLM context to fix its mistake. Tokens from all attempts are summed and tracked. Retries append after `messages[0]`, so the static prefix and its cache breakpoint survive every retry.
+
+**Exhaustion contract**: after the last failed attempt, `call_llm` records the accumulated usage (the raise would otherwise escape past everything that can reach `PipelineState`), then either raises the last error (default) or, when the caller passed `on_exhausted=(raw_content, error) -> BaseModel`, returns that fallback's result instead. `ReflectionNode._salvage` is the production consumer: it rescues each output field independently from the last raw response. Transport errors are not routed through `on_exhausted` — there is nothing to salvage.
+
+## Prompt Caching
+
+When `cache_control` is set, the model is allowlisted (`constants.CACHE_CONTROL_MODELS`; unknown slugs default off so a provider that rejects the key cannot take the pipeline down), and the prefix clears `constants.MIN_CACHEABLE_PREFIX_CHARS`, message content is sent as two text blocks with the breakpoint on the first:
+
+```python
+[
+    {"type": "text", "text": static_prefix, "cache_control": {"type": "ephemeral"}},
+    {"type": "text", "text": dynamic_text},
+]
+```
+
+Otherwise the same bytes go out as one plain string (`static_prefix + dynamic_text`). Test doubles (`AsyncMock`) have no string `model_name`, so caching is structurally off under test.
 
 ## Implementation Details
 
-**Token Extraction**: Extracts from `response.usage_metadata['total_tokens']` (works with all LangChain models)
+**Token Extraction**: `_extract_usage` reads the prompt/completion split from `usage_metadata` and answers cache accounting from the RAW provider dict at `response_metadata["token_usage"]` — the normalized `input_token_details` is always present in `langchain_openai >= 1.0` and proves nothing about the provider
 
 **Validation Context**: Always `{"state": state}` - validators extract what they need from state
 
@@ -87,5 +104,5 @@ This gives the LLM context to fix its mistake. Tokens from all attempts are summ
 ## Related Documentation
 
 - [Node System](README.md) - Architecture and node catalog
-- [Action Selection](action_selection.md) - Validation retry example
-- [Actions](../actions/README.md) - Context-aware validation patterns
+- [reflection/node.py](../../../src/mind/cognitive_architecture/nodes/reflection/node.py) - Validation retry + salvage example
+- [actions/models.py](../../../src/mind/cognitive_architecture/actions/models.py) - Context-aware validation patterns

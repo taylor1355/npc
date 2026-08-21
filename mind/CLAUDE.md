@@ -23,23 +23,19 @@ src/mind/
 ├── cognitive_architecture/          # LangGraph-based pipeline
 │   ├── pipeline.py                  # StateGraph orchestration
 │   ├── state.py                     # PipelineState model
-│   ├── models.py                    # Shared models (Memory, Observation, Action)
+│   ├── working_memory.py            # WorkingMemory, NewMemory (shared models)
 │   ├── nodes/                       # Processing nodes
-│   │   ├── base.py                  # Node & LLMNode base classes
+│   │   ├── base.py                  # Node & LLMNode base classes (caching, retry, salvage hook)
 │   │   ├── memory_query/            # Generate semantic search queries
 │   │   │   ├── node.py
 │   │   │   ├── models.py
 │   │   │   └── prompt.md
 │   │   ├── memory_retrieval/        # Vector search via ChromaDB
 │   │   │   └── node.py
-│   │   ├── cognitive_update/        # Update working memory, form memories
+│   │   ├── reflection/              # Update working memory, form memories, choose action
 │   │   │   ├── node.py
-│   │   │   ├── models.py            # WorkingMemory, NewMemory
-│   │   │   └── prompt.md
-│   │   ├── action_selection/        # Choose action based on context
-│   │   │   ├── node.py
-│   │   │   ├── models.py
-│   │   │   └── prompt.md
+│   │   │   ├── models.py            # ReflectionOutput
+│   │   │   └── prompt.md            # Split at a cache-breakpoint marker
 │   │   └── memory_consolidation/    # Daily → long-term storage
 │   │       └── node.py
 │   └── memory/
@@ -56,14 +52,23 @@ src/mind/
 └── prompts/                         # Legacy prompt templates (archived)
 ```
 
-### Cognitive Pipeline (4-step LangGraph)
+### Cognitive Pipeline (3-step LangGraph)
 
-1. **Memory Query** (~200 tokens) - Generate semantic search queries from observations
+1. **Memory Query** - Generate semantic search queries from observations
 2. **Memory Retrieval** (no LLM) - ChromaDB vector search with deduplication
-3. **Cognitive Update** (~500 tokens) - Update WorkingMemory, form new memories
-4. **Action Selection** (~300 tokens) - Choose action based on full context
+3. **Reflection** - One LLM call that updates WorkingMemory, forms new memories, AND
+   chooses the action (merged from the former cognitive_update + action_selection
+   pair, NPC-1319). Its prompt's static prefix (scaffold + world knowledge + format
+   instructions) is served from the provider's prompt cache for allowlisted models.
 
-**Performance:** ~2000 tokens, ~3.5s end-to-end (Gemini Flash Lite)
+**Performance:** the pre-merge baseline, measured live (NPC-1318, 2026-08-20), was
+**5,367 tokens per decision cycle** (mean over 10 cycles, cold memory store,
+`google/gemini-2.5-flash-lite`; per-node means 551.2 / 2,802.5 / 2,012.9 for
+memory_query / cognitive_update / action_selection). Reproduce with the harness in
+NPC-1318's baseline comment: `PYTHONPATH=$PWD/src:$PWD python measure_baseline.py`
+from a mind checkout with credentials linked. The reflection merge removes the
+duplicated prompt content between the two retired nodes; re-measure with the same
+harness rather than extrapolating.
 
 ### Memory System
 

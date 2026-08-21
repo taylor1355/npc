@@ -24,10 +24,9 @@ The cognitive pipeline processes observations through specialized nodes, each pe
 
 ```
 Node (automatic timing)
-├── LLMNode (retry + token tracking + validation)
+├── LLMNode (retry + token tracking + validation + prompt caching)
 │   ├── MemoryQueryNode
-│   ├── CognitiveUpdateNode
-│   └── ActionSelectionNode
+│   └── ReflectionNode
 └── (Direct Node extensions)
     ├── MemoryRetrievalNode
     └── MemoryConsolidationNode
@@ -38,23 +37,21 @@ Node (automatic timing)
 ```
 1. MemoryQueryNode        → Generate semantic queries
 2. MemoryRetrievalNode    → Fetch memories from vector store
-3. CognitiveUpdateNode    → Update working memory, form new memories
-4. ActionSelectionNode    → Select validated action
-5. MemoryConsolidationNode → (Separate: daily → long-term transfer)
+3. ReflectionNode         → Update working memory, form new memories, select validated action
+4. MemoryConsolidationNode → (Separate: daily → long-term transfer)
 ```
 
 ## Node Catalog
 
 ### Memory Nodes
 
-- **[MemoryQueryNode](memory_query.md)** - Generates diverse semantic queries for memory retrieval
-- **[MemoryRetrievalNode](memory_retrieval.md)** - Searches vector store and deduplicates results
-- **[MemoryConsolidationNode](memory_consolidation.md)** - Transfers daily memories to long-term storage
+- **MemoryQueryNode** ([memory_query/node.py](../../../src/mind/cognitive_architecture/nodes/memory_query/node.py)) - Generates diverse semantic queries for memory retrieval
+- **MemoryRetrievalNode** ([memory_retrieval/node.py](../../../src/mind/cognitive_architecture/nodes/memory_retrieval/node.py)) - Searches vector store and deduplicates results
+- **MemoryConsolidationNode** ([memory_consolidation/node.py](../../../src/mind/cognitive_architecture/nodes/memory_consolidation/node.py)) - Transfers daily memories to long-term storage
 
-### Decision Nodes
+### Decision Node
 
-- **[CognitiveUpdateNode](cognitive_update.md)** - Updates working memory, situation assessment, goals, emotional state
-- **[ActionSelectionNode](action_selection.md)** - Selects actions with context-aware validation and retry
+- **ReflectionNode** ([reflection/node.py](../../../src/mind/cognitive_architecture/nodes/reflection/node.py)) - One LLM call that updates working memory (situation assessment, goals, emotional state), forms new memories, and selects a context-validated action. Its prompt is split at a literal cache-breakpoint marker: everything above (scaffold, world knowledge, format instructions) is formatted once at construction and served from the provider's prompt cache; everything below is per-call state. On retry exhaustion it salvages each output field independently from the last raw response — working memory falls back to the current one (never an empty one), the action floor is WAIT — so a parse failure costs quality, never the cycle.
 
 ## State Management
 
@@ -66,7 +63,7 @@ Node (automatic timing)
 - `conversation_histories: dict[str, list[ConversationMessage]]` - Full conversation state per interaction
 - `daily_memories: list[NewMemory]` - Unconsolidated experiences
 - `chosen_action: Action | None` - Selected action
-- `tokens_used: dict[str, int]` - Token counts per node
+- `tokens_used: dict[str, StepTokenUsage]` - Per-node usage records (prompt/completion split, cache accounting, call counts)
 - `time_ms: dict[str, int]` - Execution time per node
 
 ## Performance Tracking
@@ -112,17 +109,19 @@ class MyLLMNode(LLMNode):
 ```
 
 **Examples**:
-- [action_selection/node.py](../../src/mind/cognitive_architecture/nodes/action_selection/node.py) - With validation retry
-- [memory_query/node.py](../../src/mind/cognitive_architecture/nodes/memory_query/node.py) - Simple query generation
+- [reflection/node.py](../../../src/mind/cognitive_architecture/nodes/reflection/node.py) - With validation retry, salvage fallback, and prompt caching
+- [memory_query/node.py](../../../src/mind/cognitive_architecture/nodes/memory_query/node.py) - Simple query generation
 
 ## Testing
 
 Unit tests mock LLMs with `AsyncMock` and verify behavior.
 
 **Test Examples**:
-- [test_base_node.py](../../tests/unit/test_base_node.py) - Base class testing patterns
-- [test_action_selection_node.py](../../tests/unit/test_action_selection_node.py) - Node-specific tests
-- [test_memory_query_node.py](../../tests/unit/test_memory_query_node.py) - LLM mocking patterns
+- [test_base_node.py](../../../tests/unit/test_base_node.py) - Base class testing patterns
+- [test_reflection_node.py](../../../tests/unit/test_reflection_node.py) - Node-specific tests
+- [test_reflection_fallback.py](../../../tests/unit/test_reflection_fallback.py) - Salvage matrix
+- [test_prompt_caching.py](../../../tests/unit/test_prompt_caching.py) - Caching mechanics
+- [test_memory_query_node.py](../../../tests/unit/test_memory_query_node.py) - LLM mocking patterns
 
 ## Best Practices
 

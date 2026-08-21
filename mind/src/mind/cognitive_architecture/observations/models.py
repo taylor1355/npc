@@ -302,9 +302,10 @@ class GoalDetail(BaseModel):
         Shared by every surface that renders this goal, because two independent
         builds of the same clause drift: they already had differed wording before
         this was factored out. The leading phrase is deliberately NOT included --
-        cognitive_update frames it as a subconscious pull and action_selection as
-        a direction to move toward, and that framing difference is intentional
-        where the clause itself must not be.
+        the observation's own line frames it as a subconscious pull and the
+        reflection prompt's dedicated section as a direction to move toward, and
+        that framing difference is intentional where the clause itself must not
+        be.
 
         Urgency stays the raw simulation value; the percent-of-maximum conversion
         belongs to the simulation tier and re-deriving it here would fork the

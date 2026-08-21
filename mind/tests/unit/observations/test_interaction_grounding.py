@@ -13,14 +13,14 @@ from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action, ActionType
-from mind.cognitive_architecture.nodes.action_selection.node import ActionSelectionNode
-from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.nodes.formatting import format_interaction_status
+from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from mind.cognitive_architecture.observations import (
     Observation,
     StatusObservation,
 )
 from mind.cognitive_architecture.state import PipelineState
+from mind.cognitive_architecture.working_memory import WorkingMemory
 from tests.fixtures.observations import wire_conversation_interaction
 
 
@@ -173,11 +173,11 @@ class TestInteractionStatusRendering:
 
 
 @pytest.mark.asyncio
-class TestActionSelectionRegroundsBelief:
+class TestReflectionRegroundsBelief:
     """End-to-end node test: stale working-memory belief is overridden.
 
     Feeds an observation that says NOT interacting plus a working memory that
-    claims "in conversation". The action_selection prompt must surface the
+    claims "in conversation". The reflection prompt must surface the
     grounded status, and the chosen action must not be act_in_interaction.
     """
 
@@ -185,10 +185,15 @@ class TestActionSelectionRegroundsBelief:
         # LLM mock that would *try* to act in interaction if it could.
         mock_llm = AsyncMock()
         mock_llm.ainvoke.return_value = AIMessage(
-            content='{"chosen_action": {"action": "wander", "parameters": {}}}',
+            content=(
+                '{"updated_working_memory": '
+                '{"situation_assessment": "The conversation has ended"}, '
+                '"new_memories": [], '
+                '"chosen_action": {"action": "wander", "parameters": {}}}'
+            ),
             usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
         )
-        node = ActionSelectionNode(mock_llm)
+        node = ReflectionNode(mock_llm)
 
         obs = Observation(
             entity_id="npc",

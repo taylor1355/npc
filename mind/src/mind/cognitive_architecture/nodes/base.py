@@ -3,6 +3,7 @@
 import json
 import time
 from abc import ABC
+from collections.abc import Callable
 
 from json_repair import loads as json_repair_loads
 from langchain_core.language_models import BaseChatModel
@@ -11,6 +12,8 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, ValidationError
 
+from mind import constants
+from mind.apis.langchain_llm import supports_cache_control
 from mind.cognitive_architecture.state import PipelineState, StepTokenUsage
 from mind.logging_config import get_logger
 
@@ -69,6 +72,8 @@ class LLMNode(Node):
         prompt: PromptTemplate,
         output_model: type[BaseModel] | None = None,
         max_retries: int = 0,
+        static_prefix: str | None = None,
+        cache_control: bool = False,
     ):
         """
         Args:
@@ -76,24 +81,95 @@ class LLMNode(Node):
             prompt: LangChain PromptTemplate with variable validation
             output_model: Pydantic model for structured output, None for raw string
             max_retries: Number of retry attempts on validation failure (default 0)
+            static_prefix: Fully-formatted text prepended before the rendered
+                prompt on every call. Must be byte-identical across calls (build
+                it once via build_static_prefix); a per-call format() is one
+                stray f-string away from a 0% cache hit rate with no error.
+            cache_control: Request a provider cache breakpoint after the static
+                prefix. Only honored when the model is allowlisted and the
+                prefix is long enough (_cache_breakpoint_enabled); otherwise the
+                same bytes are sent as one plain block.
 
         Raises:
-            ValueError: If max_retries > 0 but output_model is None
+            ValueError: If max_retries > 0 but output_model is None, or if
+                cache_control is requested without a static_prefix
         """
         if max_retries > 0 and output_model is None:
             raise ValueError(
                 "max_retries > 0 requires output_model (cannot retry raw string output)"
             )
+        if cache_control and static_prefix is None:
+            raise ValueError("cache_control requires a static_prefix to put the breakpoint after")
 
         self.llm = llm
         self.prompt = prompt
         self.output_model = output_model
         self.max_retries = max_retries
+        self.static_prefix = static_prefix
+        self.cache_control = cache_control
         self.parser = None
 
         # Set up parser if structured output
         if output_model is not None:
             self.parser = PydanticOutputParser(pydantic_object=output_model)
+
+    @staticmethod
+    def build_static_prefix(template_text: str, **static_vars) -> str:
+        """Format a static prompt prefix exactly once, refusing dynamic leaks.
+
+        Everything above a cache breakpoint must be identical across every call
+        and every NPC, so the static template may declare only variables whose
+        values are fixed at construction time. A dynamic variable slipping in
+        would silently fragment the cache per call; failing loudly here is the
+        guard against that.
+
+        Raises:
+            ValueError: If the template declares a variable not in static_vars
+        """
+        template = PromptTemplate.from_template(template_text)
+        unexpected = set(template.input_variables) - set(static_vars)
+        if unexpected:
+            raise ValueError(
+                f"Static prompt prefix declares non-static variables {sorted(unexpected)}; "
+                "nothing above the cache breakpoint may vary between calls"
+            )
+        return template.format(**static_vars)
+
+    def _cache_breakpoint_enabled(self) -> bool:
+        """Whether this node should request a provider cache breakpoint.
+
+        Requires an allowlisted model slug (unknown providers must not receive
+        an unrecognised content-block key) and a prefix above the provider
+        minimums. Test doubles (AsyncMock) have no real string model_name, so
+        caching is structurally off under test and every prompt-rendering
+        assertion sees the plain-string content path -- load-bearing for the
+        ported node tests.
+        """
+        if not self.cache_control or self.static_prefix is None:
+            return False
+        if len(self.static_prefix) < constants.MIN_CACHEABLE_PREFIX_CHARS:
+            return False
+        model = getattr(self.llm, "model_name", None)
+        return isinstance(model, str) and supports_cache_control(model)
+
+    def _build_content(self, dynamic_text: str) -> str | list:
+        """Assemble message content from the static prefix and dynamic suffix.
+
+        The bytes the model sees are identical in all three branches; only the
+        block structure (and the cache_control annotation) differs.
+        """
+        if self.static_prefix is None:
+            return dynamic_text
+        if self._cache_breakpoint_enabled():
+            return [
+                {
+                    "type": "text",
+                    "text": self.static_prefix,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": dynamic_text},
+            ]
+        return self.static_prefix + dynamic_text
 
     def get_format_instructions(self) -> str:
         """Get format instructions with optional enhancement for JSON-only output"""
@@ -108,11 +184,22 @@ class LLMNode(Node):
             f"IMPORTANT: Output ONLY raw JSON. Do NOT wrap in markdown code fences like ```json."
         )
 
-    async def call_llm(self, state: PipelineState, **prompt_vars) -> BaseModel | str:
+    async def call_llm(
+        self,
+        state: PipelineState,
+        *,
+        on_exhausted: Callable[[str | None, Exception], BaseModel] | None = None,
+        **prompt_vars,
+    ) -> BaseModel | str:
         """Call LLM with automatic token tracking and optional retry
 
         Args:
             state: Pipeline state (for token tracking and validation context)
+            on_exhausted: Optional fallback invoked with (last raw response
+                content, last error) after the retry loop fails every attempt on
+                parse/validation errors; its return value is returned in place
+                of raising. Token usage is recorded either way. Transport
+                errors propagate regardless -- there is nothing to salvage.
             **prompt_vars: Variables to format into prompt template
 
         Returns:
@@ -120,11 +207,12 @@ class LLMNode(Node):
         """
         # Format prompt using template (validates required vars)
         prompt_text = self.prompt.format(**prompt_vars)
+        content = self._build_content(prompt_text)
 
         # Raw string output (no retry needed)
         if self.output_model is None:
             start_time = time.time()
-            response = await self.llm.ainvoke([HumanMessage(content=prompt_text)])
+            response = await self.llm.ainvoke([HumanMessage(content=content)])
             elapsed_ms = int((time.time() - start_time) * 1000)
             usage = self._extract_usage(response) or StepTokenUsage.unreported_call()
             # Recorded unconditionally: a step that legitimately cost zero tokens
@@ -137,9 +225,12 @@ class LLMNode(Node):
             )
             return response.content
 
-        # Structured output with retry
-        messages = [HumanMessage(content=prompt_text)]
+        # Structured output with retry. Retries append AFTER messages[0], so the
+        # static prefix and its cache breakpoint survive every retry -- a
+        # retried decision still reads the cache.
+        messages = [HumanMessage(content=content)]
         last_error = None
+        last_content: str | None = None
         max_attempts = self.max_retries + 1
         usage = StepTokenUsage()
         start_time = time.time()
@@ -148,6 +239,7 @@ class LLMNode(Node):
             try:
                 # Call LLM
                 response = await self.llm.ainvoke(messages)
+                last_content = response.content
 
                 # Track usage from this attempt. Every round-trip is counted,
                 # including the ones that failed validation -- retries are real
@@ -205,6 +297,10 @@ class LLMNode(Node):
         # escapes to a handler that cannot reach PipelineState, so this write is
         # the last chance to attribute the spend at all.
         state.tokens_used[self.step_name] = usage
+        if on_exhausted is not None:
+            # The last raw content is retained so the fallback can salvage
+            # whatever parts of the response were valid.
+            return on_exhausted(last_content, last_error)
         raise last_error
 
     def _extract_usage(self, response: AIMessage) -> StepTokenUsage | None:
@@ -215,23 +311,44 @@ class LLMNode(Node):
         us zero". Callers turn None into an explicit unreported round-trip
         rather than into a free one.
 
-        The prompt/completion split and cache_read arrive in usage_metadata
-        already (langchain-core UsageMetadata / InputTokenDetails); this reads
-        them through instead of collapsing everything to total_tokens.
+        cache_reporting is answered from the RAW provider usage dict
+        (``response_metadata["token_usage"]``), never from the normalized
+        ``usage_metadata["input_token_details"]``: langchain_openai >= 1.0
+        always emits input_token_details (as ``{}`` when the provider said
+        nothing), so its presence is a fact about the library, not the
+        provider. Reading it as "the provider reported cache accounting" made
+        cache_reporting True on every metered call, destroying exactly the
+        "told us zero" vs "told us nothing" distinction this field exists to
+        preserve (NPC-1319).
         """
         usage = getattr(response, "usage_metadata", None)
         if not usage:
             return None
 
-        # NotRequired on UsageMetadata: absent means the provider does not report
-        # cache accounting, which is not the same fact as zero cache hits.
-        details = usage.get("input_token_details")
+        # The provider's own usage dict, stashed verbatim by langchain_openai.
+        # Only its prompt_tokens_details can prove cache accounting was
+        # actually reported; OpenRouter adds cache_write_tokens there too.
+        response_metadata = getattr(response, "response_metadata", None) or {}
+        raw = response_metadata.get("token_usage")
+        raw_details = raw.get("prompt_tokens_details") if isinstance(raw, dict) else None
+        cache_reporting = isinstance(raw_details, dict) and "cached_tokens" in raw_details
+
+        if cache_reporting:
+            cached_prompt_tokens = raw_details.get("cached_tokens") or 0
+            cache_write_tokens = raw_details.get("cache_write_tokens") or 0
+        else:
+            # Best-effort read-through of the normalized field. Without raw
+            # accounting a zero here can never be claimed as measured, so
+            # cache_reporting stays False.
+            cached_prompt_tokens = (usage.get("input_token_details") or {}).get("cache_read", 0)
+            cache_write_tokens = 0
 
         return StepTokenUsage(
             prompt_tokens=usage.get("input_tokens", 0),
             completion_tokens=usage.get("output_tokens", 0),
             total_tokens=usage.get("total_tokens", 0),
-            cached_prompt_tokens=(details or {}).get("cache_read", 0),
-            cache_reporting=details is not None,
+            cached_prompt_tokens=cached_prompt_tokens,
+            cache_write_tokens=cache_write_tokens,
+            cache_reporting=cache_reporting,
             model_calls=1,
         )
