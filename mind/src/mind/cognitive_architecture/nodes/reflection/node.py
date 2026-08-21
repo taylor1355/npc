@@ -19,11 +19,12 @@ from pydantic import ValidationError
 from mind.cognitive_architecture.actions import Action, ActionType
 from mind.cognitive_architecture.nodes.base import LLMNode, entity_tag
 from mind.cognitive_architecture.nodes.formatting import (
-    format_interaction_status as _format_interaction_status,
-)
-from mind.cognitive_architecture.nodes.formatting import (
+    format_goal_options,
     format_personality,
     format_substrate_goal,
+)
+from mind.cognitive_architecture.nodes.formatting import (
+    format_interaction_status as _format_interaction_status,
 )
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
@@ -120,6 +121,7 @@ class ReflectionNode(LLMNode):
             substrate_goal=format_substrate_goal(
                 state.observation.goal if state.observation else None
             ),
+            goal_options=format_goal_options(state.observation.goal if state.observation else None),
             retrieved_memories=memories_text,
             recent_events=pformat(state.recent_events),
             observation_text=str(state.observation),

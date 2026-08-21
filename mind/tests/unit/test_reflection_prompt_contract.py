@@ -30,6 +30,7 @@ DYNAMIC_VARIABLES = {
     "personality_dimensions",
     "interaction_status",
     "substrate_goal",
+    "goal_options",
     "retrieved_memories",
     "recent_events",
     "observation_text",

@@ -1563,3 +1563,78 @@ class TestDecideActionTelemetry:
             {"mind_id": "does_not_exist", "observation": self.OBSERVATION},
         )
         assert parse_response(error_result)["protocol_version"] == 1
+
+
+class TestSelectionOutputWireFormat:
+    """The goal-options pick crosses the response as absent-not-null fields.
+
+    The simulation's apply lane keys on the PRESENCE of ``selected_option_id``
+    (present = resolve the retained plan; absent = off-menu answer), so a
+    ``null`` must never appear — it would force every consumer to null-check
+    on top of presence-checking.
+    """
+
+    OBSERVATION = {
+        "entity_id": "entity_test",
+        "current_simulation_time": 100,
+        "status": {"position": [5, 5], "movement_locked": False},
+    }
+
+    async def _decide_with_action(self, action):
+        from mind.cognitive_architecture.state import PipelineState
+
+        server = MCPServer()
+        await server.mcp.call_tool(
+            "create_mind",
+            {
+                "mind_id": "mind_test",
+                "entity_id": "entity_test",
+                "config": {"traits": ["curious"], "initial_long_term_memories": []},
+            },
+        )
+
+        async def mock_process(state: PipelineState) -> PipelineState:
+            state.chosen_action = action
+            return state
+
+        server.minds["mind_test"].pipeline.process = mock_process
+        result = await server.mcp.call_tool(
+            "decide_action",
+            {"mind_id": "mind_test", "observation": self.OBSERVATION},
+        )
+        return parse_response(result)
+
+    @pytest.mark.asyncio
+    async def test_selected_option_id_reaches_the_response(self):
+        from mind.cognitive_architecture.actions import Action
+
+        response = await self._decide_with_action(
+            Action.model_construct(
+                action="interact_with",
+                parameters={"entity_id": "apple_01", "interaction_name": "consume"},
+                selected_option_id="satisfy_hunger:0",
+                selection_rationale="Hunger dominates and the apple is adjacent.",
+            )
+        )
+
+        assert response["status"] == "success"
+        assert response["action"]["selected_option_id"] == "satisfy_hunger:0"
+        assert (
+            response["action"]["selection_rationale"]
+            == "Hunger dominates and the apple is adjacent."
+        )
+
+    @pytest.mark.asyncio
+    async def test_off_menu_answer_omits_the_selection_keys_entirely(self):
+        from mind.cognitive_architecture.actions import Action
+
+        response = await self._decide_with_action(
+            Action.model_construct(action="wait", parameters={})
+        )
+
+        assert response["status"] == "success"
+        assert "selected_option_id" not in response["action"]
+        assert "selection_rationale" not in response["action"]
+        # The pre-existing halves of the action contract are untouched
+        assert response["action"]["action"] == "wait"
+        assert response["action"]["parameters"] == {}

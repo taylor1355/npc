@@ -1,5 +1,7 @@
 """Unit tests for observation models"""
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -294,40 +296,167 @@ class TestBidActionGeneration:
         assert len(bid_actions) == 0
 
 
-class TestSubstrateGoal:
-    """The `goal` key the simulation has always sent, and used to lose.
+# The exact sample payload from the goal-block wire contract (sim repo,
+# docs/reference/minds/observations.md "Goal block wire contract"; NPC-1321).
+# Parsing THIS payload verbatim is the contract test — do not "tidy" its values.
+GOAL_BLOCK_CONTRACT_SAMPLE = {
+    "contract_version": 1,
+    "urgency_max": 1.3,
+    "active_goal": {
+        "template_id": "satisfy_hunger",
+        "label": "Find food",
+        "urgency": 0.8734,
+        "drive_source": "hunger",
+        "preference_alignment": 0.1204,
+        "age_minutes": 14,
+        "interruption_threshold": 1.1354,
+    },
+    "goals": [
+        {
+            "template_id": "satisfy_hunger",
+            "label": "Find food",
+            "urgency": 0.8734,
+            "drive_source": "hunger",
+            "preference_alignment": 0.1204,
+            "is_active": True,
+        },
+        {
+            "template_id": "seek_social_interaction",
+            "label": "Find company",
+            "urgency": 0.3410,
+            "drive_source": "social",
+            "preference_alignment": -0.0312,
+            "is_active": False,
+        },
+        {
+            "template_id": "explore_area",
+            "label": "Explore the area",
+            "urgency": 0.0500,
+            "drive_source": "stimulation",
+            "preference_alignment": 0.0,
+            "is_active": False,
+        },
+    ],
+    "options": [
+        {
+            "option_id": "satisfy_hunger:0",
+            "description": "Apple (consume, 0 away)",
+            "score": 0.6756,
+            "segments": [
+                {
+                    "goal_template_id": "satisfy_hunger",
+                    "goal_label": "Find food",
+                    "steps": [
+                        {
+                            "action": {
+                                "name": "INTERACT_WITH",
+                                "parameters": {
+                                    "entity_id": "apple_01",
+                                    "interaction_name": "consume",
+                                },
+                            },
+                            "target": {
+                                "interaction_name": "consume",
+                                "entity_id": "apple_01",
+                            },
+                            "factors": {
+                                "urgency": 0.8734,
+                                "utility": 0.9100,
+                                "responsiveness": 0.8500,
+                                "policy_modifier": 1.0,
+                            },
+                            "step_score": 0.6756,
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            "option_id": "explore_area:1",
+            "description": "Wander and explore",
+            "score": 0.0050,
+            "segments": [
+                {
+                    "goal_template_id": "explore_area",
+                    "goal_label": "Explore the area",
+                    "steps": [
+                        {
+                            "action": {"name": "WANDER", "parameters": {}},
+                            "target": None,
+                            "factors": {
+                                "urgency": 0.0500,
+                                "utility": 0.1000,
+                                "responsiveness": 1.0,
+                                "policy_modifier": 1.0,
+                            },
+                            "step_score": 0.0050,
+                        }
+                    ],
+                }
+            ],
+        },
+    ],
+    "option_total": 14,
+}
 
-    Before this field was declared, ``Observation`` had six fields and pydantic's
-    default ``extra="ignore"`` dropped ``goal`` on every cycle, so the
-    substrate's active goal never reached a prompt. These pin that it survives
-    validation and that its absence stays harmless.
+
+class TestSubstrateGoal:
+    """The plan-shaped goal block: contract v1 parse posture.
+
+    ``extra="forbid"`` on the goal models is the block's whole point — a key
+    the sim emits that these models do not declare is contract drift that must
+    fail loud, not be silently dropped (the pre-declaration era lost the entire
+    block that way).
     """
 
-    def test_goal_key_survives_validation(self):
-        """Should keep the goal payload the simulation sends, not discard it"""
+    def test_full_contract_sample_payload_parses(self):
+        """The wire contract's own sample payload must validate verbatim"""
         obs = Observation.model_validate(
             {
                 "entity_id": "test_npc",
                 "current_simulation_time": 100,
                 "status": {"position": (0, 0), "movement_locked": False},
-                "goal": {
-                    "active_goal": {
-                        "label": "Find something to eat",
-                        "urgency": 1.21,
-                        "drive_source": "hunger",
-                        "template_id": "satisfy_hunger",
-                    },
-                    "candidate_count": 5,
-                },
+                "goal": GOAL_BLOCK_CONTRACT_SAMPLE,
             }
         )
 
-        assert obs.goal is not None
-        assert obs.goal.active_goal is not None
-        assert obs.goal.active_goal.label == "Find something to eat"
-        assert obs.goal.active_goal.drive_source == "hunger"
-        assert obs.goal.active_goal.template_id == "satisfy_hunger"
-        assert obs.goal.candidate_count == 5
+        goal = obs.goal
+        assert goal is not None
+        assert goal.contract_version == 1
+        assert goal.urgency_max == 1.3
+        assert goal.option_total == 14
+
+        assert goal.active_goal is not None
+        assert goal.active_goal.label == "Find food"
+        assert goal.active_goal.template_id == "satisfy_hunger"
+        assert goal.active_goal.preference_alignment == 0.1204
+        assert goal.active_goal.age_minutes == 14
+        assert goal.active_goal.interruption_threshold == 1.1354
+
+        assert [g.template_id for g in goal.goals] == [
+            "satisfy_hunger",
+            "seek_social_interaction",
+            "explore_area",
+        ]
+        assert [g.is_active for g in goal.goals] == [True, False, False]
+
+        assert len(goal.options) == 2
+        first = goal.options[0]
+        assert first.option_id == "satisfy_hunger:0"
+        assert first.score == 0.6756
+        assert first.confidence is None  # reserved key, absent at tier 0
+        step = first.segments[0].steps[0]
+        assert step.action.name == "INTERACT_WITH"
+        assert step.action.parameters["entity_id"] == "apple_01"
+        assert step.target is not None
+        assert step.target.entity_id == "apple_01"
+        assert step.factors.responsiveness == 0.85
+        assert step.step_score == 0.6756
+
+        # The wander escape hatch: null target, identity responsiveness
+        wander_step = goal.options[1].segments[0].steps[0]
+        assert wander_step.target is None
+        assert wander_step.factors.responsiveness == 1.0
 
     def test_goal_absent_is_valid(self):
         """Should treat a goal-less observation as valid with goal None"""
@@ -346,12 +475,132 @@ class TestSubstrateGoal:
             {
                 "entity_id": "test_npc",
                 "current_simulation_time": 100,
-                "goal": {"candidate_count": 0},
+                "goal": {
+                    "contract_version": 1,
+                    "urgency_max": 1.3,
+                    "goals": [],
+                    "options": [],
+                    "option_total": 0,
+                },
             }
         )
 
         assert obs.goal is not None
         assert obs.goal.active_goal is None
+        assert obs.goal.options == []
+
+    def test_undeclared_root_key_is_rejected(self):
+        """extra="forbid" working: the retired wire key is the probe.
+
+        ``candidate_count`` stopped being emitted when the plan-shaped block
+        shipped; a payload still carrying it is a version-skewed sim, and that
+        must fail loud rather than silently drop the key. (Red-first verified:
+        this test fails under pydantic's default ``extra="ignore"``.)
+        """
+        with pytest.raises(ValidationError):
+            GoalObservation.model_validate({"candidate_count": 5})
+
+    def test_undeclared_nested_key_is_rejected(self):
+        """forbid reaches every level of the block, not just the root"""
+        option = {
+            "option_id": "satisfy_hunger:0",
+            "description": "Apple",
+            "score": 0.5,
+            "segments": [],
+            "not_in_the_contract": True,
+        }
+        with pytest.raises(ValidationError):
+            GoalObservation.model_validate({"options": [option]})
+
+    def test_unknown_contract_version_warns_and_degrades(self, caplog):
+        """A future version must degrade (warn + best-effort), never raise.
+
+        The probe payload carries both an unknown version AND a novel root key,
+        because that is what a real future version looks like — the shed-and-
+        parse path has to survive the key, and the warning must name both the
+        received version and the known set.
+        """
+        payload = dict(GOAL_BLOCK_CONTRACT_SAMPLE)
+        payload["contract_version"] = 2
+        payload["novel_v2_field"] = {"anything": True}
+
+        with caplog.at_level(logging.WARNING):
+            goal = GoalObservation.model_validate(payload)
+
+        assert goal.contract_version == 2
+        assert goal.active_goal is not None  # declared fields still parsed
+        warning = next(r for r in caplog.records if "contract_version" in r.getMessage())
+        assert "2" in warning.getMessage()
+        assert "1" in warning.getMessage()
+
+    def test_known_version_does_not_warn(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            GoalObservation.model_validate(GOAL_BLOCK_CONTRACT_SAMPLE)
+
+        assert not [r for r in caplog.records if "contract_version" in r.getMessage()]
+
+    def test_general_plan_shape_parses(self):
+        """Tier 0 sends 1 segment x 1 step, but the contract's forward promise
+        is that planner tiers grow both under the same version — so the parser
+        must already accept a multi-segment, multi-step option."""
+        step = {
+            "action": {"name": "MOVE_TO", "parameters": {"destination": [3, 4]}},
+            "target": None,
+            "factors": {
+                "urgency": 0.5,
+                "utility": 0.6,
+                "responsiveness": 1.0,
+                "policy_modifier": 1.0,
+            },
+            "step_score": 0.3,
+        }
+        option = {
+            "option_id": "planner:0",
+            "description": "eat apple (hunger) then chat (social)",
+            "score": 0.9,
+            "segments": [
+                {
+                    "goal_template_id": "satisfy_hunger",
+                    "goal_label": "Find food",
+                    "steps": [step, dict(step)],
+                },
+                {
+                    "goal_template_id": "seek_social_interaction",
+                    "goal_label": "Find company",
+                    "steps": [dict(step)],
+                },
+            ],
+        }
+
+        goal = GoalObservation.model_validate({"options": [option], "option_total": 1})
+
+        parsed = goal.options[0]
+        assert len(parsed.segments) == 2
+        assert [len(seg.steps) for seg in parsed.segments] == [2, 1]
+
+    def test_reserved_keys_parse_when_present(self):
+        """``confidence`` and ``segments[].rationale`` are reserved by the
+        contract: never sent at tier 0, but their additive arrival (a planner
+        emitting them) must parse under the same version with no model change."""
+        option = {
+            "option_id": "planner:0",
+            "description": "Planned chain",
+            "score": 0.8,
+            "confidence": 0.72,
+            "segments": [
+                {
+                    "goal_template_id": "satisfy_hunger",
+                    "goal_label": "Find food",
+                    "steps": [],
+                    "rationale": "Food first; company keeps.",
+                }
+            ],
+        }
+
+        goal = GoalObservation.model_validate({"options": [option], "option_total": 1})
+
+        assert goal.options[0].confidence == 0.72
+        assert goal.options[0].segments[0].rationale == "Food first; company keeps."
 
     def test_urgency_is_not_clamped_to_one(self):
         """Should carry the simulation's wider-than-unit urgency domain intact

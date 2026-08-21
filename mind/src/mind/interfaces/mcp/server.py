@@ -463,9 +463,14 @@ class MCPServer:
                     f"[{request_id}] Successfully processed decision for {mind_id}: {result.chosen_action.action}"
                 )
                 telemetry = DecisionTelemetry.from_pipeline_state(result, mind.llm_model)
-                return _success_response(
-                    request_id, result.chosen_action.model_dump(), telemetry.model_dump()
-                )
+                action_payload = result.chosen_action.model_dump()
+                # The goal-options selection contract is absent-not-null: an
+                # off-menu answer omits these keys entirely, so the simulation's
+                # apply lane can key on presence rather than null-checking.
+                for key in ("selected_option_id", "selection_rationale"):
+                    if action_payload.get(key) is None:
+                        action_payload.pop(key, None)
+                return _success_response(request_id, action_payload, telemetry.model_dump())
 
             except ValidationError as e:
                 logger.warning(

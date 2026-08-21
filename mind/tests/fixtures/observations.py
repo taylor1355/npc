@@ -11,6 +11,13 @@ from mind.cognitive_architecture.observations import (
     EntityData,
     GoalDetail,
     GoalObservation,
+    GoalOption,
+    GoalOptionSegment,
+    GoalOptionStep,
+    GoalStepAction,
+    GoalStepFactors,
+    GoalStepTarget,
+    GoalSummary,
     MoodObservation,
     NeedsObservation,
     Observation,
@@ -476,13 +483,69 @@ def create_enriched_observation(simulation_time: int = 100) -> Observation:
             max_value=100.0,
         ),
         goal=GoalObservation(
+            urgency_max=1.3,
             active_goal=GoalDetail(
                 label="Find something to eat",
                 urgency=1.18,
                 drive_source="hunger",
                 template_id="satisfy_hunger",
+                preference_alignment=0.12,
+                age_minutes=14,
+                interruption_threshold=1.25,
             ),
-            candidate_count=5,
+            goals=[
+                GoalSummary(
+                    template_id="satisfy_hunger",
+                    label="Find something to eat",
+                    urgency=1.18,
+                    drive_source="hunger",
+                    preference_alignment=0.12,
+                    is_active=True,
+                ),
+                GoalSummary(
+                    template_id="seek_social_interaction",
+                    label="Find company",
+                    urgency=0.34,
+                    drive_source="social",
+                    preference_alignment=-0.03,
+                ),
+            ],
+            options=[
+                GoalOption(
+                    option_id="satisfy_hunger:0",
+                    description="Talk with Alice about food",
+                    score=0.68,
+                    segments=[
+                        GoalOptionSegment(
+                            goal_template_id="satisfy_hunger",
+                            goal_label="Find something to eat",
+                            steps=[
+                                GoalOptionStep(
+                                    action=GoalStepAction(
+                                        name="INTERACT_WITH",
+                                        parameters={
+                                            "entity_id": "alice_npc",
+                                            "interaction_name": "conversation",
+                                        },
+                                    ),
+                                    target=GoalStepTarget(
+                                        interaction_name="conversation",
+                                        entity_id="alice_npc",
+                                    ),
+                                    factors=GoalStepFactors(
+                                        urgency=1.18,
+                                        utility=0.68,
+                                        responsiveness=0.85,
+                                        policy_modifier=1.0,
+                                    ),
+                                    step_score=0.68,
+                                )
+                            ],
+                        )
+                    ],
+                )
+            ],
+            option_total=5,
         ),
         mood=MoodObservation(
             valence=-0.42,

@@ -3,7 +3,7 @@
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mind.logging_config import get_logger
 
@@ -282,19 +282,30 @@ class NeedsObservation(BaseModel):
 
 
 class GoalDetail(BaseModel):
-    """One goal produced by the simulation's substrate goal system.
+    """The simulation substrate's active goal.
 
     ``urgency`` is deliberately unbounded. The simulation's effective-urgency
     domain is wider than [0, 1] (preference alignment scales the template curve
-    up), and the percent-of-maximum display conversion is owned by the
-    simulation tier. Bounding or percent-formatting the value here would fork
-    that scale, so the raw number is carried and rendered plainly.
+    up; the ceiling crosses the wire as ``GoalObservation.urgency_max``), and
+    the percent-of-maximum display conversion is owned by the simulation tier.
+    Bounding or percent-formatting the value here would fork that scale, so the
+    raw number is carried and rendered plainly.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     label: str
     urgency: float
     drive_source: str = ""
     template_id: str = ""
+    # Cosine similarity of this goal against the NPC's preference vector; may
+    # legitimately be negative (a goal the NPC is disinclined toward).
+    preference_alignment: float = 0.0
+    # How long this goal has been active, in game minutes.
+    age_minutes: int = 0
+    # Urgency a rival goal must exceed to interrupt this one. Optional on the
+    # wire — omitted when unavailable, never sent as a placeholder 0.0.
+    interruption_threshold: float | None = None
 
     def urgency_clause(self) -> str:
         """The parenthesised "(urgency N, arising from your X drive)" tail.
@@ -315,18 +326,179 @@ class GoalDetail(BaseModel):
         return f"(urgency {self.urgency:.2f}{drive})"
 
 
-class GoalObservation(BaseModel):
-    """Substrate goal state: what the NPC's drives have settled on.
+class GoalSummary(BaseModel):
+    """One entry of the substrate's candidate goal field (``goals[]``).
 
-    The simulation has sent this every cycle since the goal system shipped; it
-    was discarded at this boundary because ``Observation`` never declared the
-    field (pydantic's default ``extra="ignore"``). Declaring it is what makes
-    the substrate's own answer to "why act?" visible to the LLM instead of
-    leaving it to re-derive intent from raw need percentages.
+    A deliberately thinner shape than ``GoalDetail``: the list answers *why the
+    options exist*, so it carries no age or interruption data, and exactly one
+    entry has ``is_active`` true iff an ``active_goal`` is present (matching its
+    ``template_id``). There is no per-goal utility on the wire and none may be
+    synthesized here — goals carry urgency; option steps carry utility.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    urgency: float
+    drive_source: str = ""
+    template_id: str = ""
+    preference_alignment: float = 0.0
+    is_active: bool = False
+
+
+class GoalStepAction(BaseModel):
+    """The simulation-vocabulary action a plan step performs.
+
+    Descriptive only, and documented as lossy on the sim side (a directed
+    search-wander and a plain wander serialize identically): the pick is
+    answered with ``option_id``, never reconstructed from this. ``name`` is a
+    free string rather than an enum because the vocabulary is owned by the
+    simulation — a new action name must reach the prompt with no Python change.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    parameters: dict = Field(default_factory=dict)
+
+
+class GoalStepTarget(BaseModel):
+    """The interaction a step is aimed at; ``entity_id`` joins to vision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    interaction_name: str
+    entity_id: str
+
+
+class GoalStepFactors(BaseModel):
+    """The multiplicands of a step's score.
+
+    ``responsiveness`` is ``1.0`` whenever the step has no target —
+    multiplicative identity for "habituation does not apply", not a sentinel.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    urgency: float
+    utility: float
+    responsiveness: float
+    policy_modifier: float
+
+
+class GoalOptionStep(BaseModel):
+    """One step of one plan segment. ``step_score`` equals the product of the
+    factors, and equals the option's ``score`` while options are single-step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: GoalStepAction
+    target: GoalStepTarget | None = None
+    factors: GoalStepFactors
+    step_score: float
+
+
+class GoalOptionSegment(BaseModel):
+    """One goal-scoped stretch of a plan: the goal it serves, then its steps."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal_template_id: str
+    goal_label: str
+    steps: list[GoalOptionStep] = Field(default_factory=list)
+    # Reserved by the contract: never emitted at tier 0; a planner writes it
+    # additively. Declared so its arrival parses under extra="forbid".
+    rationale: str | None = None
+
+
+class GoalOption(BaseModel):
+    """One selectable entry of the substrate's evaluated menu — a serialized
+    plan.
+
+    The sim's tier-0 generator emits exactly one segment with one step per
+    option, but the contract says to parse the GENERAL shape: when planner
+    tiers land, options grow multiple segments and steps under the same
+    contract version, and nothing here may assume the degenerate case.
+
+    ``option_id`` is the authoritative handle for a pick and is valid only for
+    the cycle that produced it — treat it as opaque, never persist it, never
+    compare it across cycles.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    option_id: str
+    description: str
+    score: float
+    segments: list[GoalOptionSegment] = Field(default_factory=list)
+    # Reserved by the contract: absent until a planner computes it (it is
+    # search_confidence x world_confidence — a measurement, never fabricated).
+    confidence: float | None = None
+
+
+# Goal-block wire versions this model set knows how to read. An unknown
+# version degrades (warn + best-effort parse), never raises: a future sim must
+# not be able to kill the decision cycle by bumping a version number.
+KNOWN_GOAL_CONTRACT_VERSIONS = frozenset({1})
+
+
+class GoalObservation(BaseModel):
+    """Substrate goal state: the active pull, the goal field, and the evaluated
+    option menu.
+
+    The wire contract lives in the simulation repo at
+    ``docs/reference/minds/observations.md`` ("Goal block wire contract").
+    ``options`` is the same pool, built by the same code, that the free tier's
+    softmax samples from — selecting the argmax is what a low-temperature
+    sampler does, selecting elsewhere is a reasoned divergence, and neither is
+    an error. ``option_total`` counts the pre-truncation pool, so
+    ``option_total > len(options)`` means a longer menu exists server-side.
+
+    ``extra="forbid"`` is this block's parsing posture (precedent:
+    ``VectorDBQuery``): the sim/mind pair ships in lockstep, and a key the
+    model does not declare is a contract drift that must fail loud rather than
+    be silently dropped.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: int = 1
+    # Ceiling of the urgency domain. Optional so a hand-built observation
+    # cannot fabricate one; the sim sends it on every cycle.
+    urgency_max: float | None = None
     active_goal: GoalDetail | None = None
-    candidate_count: int = 0
+    goals: list[GoalSummary] = Field(default_factory=list)
+    options: list[GoalOption] = Field(default_factory=list)
+    option_total: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_on_unknown_contract_version(cls, data):
+        """Unknown versions degrade, never raise.
+
+        A raise would collapse the decide_action call into an error response —
+        an NPC that silently stops acting because the sim got ahead of the
+        mind. So on an unknown version: warn (naming both the received and the
+        known versions), shed any root keys this model does not declare (a
+        purely additive future version then parses cleanly despite
+        ``extra="forbid"``), and parse the rest best-effort. Runs in
+        ``mode="before"`` deliberately: an ``after`` validator would never fire
+        for exactly the payloads it exists for, because the unknown keys would
+        fail ``extra="forbid"`` first. Known-version payloads are untouched —
+        for them an undeclared key stays a loud contract drift.
+        """
+        if not isinstance(data, dict):
+            return data
+        version = data.get("contract_version", 1)
+        if version in KNOWN_GOAL_CONTRACT_VERSIONS:
+            return data
+        logger.warning(
+            "Goal block carries unknown contract_version %s (known: %s); "
+            "parsing best-effort under the newest known contract.",
+            version,
+            sorted(KNOWN_GOAL_CONTRACT_VERSIONS),
+        )
+        return {key: value for key, value in data.items() if key in cls.model_fields}
 
 
 class ValenceBand(StrEnum):
@@ -458,7 +630,15 @@ class ConversationObservation(BaseModel):
 
 
 class Observation(BaseModel):
-    """Complete structured observation"""
+    """Complete structured observation.
+
+    ``extra`` stays at pydantic's default ``ignore`` here even though the goal
+    models forbid: the simulation's real payload carries at least one root key
+    this model has never declared (``inventory``, emitted for every NPC with an
+    InventoryComponent — all production NPC configs), so ``extra="forbid"`` at
+    this level would reject every live observation until that surface is
+    declared. Tightening this boundary is [NPC-1116]'s class of work.
+    """
 
     entity_id: str  # Mind's entity ID in simulation
     current_simulation_time: int
