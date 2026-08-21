@@ -11,8 +11,7 @@ NPC Cognitive Architecture
 ├── Cognitive Pipeline (cognitive_architecture/)
 │   ├── Memory Query - Generate semantic search queries
 │   ├── Memory Retrieval - Fetch relevant long-term memories
-│   ├── Cognitive Update - Update working memory, form new memories
-│   └── Action Selection - Choose action based on context
+│   └── Reflection - Update working memory, form new memories, choose action
 ├── MCP Server (interfaces/mcp/)
 │   ├── Tool: create_mind - Initialize cognitive pipeline
 │   ├── Tool: decide_action - Process observation → action
@@ -31,7 +30,7 @@ NPC Cognitive Architecture
 
 ### Cognitive Architecture
 
-The cognitive pipeline (`src/mind/cognitive_architecture/`) processes observations through a 4-node async pipeline:
+The cognitive pipeline (`src/mind/cognitive_architecture/`) processes observations through a 3-node async pipeline:
 
 **Memory Systems:**
 - **Working Memory**: Pydantic model tracking situation assessment, active goals, current plan, emotional state
@@ -41,8 +40,7 @@ The cognitive pipeline (`src/mind/cognitive_architecture/`) processes observatio
 **Processing Pipeline:**
 1. **Memory Query**: LLM generates semantic search queries for relevant memories
 2. **Memory Retrieval**: Fetches top-k similar memories from ChromaDB
-3. **Cognitive Update**: Updates working memory with new context, forms new daily memories
-4. **Action Selection**: Chooses action from available options based on full context
+3. **Reflection**: One LLM call updates working memory with new context, forms new daily memories, and chooses the action from the available options
 
 **Node System:**
 - Pipeline nodes extend `Node` (automatic timing) or `LLMNode` (structured output, context-aware validation, retry)

@@ -259,7 +259,7 @@ the tree contains lives under `mind/tests`. Wiring a producer is NPC-1013.
 enumerates every policy declaration, so a fourth one or a changed policy shows up
 immediately. At the time of writing there are three declarations —
 `actions/models.py` (`use_enum_values`), `vector_db_memory.py::VectorDBQuery`
-(`extra="forbid"`), `nodes/cognitive_update/models.py` (`extra="allow"`) — and every
+(`extra="forbid"`), `working_memory.py` (`extra="allow"`) — and every
 model not in that list inherits Pydantic's permissive default, including
 `Observation` and `VectorDBMetadata`, the latter re-validated on every read in
 `VectorDBMemory.search`.

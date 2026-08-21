@@ -41,7 +41,7 @@ Study the Generative Agents paper and identify applicable techniques for our arc
 
 ### What We Have
 - ✅ Daily memory buffer (`state.daily_memories`)
-- ✅ Importance scoring during memory formation (via cognitive_update)
+- ✅ Importance scoring during memory formation (via the reflection node)
 - ✅ Placeholder consolidation node (`MemoryConsolidationNode`)
 - ✅ Combined scoring (relevance + importance + recency)
 
