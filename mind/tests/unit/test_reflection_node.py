@@ -622,6 +622,7 @@ class TestGoalOptionsPromptVariable:
         assert "Option satisfy_hunger:0: Apple (consume, 0 away) (score: 0.68)" in rendered
         assert "serves 'Find food'" in rendered
         assert "utility 0.91" in rendered
+        assert "habituation 0.85" in rendered
         assert "step score 0.68" in rendered
         assert "12 lower-scoring options exist" in rendered
 
