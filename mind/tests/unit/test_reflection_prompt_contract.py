@@ -66,7 +66,8 @@ class TestReflectionPromptContract:
 
         assert set(node.prompt.input_variables) == DYNAMIC_VARIABLES
         assert node.static_prefix is not None
-        assert node.static_prefix.endswith(CACHE_BREAKPOINT_MARKER)
+        # The marker is the split point, never part of the sent bytes
+        assert CACHE_BREAKPOINT_MARKER not in node.static_prefix
         # The formatted prefix contains no unconsumed static placeholders
         assert "{world_knowledge}" not in node.static_prefix
         assert "{format_instructions}" not in node.static_prefix

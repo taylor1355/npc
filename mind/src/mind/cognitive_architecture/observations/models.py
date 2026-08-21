@@ -3,7 +3,7 @@
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mind.logging_config import get_logger
 
@@ -562,6 +562,102 @@ class RelationshipState(BaseModel):
     interaction_count: int = 0
 
 
+class VisibleInteraction(BaseModel):
+    """The interaction a VISIBLE entity is currently engaged in.
+
+    Named ``VisibleInteraction`` rather than mirroring the simulation's
+    ``InteractionSummary`` for the same reason ``RelationshipState`` is not
+    ``RelationshipData`` -- and here the confusion it prevents is not
+    hypothetical. ``StatusObservation.current_interaction`` is a *different wire
+    source with a different shape*: that one is the OBSERVER's own interaction,
+    carrying ``Interaction.to_dict()`` (name, description, needs_filled, ...),
+    while this one is a bystander's, carrying ``InteractionSummary.to_dict()``.
+    They share a wire key and nothing else. Reading one's keys off the other is
+    the NPC-1278 shape, one boundary over.
+
+    ``extra`` is deliberately NOT declared. The simulation populates it with
+    subclass-specific state and its own docstring says generic consumers should
+    not read it, so dropping it here is the intended behaviour rather than an
+    oversight -- recorded because an undeclared field and a forgotten field look
+    identical from this side, which is exactly how this model came to be missing
+    for as long as it was (NPC-1323).
+    """
+
+    interaction_id: str = ""
+    interaction_name: str = ""
+    #: Both identity channels are carried. ``participant_names`` is what renders
+    #: into the prompt; ``participant_ids`` stays available for programmatic
+    #: consumers that need to act on a participant rather than describe one.
+    participant_ids: list[str] = Field(default_factory=list)
+    participant_names: list[str] = Field(default_factory=list)
+    participant_count: int = 0
+    max_participants: int = 1
+    min_participants: int = 1
+    duration_minutes: float = 0.0
+    is_joinable: bool = False
+    #: Empty when joinable; a short token like ``at_capacity`` when not.
+    joinable_reason: str = ""
+
+    def _companions(self, exclude_entity_id: str = "") -> list[str]:
+        """Participant names minus the entity this line is rendered under.
+
+        The simulation's participant lists include EVERY participant, the
+        observed entity included, so rendering them verbatim under that
+        entity's own bullet produces "Alice ... In Conversation with Alice,
+        Bob". ``participant_ids`` and ``participant_names`` are parallel by
+        construction (``get_observation_summary`` fills both from the same
+        ordered list), which is what makes an id-based exclusion possible --
+        and id-based is what we want, because display names are not unique.
+
+        If the two lists ever disagree in length the pairing is unsafe, so this
+        returns every name rather than guessing which one to drop: a redundant
+        name reads oddly, a wrongly dropped one misinforms.
+        """
+        names = [n for n in self.participant_names if n]
+        if not exclude_entity_id or len(self.participant_ids) != len(self.participant_names):
+            return names
+        return [
+            name
+            for pid, name in zip(self.participant_ids, self.participant_names, strict=False)
+            if name and pid != exclude_entity_id
+        ]
+
+    def render_summary(self, exclude_entity_id: str = "") -> str:
+        """One prompt line describing what this entity is doing, and whether
+        the observer could join it.
+
+        Joinability is the point of the line. An NPC deciding whether to
+        approach a group needs the refusal reason *before* it bids, not after a
+        rejected bid comes back. Never raises: this runs on the prompt path
+        every decision cycle, where an exception collapses the cycle into the
+        WAIT fallback.
+
+        ``exclude_entity_id`` drops the entity whose bullet this renders under;
+        see ``_companions``. The participant COUNT is deliberately not adjusted
+        to match -- it is capacity information ("4 of 4"), and the observer
+        needs the real occupancy to reason about joining.
+        """
+        name = self.interaction_name.strip() or UNNAMED_INTERACTION
+        head = f"In {name}"
+
+        others = self._companions(exclude_entity_id)
+        if others:
+            head += f" with {', '.join(others)}"
+
+        facts = [f"{self.participant_count} of {self.max_participants}"]
+        if self.duration_minutes > 0.0:
+            facts.append(f"{self.duration_minutes:.0f} min so far")
+        head += f" ({', '.join(facts)})"
+
+        if self.is_joinable:
+            return f"{head} -- joinable"
+        # The token is data; turning it into words is this layer's job, but it
+        # is only reformatted, never translated into a vocabulary the
+        # simulation does not have.
+        reason = self.joinable_reason.strip().replace("_", " ")
+        return f"{head} -- not joinable{f': {reason}' if reason else ''}"
+
+
 class EntityData(BaseModel):
     """Visible entity with interaction affordances"""
 
@@ -570,6 +666,21 @@ class EntityData(BaseModel):
     position: tuple[int, int]
     interactions: dict[str, dict] = Field(default_factory=dict)
     relationship: RelationshipState | None = None
+    current_interaction: VisibleInteraction | None = None
+
+    @field_validator("current_interaction", mode="before")
+    @classmethod
+    def _idle_entity_has_no_interaction(cls, value: Any) -> Any:
+        """Map the simulation's idle sentinel onto ``None``.
+
+        ``EntityData.to_dict()`` emits ``current_interaction: {}`` for an idle
+        entity rather than omitting the key. Every field on
+        ``VisibleInteraction`` has a default, so ``{}`` would parse cleanly into
+        an all-default instance -- and the renderer would then announce a
+        nameless, zero-participant interaction for every idle entity in view.
+        A falsy payload means idle; say so in the type.
+        """
+        return value or None
 
 
 class VisionObservation(BaseModel):
@@ -701,6 +812,14 @@ class Observation(BaseModel):
                         f"    Relationship: familiarity {rel.familiarity:.2f}, "
                         f"sentiment {rel.sentiment:+.2f}, "
                         f"{rel.interaction_count} shared interactions"
+                    )
+
+                # After the relationship line and before the affordance list:
+                # what this entity is doing now bears on whether to approach it
+                # at all, which is upstream of which interaction to start.
+                if entity.current_interaction:
+                    entity_parts.append(
+                        f"    {entity.current_interaction.render_summary(entity.entity_id)}"
                     )
 
                 if entity.interactions:
