@@ -1,6 +1,6 @@
 """Rendering tests for Observation.__str__
 
-``str(observation)`` is the ``observation_text`` the cognitive_update prompt
+``str(observation)`` is the ``observation_text`` the reflection prompt
 consumes, so anything that does not render here is invisible to the LLM no
 matter how faithfully it crosses the wire.
 """

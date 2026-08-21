@@ -55,8 +55,7 @@ class TestCognitivePipelineIntegration:
         # Assert: Pipeline completed all nodes
         assert "memory_query" in result.time_ms
         assert "memory_retrieval" in result.time_ms
-        assert "cognitive_update" in result.time_ms
-        assert "action_selection" in result.time_ms
+        assert "reflection" in result.time_ms
         assert all(t >= 0 for t in result.time_ms.values())
 
         # Assert: Memory queries generated
@@ -75,11 +74,17 @@ class TestCognitivePipelineIntegration:
         assert isinstance(result.chosen_action.parameters, dict)
 
         # Assert: Token tracking works
-        assert all(
-            node in result.tokens_used
-            for node in ["memory_query", "cognitive_update", "action_selection"]
-        )
+        assert all(node in result.tokens_used for node in ["memory_query", "reflection"])
         assert all(u.total_tokens > 0 for u in result.tokens_used.values())
+
+        # Assert: A clean decision is exactly two round-trips (memory_query +
+        # reflection); more means retries fired, fewer means a step vanished.
+        from mind.cognitive_architecture.state import StepTokenUsage
+
+        folded = StepTokenUsage()
+        for usage in result.tokens_used.values():
+            folded = folded.merged_with(usage)
+        assert folded.model_calls == 2
 
         # Assert: Daily memories have valid structure
         for mem in result.daily_memories:
@@ -172,3 +177,31 @@ class TestCognitivePipelineIntegration:
         # Assert: State maintained and evolved
         assert result2.working_memory is not None
         assert result1.working_memory is not result2.working_memory  # New object created
+
+    async def test_second_decision_reads_the_prompt_cache(self, pipeline):
+        """Two decisions back to back: the reflection prefix should be served
+        from the provider cache on the second (NPC-1319).
+
+        Skipped rather than failed when the provider reports no cache
+        accounting at all -- "told us nothing" is not evidence caching failed
+        (that reading is exactly what the cache_reporting fix preserves).
+        """
+        observation = create_blacksmith_observation(simulation_time=1000)
+        state = PipelineState(
+            observation=observation, personality_traits=["diligent"], available_actions=[]
+        )
+        result1 = await pipeline.process(state)
+
+        state.working_memory = result1.working_memory
+        state.observation = create_blacksmith_observation(simulation_time=1100)
+        result2 = await pipeline.process(state)
+
+        reflection_usage = result2.tokens_used["reflection"]
+        if not reflection_usage.cache_reporting:
+            pytest.skip(
+                "provider reported no cache accounting for this model; "
+                "cannot distinguish zero hits from silence"
+            )
+        assert reflection_usage.cached_prompt_tokens > 0, (
+            "the static reflection prefix should be a cache hit on the second decision"
+        )

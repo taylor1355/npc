@@ -218,7 +218,7 @@ for cluster, cohesiveness in top_cohesive_clusters[:3]:
 ## Dependencies
 
 - ✅ Current memory system (VectorDBMemory, daily buffer) - [vector_db_memory.py](../../src/mind/cognitive_architecture/memory/vector_db_memory.py)
-- ✅ Importance scoring during memory formation - [cognitive_update/node.py](../../src/mind/cognitive_architecture/nodes/cognitive_update/node.py)
+- ✅ Importance scoring during memory formation - [reflection/node.py](../../src/mind/cognitive_architecture/nodes/reflection/node.py)
 - ✅ Placeholder consolidation node to replace - [memory_consolidation/node.py](../../src/mind/cognitive_architecture/nodes/memory_consolidation/node.py)
 - ✅ LLM access for chunking and reflection generation
 - ⚠️ Sleep/downtime periods when consolidation runs (see [sleep_as_cognitive_resource.md](sleep_as_cognitive_resource.md))
