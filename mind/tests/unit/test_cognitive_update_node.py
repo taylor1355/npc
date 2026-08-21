@@ -7,13 +7,13 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from mind.cognitive_architecture.memory import Memory
-from mind.cognitive_architecture.nodes.cognitive_update.models import (
-    NewMemory,
-    WorkingMemory,
-)
 from mind.cognitive_architecture.nodes.cognitive_update.node import CognitiveUpdateNode
 from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.state import PipelineState
+from mind.cognitive_architecture.working_memory import (
+    NewMemory,
+    WorkingMemory,
+)
 
 
 @pytest.mark.asyncio

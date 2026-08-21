@@ -5,8 +5,8 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from mind.apis.langchain_llm import LangChainModel
-from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.state import PipelineState, StepTokenUsage
+from mind.cognitive_architecture.working_memory import WorkingMemory
 from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_MEMORY_STORAGE_PATH
 
 # === Configuration Models ===

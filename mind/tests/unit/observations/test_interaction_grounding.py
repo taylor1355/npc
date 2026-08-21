@@ -14,13 +14,13 @@ from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action, ActionType
 from mind.cognitive_architecture.nodes.action_selection.node import ActionSelectionNode
-from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.nodes.formatting import format_interaction_status
 from mind.cognitive_architecture.observations import (
     Observation,
     StatusObservation,
 )
 from mind.cognitive_architecture.state import PipelineState
+from mind.cognitive_architecture.working_memory import WorkingMemory
 from tests.fixtures.observations import wire_conversation_interaction
 
 

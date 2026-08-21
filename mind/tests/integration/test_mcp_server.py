@@ -4,7 +4,6 @@ import json
 
 import pytest
 
-from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.observations import (
     EntityData,
     NeedsObservation,
@@ -12,6 +11,7 @@ from mind.cognitive_architecture.observations import (
     StatusObservation,
     VisionObservation,
 )
+from mind.cognitive_architecture.working_memory import WorkingMemory
 from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_SMALL_MODEL
 from mind.interfaces.mcp.models import MindConfig
 from mind.interfaces.mcp.server import MCPServer
@@ -210,7 +210,7 @@ async def test_consolidate_memories(mcp_server, test_mind_config):
 
     # Manually add some daily memories for testing
     mind = mcp_server.minds["test_mind_001"]
-    from mind.cognitive_architecture.nodes.cognitive_update.models import NewMemory
+    from mind.cognitive_architecture.working_memory import NewMemory
 
     mind.daily_memories.append(NewMemory(content="Test memory", importance=5.0))
 

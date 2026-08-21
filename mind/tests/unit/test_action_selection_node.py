@@ -8,7 +8,6 @@ from langchain_core.messages import AIMessage
 
 from mind.cognitive_architecture.actions import Action, ActionType, AvailableAction
 from mind.cognitive_architecture.nodes.action_selection.node import ActionSelectionNode
-from mind.cognitive_architecture.nodes.cognitive_update.models import WorkingMemory
 from mind.cognitive_architecture.nodes.formatting import format_substrate_goal
 from mind.cognitive_architecture.observations import (
     GoalDetail,
@@ -17,6 +16,7 @@ from mind.cognitive_architecture.observations import (
     StatusObservation,
 )
 from mind.cognitive_architecture.state import PipelineState
+from mind.cognitive_architecture.working_memory import WorkingMemory
 from tests.fixtures.observations import wire_current_interaction, wire_property_spec
 
 
