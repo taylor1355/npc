@@ -21,6 +21,7 @@ from .models import (
     RelationshipState,
     StatusObservation,
     ValenceBand,
+    VisibleInteraction,
     VisionObservation,
 )
 
@@ -45,5 +46,6 @@ __all__ = [
     "RelationshipState",
     "StatusObservation",
     "ValenceBand",
+    "VisibleInteraction",
     "VisionObservation",
 ]
