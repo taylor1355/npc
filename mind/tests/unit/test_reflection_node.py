@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage
 
 from mind.cognitive_architecture.actions import Action, ActionType, AvailableAction
 from mind.cognitive_architecture.memory import Memory
-from mind.cognitive_architecture.nodes.formatting import format_substrate_goal
+from mind.cognitive_architecture.nodes.formatting import format_goal_options, format_substrate_goal
 from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from mind.cognitive_architecture.observations import (
     GoalDetail,
@@ -445,9 +445,7 @@ class TestSubstrateGoalPromptVariable:
         assert rendered.strip()
 
     def test_goal_without_active_goal_formats_to_the_same_sentinel(self):
-        assert format_substrate_goal(GoalObservation(candidate_count=4)) == format_substrate_goal(
-            None
-        )
+        assert format_substrate_goal(GoalObservation()) == format_substrate_goal(None)
 
     def test_active_goal_formats_as_an_advisory_pull(self):
         rendered = format_substrate_goal(
@@ -500,7 +498,6 @@ class TestReflectionSubstrateGoalArms:
         state = self._state(
             GoalObservation(
                 active_goal=GoalDetail(label="Rest", urgency=0.8, drive_source="energy"),
-                candidate_count=3,
             )
         )
 
@@ -516,3 +513,200 @@ class TestReflectionSubstrateGoalArms:
         await node.process(state)
 
         assert "Seek company" in rendered_prompt(mock_llm)
+
+
+def _goal_with_options() -> GoalObservation:
+    """A small wire-shaped goal block with a two-entry option menu."""
+    return GoalObservation.model_validate(
+        {
+            "contract_version": 1,
+            "urgency_max": 1.3,
+            "active_goal": {
+                "template_id": "satisfy_hunger",
+                "label": "Find food",
+                "urgency": 0.87,
+                "drive_source": "hunger",
+                "preference_alignment": 0.12,
+                "age_minutes": 14,
+            },
+            "goals": [
+                {
+                    "template_id": "satisfy_hunger",
+                    "label": "Find food",
+                    "urgency": 0.87,
+                    "drive_source": "hunger",
+                    "preference_alignment": 0.12,
+                    "is_active": True,
+                }
+            ],
+            "options": [
+                {
+                    "option_id": "satisfy_hunger:0",
+                    "description": "Apple (consume, 0 away)",
+                    "score": 0.6756,
+                    "segments": [
+                        {
+                            "goal_template_id": "satisfy_hunger",
+                            "goal_label": "Find food",
+                            "steps": [
+                                {
+                                    "action": {
+                                        "name": "INTERACT_WITH",
+                                        "parameters": {
+                                            "entity_id": "apple_01",
+                                            "interaction_name": "consume",
+                                        },
+                                    },
+                                    "target": {
+                                        "interaction_name": "consume",
+                                        "entity_id": "apple_01",
+                                    },
+                                    "factors": {
+                                        "urgency": 0.87,
+                                        "utility": 0.91,
+                                        "responsiveness": 0.85,
+                                        "policy_modifier": 1.0,
+                                    },
+                                    "step_score": 0.6756,
+                                }
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "option_id": "explore_area:1",
+                    "description": "Wander and explore",
+                    "score": 0.005,
+                    "segments": [
+                        {
+                            "goal_template_id": "explore_area",
+                            "goal_label": "Explore the area",
+                            "steps": [
+                                {
+                                    "action": {"name": "WANDER", "parameters": {}},
+                                    "target": None,
+                                    "factors": {
+                                        "urgency": 0.05,
+                                        "utility": 0.1,
+                                        "responsiveness": 1.0,
+                                        "policy_modifier": 1.0,
+                                    },
+                                    "step_score": 0.005,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ],
+            "option_total": 14,
+        }
+    )
+
+
+class TestGoalOptionsPromptVariable:
+    """`{goal_options}` must be formattable in every arm, like `{substrate_goal}`"""
+
+    def test_absent_goal_formats_to_a_sentinel_string(self):
+        rendered = format_goal_options(None)
+
+        assert isinstance(rendered, str)
+        assert rendered.strip()
+
+    def test_goal_without_options_formats_to_the_same_sentinel(self):
+        assert format_goal_options(GoalObservation()) == format_goal_options(None)
+
+    def test_options_render_headline_steps_and_truncation(self):
+        rendered = format_goal_options(_goal_with_options())
+
+        assert "2 of 14 evaluated options" in rendered
+        assert "Option satisfy_hunger:0: Apple (consume, 0 away) (score: 0.68)" in rendered
+        assert "serves 'Find food'" in rendered
+        assert "utility 0.91" in rendered
+        assert "habituation 0.85" in rendered
+        assert "step score 0.68" in rendered
+        assert "12 lower-scoring options exist" in rendered
+
+    def test_full_menu_renders_no_truncation_note(self):
+        goal = _goal_with_options()
+        goal = goal.model_copy(update={"option_total": 2})
+
+        assert "not shown" not in format_goal_options(goal)
+
+
+@pytest.mark.asyncio
+class TestReflectionGoalOptions:
+    """The option menu must reach the prompt, and the pick must survive parsing"""
+
+    @pytest.fixture
+    def mock_llm(self):
+        return make_mock_llm()
+
+    @pytest.fixture
+    def node(self, mock_llm):
+        return ReflectionNode(mock_llm)
+
+    def _state(self, goal):
+        return PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(position=(5, 10), movement_locked=False),
+                goal=goal,
+            ),
+            working_memory=WorkingMemory(
+                situation_assessment="Hungry near the orchard",
+                active_goals=[],
+                emotional_state="Peckish",
+            ),
+            available_actions=[AvailableAction(name="wait", description="Wait and observe")],
+        )
+
+    async def test_prompt_receives_the_rendered_options(self, node, mock_llm):
+        await node.process(self._state(_goal_with_options()))
+
+        prompt = rendered_prompt(mock_llm)
+        assert "### Goal Options" in prompt
+        assert "Option satisfy_hunger:0" in prompt
+        assert "score: 0.68" in prompt
+
+    async def test_goalless_state_renders_the_options_sentinel(self, node, mock_llm):
+        await node.process(self._state(None))
+
+        assert "No evaluated options this cycle." in rendered_prompt(mock_llm)
+
+    async def test_selected_option_id_round_trips_from_the_response(self, mock_llm):
+        response = """{
+            "updated_working_memory": {
+                "situation_assessment": "Hungry, apple at hand",
+                "active_goals": ["Eat"],
+                "emotional_state": "Focused"
+            },
+            "new_memories": [],
+            "chosen_action": {
+                "action": "wait",
+                "parameters": {},
+                "selected_option_id": "satisfy_hunger:0",
+                "selection_rationale": "Hunger dominates and the apple is adjacent."
+            }
+        }"""
+        mock_llm.ainvoke.return_value = AIMessage(
+            content=response,
+            usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+        )
+        node = ReflectionNode(mock_llm)
+
+        result = await node.process(self._state(_goal_with_options()))
+
+        assert result.chosen_action.selected_option_id == "satisfy_hunger:0"
+        assert (
+            result.chosen_action.selection_rationale
+            == "Hunger dominates and the apple is adjacent."
+        )
+
+    async def test_absent_selection_fields_stay_none(self, node):
+        """An off-menu answer (no selection fields at all) is fully legal"""
+        result = await node.process(self._state(_goal_with_options()))
+
+        assert result.chosen_action.action == ActionType.WAIT
+        assert result.chosen_action.selected_option_id is None
+        assert result.chosen_action.selection_rationale is None

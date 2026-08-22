@@ -19,11 +19,12 @@ from pydantic import ValidationError
 from mind.cognitive_architecture.actions import Action, ActionType
 from mind.cognitive_architecture.nodes.base import LLMNode, entity_tag
 from mind.cognitive_architecture.nodes.formatting import (
-    format_interaction_status as _format_interaction_status,
-)
-from mind.cognitive_architecture.nodes.formatting import (
+    format_goal_options,
     format_personality,
     format_substrate_goal,
+)
+from mind.cognitive_architecture.nodes.formatting import (
+    format_interaction_status as _format_interaction_status,
 )
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
@@ -106,6 +107,8 @@ class ReflectionNode(LLMNode):
         # Format available actions
         actions_text = "\n".join([f"- {str(action)}" for action in state.available_actions])
 
+        goal_obs = state.observation.goal if state.observation else None
+
         output = await self.call_llm(
             state,
             # Salvage instead of raise: a parse failure must not cost the whole
@@ -118,9 +121,8 @@ class ReflectionNode(LLMNode):
             # Ground the "am I interacting?" belief in the fresh observation so
             # a stale working-memory belief gets corrected this cycle (NPC-688).
             interaction_status=_format_interaction_status(state.observation),
-            substrate_goal=format_substrate_goal(
-                state.observation.goal if state.observation else None
-            ),
+            substrate_goal=format_substrate_goal(goal_obs),
+            goal_options=format_goal_options(goal_obs),
             retrieved_memories=memories_text,
             recent_events=pformat(state.recent_events),
             observation_text=str(state.observation),

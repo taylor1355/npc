@@ -38,6 +38,28 @@ class Action(BaseModel):
         default_factory=dict,
         description="Action parameters as key-value pairs. Use exact parameter names from the action description.",
     )
+    # Selection-output fields for the substrate's Goal Options menu. Both are
+    # optional: an absent selected_option_id is a fully legal off-menu answer
+    # (bid responses, act_in_interaction, or simply an action the menu did not
+    # offer). When present, the simulation resolves the id against the plan it
+    # retained for this cycle, so it must be echoed verbatim — the sim treats
+    # an unresolvable id loudly, never silently.
+    selected_option_id: str | None = Field(
+        default=None,
+        description=(
+            "When the chosen action takes one of the entries under 'Goal Options', "
+            "the option_id of that entry, echoed verbatim. Omit entirely when "
+            "acting off-menu."
+        ),
+    )
+    selection_rationale: str | None = Field(
+        default=None,
+        description=(
+            "One short sentence on why this option was chosen over the others "
+            "(or why an off-menu action beat the menu). Omit when there is "
+            "nothing to say."
+        ),
+    )
 
     def __str__(self) -> str:
         """Format action for LLM consumption"""

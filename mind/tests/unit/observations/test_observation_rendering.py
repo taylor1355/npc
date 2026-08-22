@@ -75,7 +75,7 @@ class TestControlArmRendering:
         assert str(_base_observation()) == GOLDEN_UNENRICHED
 
     def test_goal_present_but_inactive_renders_nothing_extra(self):
-        obs = _base_observation(goal=GoalObservation(candidate_count=3))
+        obs = _base_observation(goal=GoalObservation())
 
         assert str(obs) == GOLDEN_UNENRICHED
 
@@ -92,7 +92,6 @@ class TestSubstrateGoalRendering:
                     drive_source="hunger",
                     template_id="satisfy_hunger",
                 ),
-                candidate_count=5,
             )
         )
 

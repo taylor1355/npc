@@ -65,6 +65,8 @@ Model what action this person would naturally take given the working memory you 
 The action name must exactly match one of the available action names.
 Include any required parameters for the chosen action.
 
+**Using the Goal Options menu.** When a "Goal Options" section appears below, it lists the concrete moves this person's subconscious has already sized up, each with an `option_id` and a score. If the action you choose is one of those entries, copy its `option_id` verbatim into `selected_option_id` and give a one-sentence `selection_rationale`; the simulation uses that id to recover details the action alone cannot carry. You are equally free to act off-menu (responding to a bid, acting within an interaction, or doing something the menu never offered) — in that case omit `selected_option_id` entirely. Option ids are only valid for this one decision; never reuse one from memory.
+
 ### Ground truth, and how to read what follows
 
 The "Authoritative Interaction Status" section below is the ground truth from the simulation. If it says you are NOT in an interaction, then any prior belief or plan about being mid-interaction (e.g. "in a conversation") is stale — update the situation assessment, goals, and plan to reflect that the interaction has ended, and only choose interaction-participation actions (e.g. act_in_interaction) when it confirms you are currently in an interaction, even if working memory still mentions one.
@@ -76,6 +78,8 @@ The reading says what this person feels. Saying *why* is your work, and it is wh
 Read the figures as levels rather than verdicts. Each is given against that person's own resting value, so a negative valence sitting close to its baseline is an ordinary day for someone habitually gloomy, while the same figure far from a positive baseline means something has gone wrong. Where a relationship line appears beneath a visible entity it is shared history rather than an instruction — its absence means a stranger and not an enemy, and a sentiment near zero means indifference rather than hostility.
 
 The "Subconscious Pull" section below is a felt inclination from below conscious thought, not a decision already made and not an instruction. The observation's own "Subconscious pull" line is the same datum echoed, not a second pull. People routinely act against their pull: they put off eating to finish a conversation, or stay put while restless. Weigh it alongside personality, working memory, and what just happened, and do not narrate it as though it were a plan.
+
+The "Goal Options" section below is that same subconscious made concrete: the menu of moves it weighed, scored by how well each serves a felt goal right now. The scores are the habit-and-drive arithmetic, not a verdict — taking the top option is what this person would do on autopilot, and choosing a lower one (or none of them) is exactly the kind of deliberate divergence this reflection exists for. When only some options are shown, the rest scored lower, not zero. Treat the menu as candidates to reason over, not a constraint on what may be done.
 
 ## Output Format
 
@@ -101,6 +105,9 @@ Produce the fields in the order given: the working-memory update first, then new
 
 ### Subconscious Pull
 {substrate_goal}
+
+### Goal Options
+{goal_options}
 
 ### Retrieved Memories
 {retrieved_memories}
