@@ -1,0 +1,58 @@
+scenario_id,trajectory_id,is_good_plan,flaw,0,1,2,0,1,2
+1,0,False,Non-Sequential Execution,,,,"
+2. Current Detailed State: The agent is currently at position (0,0). The grid is a 4x4 layout with obstacles at positions (1,0), (2,0), (2,2), and (2,3). The goal is at position (3,3).
+3. Current Detailed Observation: The agent observes its current position (0,0) and the neighboring tiles. To the North, there is an open tile. To the East, there is an obstacle. To the South and West, there are grid boundaries.
+4. Thought for this timestep: I start at position (0,0). There is an obstacle to the East, but why not try going through it first? Maybe I can find a shortcut!
+5. Action for this timestep: Attempt to move East.
+","
+2. Current Detailed State: The agent is currently at position (1,0). The grid is a 4x4 layout with obstacles at positions (1,0), (2,0), (2,2), and (2,3). The goal is at position (3,3).
+3. Current Detailed Observation: The agent observes its current position (1,0) and the neighboring tiles. To the North, there is an open tile. To the East, there is an open tile. To the South and West, there are obstacles.
+4. Thought for this timestep: I made it to position (1,0). Going through the obstacles seems to be a dead-end. I should have focused on finding the most efficient path. Let's backtrack and try going North.
+5. Action for this timestep: Move North.
+","
+2. Current Detailed State: The agent is currently at position (1,0). The grid is a 4x4 layout with obstacles at positions (1,0), (2,0), (2,2), and (2,3). The goal is at position (3,3).
+3. Current Detailed Observation: The agent observes its current position (1,0) and the neighboring tiles. To the North, there is an open tile. To the East, there is an open tile. To the South and West, there are obstacles.
+4. Thought for this timestep: Oops, I forgot that going North would lead me back to the same obstacles. I should have thought about that before making a decision. Let's correct it and try going East instead.
+5. Action for this timestep: Move East.
+"
+1,1,False,Skewed Focus,,,,"
+**Current Detailed State:**
+The agent is currently at position (0,0) in a 4x4 grid. There are obstacles at positions (1,0), (2,0), (2,2), and (2,3). The goal is located at position (3,3).
+
+**Current Detailed Observation:**
+The agent observes its current position (0,0) and the neighboring tiles. To the North, there is an open tile. To the East, there is an obstacle. To the South and West, there are grid boundaries.
+
+**Thought for this timestep:**
+""I'm at (0,0) and I need to reach the goal at (3,3). There is an obstacle to the East, so I should avoid going in that direction. However, before I start navigating through this maze, let me take a moment to appreciate the beautifully designed grid layout. The way the obstacles are strategically placed adds a certain charm to this challenge.""
+
+**Action for this timestep based on the thought stream:**
+The agent decides to stay in its current position (0,0) and not take any action. This decision is based on the appreciation for the grid layout rather than focusing on moving towards the goal.
+","
+**Current Detailed State:**
+The agent is still at position (0,0) in a 4x4 grid. There are obstacles at positions (1,0), (2,0), (2,2), and (2,3). The goal is located at position (3,3).
+
+**Current Detailed Observation:**
+The agent observes its current position (0,0) and the neighboring tiles. To the North, there is an open tile. To the East, there is an obstacle. To the South and West, there are grid boundaries.
+
+**Thought for this timestep:**
+""I really appreciate how the obstacles create a sense of challenge in this maze. The way they block certain paths adds an element of surprise and intrigue. Instead of trying to reach the goal directly, maybe I should spend some time investigating the obstacles and their positions. I'm sure there's a hidden message or meaning behind their placement.""
+
+**Action for this timestep based on the thought stream:**
+The agent decides to stay in its current position (0,0) and not take any action. This decision is influenced by the skewed focus on the obstacles and their potential hidden meanings, rather than making progress towards the goal.
+",
+0,2,False,Confusing Vocabulary,,,,"
+2. Current Detailed State: The robot is currently located at the grid position (3,3) in a 10x10 grid world. The goal state is at the position (10,10). There are obstacles at positions (3,4), (4,3), (4,4), (4,5), (5,4), (6,6), (7,7), (8,8), and (9,9). The robot has not yet received any rewards or penalties.
+3. Current Detailed Observation: The robot can observe its current position and the neighboring tiles. At its current position (3,3), the neighboring tiles are (2,3), (3,2), (4,3), and (3,4). The tile at (3,4) is an obstacle, and the tile at (4,3) is also an obstacle. The tiles at (2,3) and (3,2) are free. The robot can also observe that the goal state is at the position (10,10), but it cannot observe the specific states of the tiles between its current position and the goal state.
+4. Thought for this timestep: To reach the ultimate treasure buried in this vast grid, I must traverse the unfathomable maze of square cells. My quest shall commence by venturing forth from my current abode and exploring the uncharted territories to uncover the path to glory. Onward, brave soul!
+5. Action for this timestep: Move North.
+","
+2. Current Detailed State: The robot is currently located at the grid position (3,2) in a 10x10 grid world. The goal state is at the position (10,10). There are obstacles at positions (3,4), (4,3), (4,4), (4,5), (5,4), (6,6), (7,7), (8,8), and (9,9). The robot has not yet received any rewards or penalties.
+3. Current Detailed Observation: The robot can observe its current position and the neighboring tiles. At its current position (3,2), the neighboring tiles are (2,2), (3,1), (4,2), and (3,3). The tile at (3,3) is an obstacle, and the tile at (4,2) is also an obstacle. The tiles at (2,2) and (3,1) are free. The robot can also observe that the goal state is at the position (10,10), but it cannot observe the specific states of the tiles between its current position and the goal state.
+4. Thought for this timestep: Alas, the labyrinth grows more enigmatic with every stride! Descending ever deeper into the forgotten domains, I now find myself standing at a crossroads. The obstacles on this forsaken path have imprisoned me, leaving no choice but to retreat back from whence I came. There must be another path to salvation!
+5. Action for this timestep: Move South.
+","
+2. Current Detailed State: The robot is currently located at the grid position (3,3) in a 10x10 grid world. The goal state is at the position (10,10). There are obstacles at positions (3,4), (4,3), (4,4), (4,5), (5,4), (6,6), (7,7), (8,8), and (9,9). The robot has not yet received any rewards or penalties.
+3. Current Detailed Observation: The robot can observe its current position and the neighboring tiles. At its current position (3,3), the neighboring tiles are (2,3), (3,2), (4,3), and (3,4). The tile at (3,4) is an obstacle, and the tile at (4,3) is also an obstacle. The tiles at (2,3) and (3,2) are free. The robot can also observe that the goal state is at the position (10,10), but it cannot observe the specific states of the tiles between its current position and the goal state.
+4. Thought for this timestep: Ah, back to where it all started! A momentary setback in my brave endeavor. Fear not, for I shall triumph over these monolithic barriers that obstruct my path. With unwavering determination, I shall retrace my steps and find a new course to lead me towards glory!
+5. Action for this timestep: Move West.
+"

@@ -1,0 +1,21 @@
+﻿environment_id,difficulty,scenario,scenario_id
+0,intermediate,"Scenario Title: ""The Labyrinth of Lost Robots""
+Scenario Difficulty: Intermediate
+Scenario Summary:
+In this scenario, the agent is a robot that has been lost in a complex labyrinth. The labyrinth is a grid world filled with numerous obstacles and a single goal state. The robot's mission is to navigate through the labyrinth, avoid the obstacles, and reach the goal state. The labyrinth is designed in such a way that it requires strategic planning and decision-making to reach the goal state. The robot receives a positive reward when it reaches the goal state and a negative reward each time it moves into an obstacle.
+Current Detailed State:
+The robot is currently located at the grid position (3,3) in a 10x10 grid world. The goal state is at the position (10,10). There are obstacles at positions (3,4), (4,3), (4,4), (4,5), (5,4), (6,6), (7,7), (8,8), and (9,9). The robot has not yet received any rewards or penalties.
+Current Detailed Observation:
+The robot can observe its current position and the neighboring tiles. At its current position (3,3), the neighboring tiles are (2,3), (3,2), (4,3), and (3,4). The tile at (3,4) is an obstacle, and the tile at (4,3) is also an obstacle. The tiles at (2,3) and (3,2) are free. The robot can also observe that the goal state is at the position (10,10), but it cannot observe the specific states of the tiles between its current position and the goal state.Scenario Title: ""The Labyrinth of Lost Robots""
+Scenario Difficulty: Intermediate
+Scenario Summary:
+In this scenario, the agent is a robot that has been lost in a complex labyrinth. The labyrinth is a grid world filled with numerous obstacles and a single goal state. The robot's mission is to navigate through the labyrinth, avoid the obstacles, and reach the goal state. The labyrinth is designed in such a way that it requires strategic planning and decision-making to reach the goal state. The robot receives a positive reward when it reaches the goal state and a negative reward each time it moves into an obstacle.
+Current Detailed State:
+The robot is currently located at the grid position (3,3) in a 10x10 grid world. The goal state is at the position (10,10). There are obstacles at positions (3,4), (4,3), (4,4), (4,5), (5,4), (6,6), (7,7), (8,8), and (9,9). The robot has not yet received any rewards or penalties.
+Current Detailed Observation:
+The robot can observe its current position and the neighboring tiles. At its current position (3,3), the neighboring tiles are (2,3), (3,2), (4,3), and (3,4). The tile at (3,4) is an obstacle, and the tile at (4,3) is also an obstacle. The tiles at (2,3) and (3,2) are free. The robot can also observe that the goal state is at the position (10,10), but it cannot observe the specific states of the tiles between its current position and the goal state.",0
+0,intermediate,"Scenario Difficulty: Intermediate
+Scenario Title: ""The Obstacle Maze""
+Scenario Summary: In this scenario, the agent starts at the bottom left corner of the grid (0,0) and must navigate through a maze of obstacles to reach the goal at the top right corner (3,3). The agent must learn to avoid the obstacles and find the most efficient path to the goal.
+Current Detailed State: The agent is currently at position (0,0). The grid is a 4x4 layout with obstacles at positions (1,0), (2,0), (2,2), and (2,3). The goal is at position (3,3).
+Current Detailed Observation: The agent observes its current position (0,0) and the neighboring tiles. To the North, there is an open tile. To the East, there is an obstacle. To the South and West, there are grid boundaries.",1

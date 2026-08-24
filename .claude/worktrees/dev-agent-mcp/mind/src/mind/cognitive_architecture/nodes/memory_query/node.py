@@ -1,0 +1,42 @@
+"""Memory query generation node"""
+
+from pathlib import Path
+from pprint import pformat
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.prompts import PromptTemplate
+
+from mind.cognitive_architecture.nodes.base import LLMNode
+from mind.cognitive_architecture.state import PipelineState
+from mind.logging_config import get_logger
+
+from .models import MemoryQueryOutput
+
+logger = get_logger()
+
+
+class MemoryQueryNode(LLMNode):
+    """Generates diverse queries to search long-term memory"""
+
+    step_name = "memory_query"
+
+    def __init__(self, llm: BaseChatModel):
+        # Load prompt template
+        prompt_path = Path(__file__).parent / "prompt.md"
+        prompt = PromptTemplate.from_template(prompt_path.read_text())
+
+        super().__init__(llm, prompt, output_model=MemoryQueryOutput, max_retries=2)
+
+    async def process(self, state: PipelineState) -> PipelineState:
+        """Generate memory queries from observation"""
+        output = await self.call_llm(
+            state,
+            working_memory=str(state.working_memory),
+            observation=str(state.observation),
+            format_instructions=self.get_format_instructions()
+        )
+
+        state.memory_queries = output.queries
+        logger.debug(f"Generated {len(output.queries)} memory queries: {output.queries}")
+        return state

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//mnt/c/Users/hearn/Dev/gamedev/npc-simulation/docs/**)",
+      "Bash(tree:*)",
+      "Bash(poetry show:*)",
+      "Read(//mnt/c/Users/hearn/Dev/gamedev/npc-simulation/src/contracts/actions/**)",
+      "Read(//mnt/c/Users/hearn/Dev/gamedev/npc-simulation/src/field/**)",
+      "Read(//mnt/c/Users/hearn/Dev/gamedev/npc-simulation/src/clients/simple/**)",
+      "Read(//mnt/c/Users/hearn/Dev/gamedev/npc-simulation/src/minds/**)",
+      "Read(//home/hearn/.claude/**)",
+      "Read(//mnt/c/Users/hearn/Dev/gamedev/npc-simulation/**)",
+      "Bash(git rev-list:*)",
+      "Bash(xargs cat:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
