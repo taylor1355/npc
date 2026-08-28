@@ -250,7 +250,14 @@ class TestMindEvent:
 
         formatted = str(event)
         assert formatted.strip()
-        assert not formatted.startswith("Unknown event type")
+        # NOT a startswith check against the retired "Unknown event type"
+        # literal: that string no longer appears anywhere in __str__, so the
+        # assertion could not fail and guarded nothing. What must hold is that
+        # the arm SAYS something specific -- the event type named in prose or
+        # at minimum echoed with its payload, never a bare class repr.
+        assert "MindEvent(" not in formatted
+        assert formatted.strip() != ""
+        assert formatted.strip() != str(event_type)
 
     def test_bid_received_renders_the_counter_offer(self):
         """A counter-offer must survive into the prompt.
