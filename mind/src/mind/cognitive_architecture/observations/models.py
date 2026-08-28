@@ -797,11 +797,37 @@ class ConversationObservation(BaseModel):
 class Observation(BaseModel):
     """Complete structured observation.
 
-    ``extra`` stays at pydantic's default ``ignore`` here even though the goal
-    models forbid. Every root key the simulation emits is now declared below
-    -- ``inventory`` was the last undeclared one -- so tightening this to
-    ``extra="forbid"`` is the remaining step of [NPC-1116].
+    ``extra="forbid"``: the built-in mind and the simulation ship in lockstep,
+    so a root key this model does not declare is contract drift, not noise
+    (precedent: every ``Goal*`` model; decided on NPC-1116). Every root key the
+    simulation emits is declared below -- verified against simulation
+    ``origin/main`` @ a2ac2f5a by resolving ``get_type()`` for every
+    observation added in ``entity_controller.gd`` and
+    ``npc_controller.gd::get_current_state_observation``. The wire root key set
+    is mechanically ``{entity_id, current_simulation_time}`` plus one key per
+    ``get_type()``, because ``composite_observation.gd::get_data`` builds it
+    that way and nothing filters it afterwards.
+
+    This is the one place in this module that RAISES rather than degrades, and
+    the exception is deliberate. Elsewhere a malformed payload degrades because
+    the alternative is a SILENT stop; here the failure is loud by construction
+    -- ``server.py`` returns an error response and
+    ``mcp_mind_client.gd::_on_decide_action_response`` logs it at ERROR, naming
+    the offending key, before falling back to wait. Loud-and-inert is the trade;
+    silent-and-wrong is what NPC-1116 exists to end.
+
+    CONSEQUENCE FOR RELEASE ORDERING: a new observation type must land HERE
+    FIRST, and be deployed -- the server is a long-lived process. Merging a
+    simulation-side ``add_observation`` before the matching field exists here
+    takes every MCP NPC to wait, every cycle, until a code change ships.
+
+    ``conversations`` is declared but never on the wire: it is lifted out of
+    ``INTERACTION_OBSERVATION`` events by
+    ``server.py::_extract_conversation_observations``. It stays declared so
+    ``model_dump()`` round-trips through ``model_validate`` under forbid.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     entity_id: str  # Mind's entity ID in simulation
     current_simulation_time: int

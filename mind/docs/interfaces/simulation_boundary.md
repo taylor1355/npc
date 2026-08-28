@@ -83,6 +83,35 @@ or `to_dict()` that emits it.
 - `ACTION_CHOSEN` is a `MindEventType` member with no counterpart in
   `mind_event.gd::Type`, so the simulation never emits it.
 
+## Parsing posture
+
+`Observation` is `extra="forbid"` (NPC-1116). A root key this server does not
+declare raises a `ValidationError`, `server.py` returns an error response, and
+`mcp_mind_client.gd::_on_decide_action_response` logs it at ERROR and falls back
+to a wait. That is loud but **total**: every MCP NPC stops acting, every cycle,
+until a code change ships.
+
+The consequence is a cross-repo ordering rule that runs opposite to the old one:
+
+- **A new observation type must be declared here first, and deployed**, before
+  the simulation-side `add_observation` merges. The server is a long-lived
+  process launched from `.mind_launch.json` against a sibling clone, so pulling
+  simulation `main` without restarting it is enough to cause the outage.
+- Nested blocks are **not** uniformly forbidding. The `Goal*` family and
+  `InventoryObservation` forbid; `StatusObservation`, `NeedsObservation`,
+  `VisionObservation`, `MoodObservation`, `EntityData` and `VisibleInteraction`
+  keep pydantic's default `ignore`. **Root forbid catches a new BLOCK, not a new
+  FIELD inside an existing block.**
+- `ConversationObservation` must never gain forbid: `server.py` validates it
+  inside `try/except ValidationError: continue`, so forbidding there would
+  silently skip every `INTERACTION_OBSERVATION` — the same bug one layer over.
+
+**The parity audit cannot see this class of defect.** `audit_mcp_parity.py`
+scans `audit_scope.substrate_files` for substrate-component getters and exports;
+inventory is not substrate state, and the audit stays green through both this
+bug and any regression of it. Forbid is the mechanism precisely because auditing
+is not.
+
 ## See also
 
 - [interfaces/mcp.md](mcp.md) — the protocol this server exposes
