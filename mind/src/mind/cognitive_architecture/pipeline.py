@@ -5,6 +5,7 @@ from langgraph.graph import END, StateGraph
 
 from mind.logging_config import get_logger
 
+from .memory.retrieval import RetrievalWeights
 from .memory.vector_db_memory import VectorDBMemory
 from .nodes.base import entity_tag
 from .nodes.memory_query.node import MemoryQueryNode
@@ -18,13 +19,18 @@ logger = get_logger()
 class CognitivePipeline:
     """Orchestrates the cognitive processing pipeline using LangGraph"""
 
-    def __init__(self, llm: BaseChatModel, memory_store: VectorDBMemory):
+    def __init__(
+        self,
+        llm: BaseChatModel,
+        memory_store: VectorDBMemory,
+        retrieval_weights: RetrievalWeights | None = None,
+    ):
         self.llm = llm
         self.memory_store = memory_store
 
         # Initialize nodes
         self.memory_query_node = MemoryQueryNode(llm)
-        self.memory_retrieval_node = MemoryRetrievalNode(memory_store)
+        self.memory_retrieval_node = MemoryRetrievalNode(memory_store, weights=retrieval_weights)
         self.reflection_node = ReflectionNode(llm)
 
         # Build the graph

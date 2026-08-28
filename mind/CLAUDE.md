@@ -95,10 +95,28 @@ observation fixtures set: none of them carries a `MindEvent`.
 
 - **Vector storage** via ChromaDB with semantic search
 - **Metadata:** timestamp, location, unique ID
-- **Importance scoring:** 1-10 scale via LLM evaluation
+- **Importance scoring:** 1-10 scale via LLM evaluation, emitted by reflection
+  alongside the chosen action — no separate call
 - **Deduplication:** ID-based filtering in retrieval
 - **Daily buffer:** Consolidates to long-term on demand
-- **Recency decay:** Applied in retrieval scoring
+- **Retrieval scoring:** `memory/retrieval.py` — Park's three terms (relevance,
+  importance, recency) at his published equal weights, over a candidate pool
+  wider than `top_k`. Terms return `None` to abstain when the data is absent,
+  and the surviving weights renormalize; a term with no data never votes in
+  either direction. Configurable globally, per mind, or per query. Timestamps
+  are **elapsed game minutes** and the decay base is per game **hour** [NPC-400]
+- **Min-max normalized per pool**, following Park — and load-bearing, not
+  cosmetic: the terms' *realized* ranges differ ~3x (measured: relevance 0.31,
+  importance 0.60, recency 0.98), so without it equal weights would mean equal
+  coefficients on unequal ranges rather than equal influence. A score is
+  therefore relative to its candidate pool, which is sound because nothing
+  compares scores across queries. Measurement:
+  `tests/unit/memory/test_term_spread_measurement.py`
+- **Recency reinforcement:** retrieval pulls a memory's decay anchor toward the
+  present via an EMA seeded at creation, so repeatedly-recalled memories stay
+  "recent" while a single recall leaves most of a memory's age intact. Park's
+  decay-from-last-retrieval (alpha 1.0) and decay-from-creation (alpha 0.0) are
+  its endpoints. Costs one metadata update per retrieved memory, no LLM call
 
 ### Working Memory (Structured State)
 

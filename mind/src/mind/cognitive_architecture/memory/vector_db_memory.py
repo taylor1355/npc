@@ -4,13 +4,26 @@ import os
 
 import chromadb
 from chromadb.errors import NotFoundError
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sentence_transformers import SentenceTransformer
 
-from mind.constants import DEFAULT_EMBEDDING_MODEL
+from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_RECENCY_REINFORCEMENT_ALPHA
+from mind.logging_config import get_logger
 
 from ..id_generator import IdGenerator
-from .models import Memory
+from .models import ImportanceScore, Memory, VectorDBMetadata
+from .retrieval import (
+    RetrievalContext,
+    RetrievalWeights,
+    ScoredCandidate,
+    candidate_pool_size,
+    default_terms,
+    rank,
+    reinforced_time,
+    should_reinforce,
+)
+
+logger = get_logger()
 
 
 def _delete_collection_if_exists(client: chromadb.ClientAPI, collection_name: str) -> None:
@@ -30,22 +43,6 @@ def _delete_collection_if_exists(client: chromadb.ClientAPI, collection_name: st
         pass
 
 
-class VectorDBMetadata(BaseModel):
-    """Metadata stored with each memory in ChromaDB"""
-
-    importance: float
-    timestamp: int | None = None
-    location_x: int | None = None
-    location_y: int | None = None
-    tags: list[str] = Field(default_factory=list)
-
-    def get_location(self) -> tuple[int, int] | None:
-        """Extract location tuple if both coordinates present"""
-        if self.location_x is not None and self.location_y is not None:
-            return (self.location_x, self.location_y)
-        return None
-
-
 class VectorDBQuery(BaseModel):
     """Query parameters for vector database search
 
@@ -60,8 +57,14 @@ class VectorDBQuery(BaseModel):
 
     query: str
     top_k: int = 5
-    importance_weight: float = 0.3
-    recency_weight: float = 0.2
+
+    # Per-query weight override. None uses the module defaults (Park's 1/1/1).
+    # This replaces the previous importance_weight/recency_weight pair, which
+    # expressed relevance only implicitly and could drive it negative; those
+    # fields are removed rather than deprecated, and extra="forbid" above means
+    # any straggler fails at construction instead of silently reverting.
+    weights: RetrievalWeights | None = None
+
     current_simulation_time: int | None = None
     # Filter to memories with ANY of these tags. Storage layer only: nothing in the
     # cognitive pipeline sets this yet, and no node passes tags to add_memory, so
@@ -74,7 +77,14 @@ class ChromaQueryResult(BaseModel):
 
     ids: list[list[str]]
     documents: list[list[str]]
-    metadatas: list[list[dict]]
+
+    # Entries are None for rows stored with no metadata at all. ChromaDB refuses
+    # to write an empty metadata dict, so a memory whose every field is unset
+    # (never rated, never timestamped, untagged) is written without metadata and
+    # reads back as None here - which is a faithful round-trip of "nothing was
+    # recorded", not a loss.
+    metadatas: list[list[dict | None]]
+
     distances: list[list[float]] | None = None
 
     @property
@@ -88,7 +98,7 @@ class ChromaQueryResult(BaseModel):
         return self.documents[0] if self.documents else []
 
     @property
-    def first_query_metadatas(self) -> list[dict]:
+    def first_query_metadatas(self) -> list[dict | None]:
         """Get metadatas from first query result"""
         return self.metadatas[0] if self.metadatas else []
 
@@ -122,6 +132,7 @@ class VectorDBMemory:
         collection_name: str = "memories",
         embedding_model: str = DEFAULT_EMBEDDING_MODEL,
         storage_path: str | None = None,
+        recency_reinforcement_alpha: float = DEFAULT_RECENCY_REINFORCEMENT_ALPHA,
     ):
         """Initialize vector database memory component
 
@@ -129,7 +140,20 @@ class VectorDBMemory:
             collection_name: Name of the ChromaDB collection
             embedding_model: SentenceTransformer model name for embeddings
             storage_path: Directory path for persistent storage (None = in-memory only)
+            recency_reinforcement_alpha: How strongly one retrieval pulls a
+                memory's recency anchor toward the present. 1.0 reproduces
+                Park's decay-from-last-retrieval exactly; 0.0 reproduces
+                decay-from-creation exactly. See
+                DEFAULT_RECENCY_REINFORCEMENT_ALPHA.
         """
+        if not 0.0 <= recency_reinforcement_alpha <= 1.0:
+            raise ValueError(
+                "recency_reinforcement_alpha must lie in [0, 1] "
+                f"(got {recency_reinforcement_alpha}); outside it, retrieval would push a "
+                "memory's anchor past the present or backwards past its own creation"
+            )
+        self.recency_reinforcement_alpha = recency_reinforcement_alpha
+
         # Initialize embedding model
         self.encoder = SentenceTransformer(embedding_model)
 
@@ -207,21 +231,31 @@ class VectorDBMemory:
     def add_memory(
         self,
         content: str,
-        importance: float = 1.0,
+        importance: ImportanceScore | None = None,
         timestamp: int | None = None,
         location: tuple[int, int] | None = None,
         tags: list[str] | None = None,
+        subject_ids: list[str] | None = None,
     ) -> Memory:
         """Add a memory to the store
 
         Args:
             content: Memory content text
-            importance: Importance score (0.0-10.0)
-            timestamp: Simulation timestamp (game ticks/frames)
+            importance: Poignancy on the 1-10 rubric, from the LLM that formed
+                the memory. None means never rated - a caller with no rating must
+                pass None rather than inventing one, because the retrieval
+                scorer abstains on None and cannot tell an invented midpoint
+                from a real rating.
+            timestamp: Elapsed game minutes
+                (SimulationTime.get_elapsed_game_minutes). None means unknown;
+                do not substitute 0, which is a valid reading.
             location: Grid coordinates (x, y)
             tags: Categorical tags for filtering
+            subject_ids: Entities this memory is about. Reserved for NPC-401 /
+                NPC-411; no production caller sets it yet.
         """
         tag_list = tags or []
+        subject_id_list = subject_ids or []
 
         # Generate memory ID
         memory_id = IdGenerator.generate_memory_id()
@@ -246,12 +280,30 @@ class VectorDBMemory:
             location_x=location[0] if location else None,
             location_y=location[1] if location else None,
             tags=tag_list,
+            subject_ids=subject_id_list,
+            # The EMA is seeded at creation; retrieval pulls it toward the
+            # present from there.
+            effective_time=timestamp,
+            last_accessed=timestamp,
         )
 
         # Store in ChromaDB (empty arrays not allowed in metadata, so exclude them)
         metadata_dict = metadata.model_dump(exclude_none=True)
         if not metadata_dict.get("tags"):
             metadata_dict.pop("tags", None)
+        if not metadata_dict.get("subject_ids"):
+            metadata_dict.pop("subject_ids", None)
+
+        # VectorDBMetadata.schema_version is non-optional, so exclude_none always
+        # leaves at least one key. That is what keeps this dict non-empty, and it
+        # must stay that way: ChromaDB rejects an empty metadata dict, and
+        # passing metadatas=None instead makes the row read back carrying a
+        # deleted row's metadata. See VectorDBMetadata.schema_version.
+        if not metadata_dict:
+            raise ValueError(
+                f"refusing to write memory {memory_id} with empty metadata - "
+                "ChromaDB would return another row's metadata for it"
+            )
 
         self.collection.add(
             ids=[memory_id],
@@ -281,9 +333,12 @@ class VectorDBMemory:
             else:
                 where_clause = {"$or": [{"tags": {"$contains": t}} for t in query.tags]}
 
+        # Over-fetch by cosine, then score the pool. Fetching exactly top_k would
+        # make the weighted score a reranker over the cosine top-k - see
+        # retrieval.candidate_pool_size for why that is not a retrieval formula.
         raw_results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=min(query.top_k, collection_count),
+            n_results=candidate_pool_size(query.top_k, collection_count),
             where=where_clause,
             include=["documents", "metadatas", "distances"],
         )
@@ -294,50 +349,93 @@ class VectorDBMemory:
         if not results.first_query_ids:
             return []
 
-        # Convert results to Memory objects with combined scoring
-        memories = []
-
-        for memory_id, content, metadata_dict, distance in results.iter_first_query():
-            # Parse metadata with type safety
-            metadata = VectorDBMetadata.model_validate(metadata_dict)
-
-            # Calculate combined score. The collection uses cosine space, so the
-            # ChromaDB distance is (1 - cosine_similarity). Convert back to a
-            # similarity in [0, 1] (clamped); fall back to 1.0 when a backend
-            # omits distances so older/partial results still rank deterministically.
-            if distance is None:
-                similarity_score = 1.0
-            else:
-                similarity_score = max(0.0, min(1.0, 1.0 - distance))
-            importance_score = metadata.importance / 10.0
-
-            # Calculate recency score if we have timestamps
-            if query.current_simulation_time is not None and metadata.timestamp is not None:
-                time_delta = query.current_simulation_time - metadata.timestamp
-                # Decay over simulation time (adjust decay rate as needed)
-                recency_score = 1.0 / (1.0 + time_delta / 1000.0)
-            else:
-                recency_score = 1.0
-
-            combined_score = (
-                (1 - query.importance_weight - query.recency_weight) * similarity_score
-                + query.importance_weight * importance_score
-                + query.recency_weight * recency_score
-            )
-
-            memory = Memory(
-                id=memory_id,
+        candidates = [
+            ScoredCandidate(
+                memory_id=memory_id,
                 content=content,
-                timestamp=metadata.timestamp,
-                importance=metadata.importance,
-                location=metadata.get_location(),
-                tags=metadata.tags,
+                # None means the row was stored with no metadata at all; that is
+                # an all-unset record, not a parse failure.
+                metadata=VectorDBMetadata.model_validate(metadata_dict or {}),
+                distance=distance,
             )
-            memories.append((combined_score, memory))
+            for memory_id, content, metadata_dict, distance in results.iter_first_query()
+        ]
 
-        # Sort by combined score and return
-        memories.sort(key=lambda x: x[0], reverse=True)
-        return [m for _, m in memories[: query.top_k]]
+        # All scoring arithmetic lives in retrieval.py, which imports no storage
+        # backend - that is what makes the formula testable as a pure function.
+        context = RetrievalContext(
+            query=query.query, current_simulation_time=query.current_simulation_time
+        )
+        ranked = rank(
+            candidates,
+            context,
+            query.weights or RetrievalWeights(),
+            default_terms(),
+            query.top_k,
+        )
+
+        self._reinforce_retrieved(
+            [candidate for _, candidate in ranked], query.current_simulation_time
+        )
+
+        return [
+            Memory(
+                id=candidate.memory_id,
+                content=candidate.content,
+                timestamp=candidate.metadata.timestamp,
+                importance=candidate.metadata.importance,
+                location=candidate.metadata.get_location(),
+                tags=candidate.metadata.tags,
+            )
+            for _, candidate in ranked
+        ]
+
+    def _reinforce_retrieved(self, candidates: list[ScoredCandidate], now: int | None) -> None:
+        """Pull each returned memory's recency anchor toward the present.
+
+        This is what makes recency measure how persistently a memory has
+        mattered rather than only when it was formed. One metadata update per
+        returned memory per query - no LLM call, no re-embedding. ChromaDB's
+        `update` MERGES the keys given with those already stored (verified
+        against 1.5.9), so passing only the two changed fields cannot drop
+        importance, tags or the creation timestamp.
+
+        Failure is logged, never swallowed: a silently-failed write means the
+        memory stops aging correctly for the rest of its life, and every later
+        retrieval would look entirely normal. Retrieval itself still succeeds -
+        the caller asked for memories and we have them - so this reports and
+        continues rather than raising.
+        """
+        if now is None:
+            return
+
+        ids: list[str] = []
+        metadatas: list[dict] = []
+        for candidate in candidates:
+            anchor = candidate.metadata.recency_anchor
+            if not should_reinforce(anchor, now):
+                continue
+            ids.append(candidate.memory_id)
+            metadatas.append(
+                {
+                    "effective_time": reinforced_time(
+                        anchor, now, self.recency_reinforcement_alpha
+                    ),
+                    "last_accessed": now,
+                }
+            )
+
+        if not ids:
+            return
+
+        try:
+            self.collection.update(ids=ids, metadatas=metadatas)
+        except Exception:
+            logger.exception(
+                f"Failed to reinforce recency for {len(ids)} retrieved memories "
+                f"({', '.join(ids)}). Their recency anchors are now stale, so they will "
+                "age as if this retrieval never happened."
+            )
 
     def drop_collection(self) -> None:
         """Delete this store's collection, treating "already gone" as success.

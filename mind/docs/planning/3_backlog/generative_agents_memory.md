@@ -28,9 +28,10 @@ Study the Generative Agents paper and identify applicable techniques for our arc
 - How does importance affect retrieval?
 
 ### 4. Memory Retrieval
-- What's their retrieval algorithm (recency + relevance + importance)?
-- How do they balance the three factors?
-- Do they use any filtering or ranking mechanisms?
+**Answered and shipped — [NPC-400].** The retrieval formula, its weights, the
+forgetting curve and the candidate-pool question are settled; see
+`cognitive_architecture/memory/retrieval.py` and the overview's "Memory Stream
+with Cognitive Scoring". Do not re-derive them here.
 
 ### 5. Consolidation Process
 - When does consolidation happen (sleep/downtime)?
@@ -43,14 +44,15 @@ Study the Generative Agents paper and identify applicable techniques for our arc
 - ✅ Daily memory buffer (`state.daily_memories`)
 - ✅ Importance scoring during memory formation (via the reflection node)
 - ✅ Placeholder consolidation node (`MemoryConsolidationNode`)
-- ✅ Combined scoring (relevance + importance + recency)
+- ✅ Retrieval scoring: three terms at Park's equal weights, exponential decay
+  per game hour, scored over a candidate pool wider than `top_k` [NPC-400]
 
 ### What We Need
 - Reflection generation mechanism
-- Sophisticated consolidation algorithm
+- Sophisticated consolidation algorithm (NPC-414)
 - Memory abstraction/generalization
-- Forgetting curve implementation
-- Better retrieval balancing
+- Retrieval-quality evaluation harness — the prerequisite for any weight
+  tuning, which NPC-400 deliberately did not attempt without one
 
 ## Success Criteria
 
