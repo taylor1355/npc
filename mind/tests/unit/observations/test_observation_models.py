@@ -67,13 +67,18 @@ class TestObservationModels:
     def test_create_conversation_observation(self):
         """Should create conversation with message history"""
         msg1 = ConversationMessage(
+            id="message_test_observation_models_1",
             speaker_id="npc_1",
             speaker_name="Guard",
             message="Hello traveler",
             timestamp=100,
         )
         msg2 = ConversationMessage(
-            speaker_id="npc_2", speaker_name="Merchant", message="Greetings", timestamp=105
+            id="message_test_observation_models_2",
+            speaker_id="npc_2",
+            speaker_name="Merchant",
+            message="Greetings",
+            timestamp=105,
         )
 
         conv = ConversationObservation(

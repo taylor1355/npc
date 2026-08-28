@@ -706,22 +706,22 @@ class ConversationMessage(BaseModel):
     lands perception stays exactly as dark as it already was, and after it lands
     it works. A legacy field would be dead the day it merged.
 
-    ``id`` is the simulation's per-message identity, and it is **permanently
-    optional — not transitional**. The simulation ships as a game binary while
-    this runs as a separately-launched MCP server, so there is no deploy step
-    that updates both at once: an older simulation sending no id is a shape this
-    model must accept forever, and ``None`` here means exactly "the producer did
-    not send one". Dedup falls back to a composite key for those messages; see
-    ``Mind.update_conversations``.
+    ``id`` is the simulation's per-message identity and is **required**. The
+    simulation mints it in ``Message._init`` as a class invariant and mints one
+    for any pre-id save on load, so every message a current simulation can emit
+    carries one. Accepting an id-less message would mean keeping a parallel
+    legacy path alive for a producer that does not exist; an id-less payload is
+    instead refused loudly at the parse boundary (see
+    ``_extract_conversation_observations``).
     """
 
     speaker_id: str
     speaker_name: str
     message: str
+    id: str
     timestamp: int | None = None
     is_system: bool = False
     declarations: list[dict] = Field(default_factory=list)
-    id: str | None = None
 
     def render_markers(self) -> str:
         """Trailing ``[system] [farewell]``-style markers, or "" when there are none.

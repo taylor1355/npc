@@ -1,23 +1,27 @@
 """Regression tests for NPC-1297: conversation message deduplication.
 
 ``Mind.update_conversations`` aggregates overlapping rolling windows of
-conversation history into one stored transcript. It carried **three** distinct
-defects, and only the first is the one the issue title names:
+conversation history into one stored transcript. It carried **three** defects:
 
 1. The dedup key was ``timestamp`` **alone**, shared across all speakers. The
    simulation truncates game time to whole minutes and deterministically appends
    two messages in one tick (a participant's message, then the system's
    "message limit reached" notice) — so the second was silently dropped.
-2. The ``existing_timestamps`` set was computed **once before** the message loop
-   and never added to, so a single batch containing the same message twice
-   stored it twice.
-3. ``timestamp is None`` bypassed dedup **unconditionally and forever**, so an
-   unstamped message was re-appended on every cycle that re-sent it.
+2. The index was computed **once before** the message loop and never added to,
+   so a single batch containing the same message twice stored it twice.
+3. ``timestamp is None`` bypassed dedup **unconditionally and forever**.
 
-The fix is a two-branch key: by ``id`` when the producer sent one, by the
-composite ``(timestamp, speaker_id, message)`` when it did not. The composite
-branch is **permanent, not transitional** — the simulation and this server are
-deployed independently, so an id-less producer is a shape that must keep working.
+The fix is to key on the message's ``id``, which the simulation mints as a class
+invariant. Defect 1 dissolves (ids distinguish same-minute messages), defect 3
+dissolves (timestamps take no part in identity at all), and defect 2 is fixed
+separately — by mutating the index *inside* the loop, which an id-only key still
+requires.
+
+There is deliberately **no fallback keying strategy**. ``id`` is required, an
+id-less payload is refused loudly at the parse boundary, and an empty id is
+refused loudly here. Keeping a composite-key path alive for a producer that
+cannot exist would be the "parallel legacy code path" the project's anti-pattern
+table forbids.
 
 Tests target ``Mind.conversation_histories`` directly: no pipeline node reads
 ``PipelineState.conversation_histories``, so there is no end-to-end prompt
@@ -27,11 +31,13 @@ assertion available to make instead.
 import logging
 
 import pytest
+from pydantic import ValidationError
 
-from mind.cognitive_architecture.observations import ConversationMessage
+from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
 from mind.cognitive_architecture.observations.models import ConversationObservation
 from mind.cognitive_architecture.working_memory import WorkingMemory
 from mind.interfaces.mcp.mind import Mind
+from mind.interfaces.mcp.server import _extract_conversation_observations
 
 INTERACTION_ID = "interaction_conv_1"
 
@@ -59,7 +65,7 @@ def make_message(
     message: str = "Hello!",
     timestamp: int | None = 10,
     *,
-    msg_id: str | None = None,
+    msg_id: str = "message_a",
     is_system: bool = False,
 ) -> ConversationMessage:
     return ConversationMessage(
@@ -89,11 +95,11 @@ def stored(mind: Mind) -> list[ConversationMessage]:
 class TestSameTimestampDistinctSpeakers:
     """Defect 1: the key was ``timestamp`` alone, so one of the two was dropped.
 
-    These are deliberately **two-cycle** tests. In a single batch defect 2 masks
-    defect 1 — the old code never added to its timestamp set, so both messages
-    appended and the test would pass against the un-fixed code. Two cycles is
-    also the faithful reproduction: the simulation calls ``send_observations()``
-    once after the participant's message and again after the system notice.
+    Deliberately a **two-cycle** test. In a single batch defect 2 masks defect 1
+    — the old code never added to its timestamp set, so both messages appended
+    and the test would pass against the un-fixed code. Two cycles is also the
+    faithful reproduction: the simulation calls ``send_observations()`` once
+    after the participant's message and again after the system notice.
     """
 
     def test_two_same_timestamp_messages_from_different_speakers_both_survive(self):
@@ -116,22 +122,11 @@ class TestSameTimestampDistinctSpeakers:
         assert len(stored(mind)) == 2
         assert [m.message for m in stored(mind)] == ["Hello!", "Message limit reached (15)."]
 
-    def test_same_timestamp_distinct_speakers_survive_without_ids(self):
-        """The composite branch must fix defect 1 too — it is the id-less path's key."""
-        mind = make_mind()
-        alice = make_message("npc_alice", "Hello!", 10)
-        system = make_message("system", "Message limit reached (15).", 10, is_system=True)
-
-        mind.update_conversations([make_observation([alice])])
-        mind.update_conversations([make_observation([alice, system])])
-
-        assert len(stored(mind)) == 2
-
 
 class TestDedupStillHolds:
     """Anti-cheat: deleting the dedup mechanism must NOT make the suite pass.
 
-    Without this, the tests above could be "fixed" by appending unconditionally.
+    Without this, the test above could be "fixed" by appending unconditionally.
     """
 
     def test_same_message_across_three_overlapping_windows_stored_once(self):
@@ -148,22 +143,15 @@ class TestDedupStillHolds:
         assert len(stored(mind)) == 3
         assert [m.id for m in stored(mind)] == ["message_a", "message_b", "message_c"]
 
-    def test_same_message_across_overlapping_windows_stored_once_without_ids(self):
-        mind = make_mind()
-        first = make_message("npc_alice", "Hello!", 10)
-        second = make_message("npc_bob", "Hi there!", 11)
-
-        mind.update_conversations([make_observation([first])])
-        mind.update_conversations([make_observation([first, second])])
-        mind.update_conversations([make_observation([first, second])])
-
-        assert len(stored(mind)) == 2
-
 
 class TestIntraBatchDuplicates:
-    """Defect 2: the index was built once before the loop and never added to."""
+    """Defect 2: the index was built once before the loop and never added to.
 
-    def test_duplicate_within_a_single_batch_stored_once_by_id(self):
+    Independent of the keying strategy — an id-only key gets this wrong too if
+    the set is not mutated inside the loop.
+    """
+
+    def test_duplicate_within_a_single_batch_stored_once(self):
         mind = make_mind()
         msg = make_message("npc_alice", "Hello!", 10, msg_id="message_a")
 
@@ -171,29 +159,39 @@ class TestIntraBatchDuplicates:
 
         assert len(stored(mind)) == 1
 
-    def test_duplicate_within_a_single_batch_stored_once_by_composite(self):
+    def test_three_copies_within_a_single_batch_stored_once(self):
         mind = make_mind()
+        msg = make_message("npc_alice", "Hello!", 10, msg_id="message_a")
 
-        mind.update_conversations(
-            [
-                make_observation(
-                    [
-                        make_message("npc_alice", "Hello!", 10),
-                        make_message("npc_alice", "Hello!", 10),
-                    ]
-                )
-            ]
-        )
+        mind.update_conversations([make_observation([msg, msg, msg])])
 
         assert len(stored(mind)) == 1
 
 
-class TestNullTimestamp:
-    """Defect 3: ``timestamp is None`` bypassed dedup unconditionally."""
+class TestIdentityIsTheIdAlone:
+    """Defect 3 dissolved: no field other than ``id`` takes part in identity.
 
-    def test_null_timestamp_message_is_deduplicated(self):
+    These are the guard against quietly reintroducing a composite key. Each
+    fails if ``timestamp``, ``speaker_id``, or ``message`` is folded back in.
+    """
+
+    def test_same_id_dedups_even_when_the_timestamp_differs(self):
+        """A timestamp is not part of identity, so a re-send may correct it freely."""
         mind = make_mind()
-        msg = make_message("npc_alice", "Hello!", None)
+
+        mind.update_conversations(
+            [make_observation([make_message("npc_alice", "Hello!", 10, msg_id="message_a")])]
+        )
+        mind.update_conversations(
+            [make_observation([make_message("npc_alice", "Hello!", 11, msg_id="message_a")])]
+        )
+
+        assert len(stored(mind)) == 1
+
+    def test_same_id_dedups_when_the_timestamp_is_absent(self):
+        """The old code let a ``None`` timestamp bypass dedup forever."""
+        mind = make_mind()
+        msg = make_message("npc_alice", "Hello!", None, msg_id="message_a")
 
         mind.update_conversations([make_observation([msg])])
         mind.update_conversations([make_observation([msg])])
@@ -201,33 +199,8 @@ class TestNullTimestamp:
 
         assert len(stored(mind)) == 1
 
-    def test_distinct_null_timestamp_messages_are_all_kept(self):
-        """Paired positive: dedup must not over-collapse unstamped messages.
-
-        Without this, defect 3 could be "fixed" by dropping every ``None``-stamped
-        message after the first, which is a different bug with the same test count.
-        """
-        mind = make_mind()
-
-        mind.update_conversations(
-            [
-                make_observation(
-                    [
-                        make_message("npc_alice", "Hello!", None),
-                        make_message("npc_bob", "Hi there!", None),
-                        make_message("npc_alice", "How are you?", None),
-                    ]
-                )
-            ]
-        )
-
-        assert len(stored(mind)) == 3
-
-
-class TestMixedAndVersionSkew:
-    """Both branches active at once, and the sim-downgrade / sim-upgrade paths."""
-
-    def test_mixed_id_and_idless_batch_uses_both_branches(self):
+    def test_distinct_ids_are_kept_when_every_other_field_is_identical(self):
+        """Two messages identical but for their ids are two messages."""
         mind = make_mind()
 
         mind.update_conversations(
@@ -235,77 +208,41 @@ class TestMixedAndVersionSkew:
                 make_observation(
                     [
                         make_message("npc_alice", "Hello!", 10, msg_id="message_a"),
-                        make_message("npc_bob", "Hi there!", 10),
-                    ]
-                )
-            ]
-        )
-        # Re-sent identically: neither branch may append a second copy.
-        mind.update_conversations(
-            [
-                make_observation(
-                    [
-                        make_message("npc_alice", "Hello!", 10, msg_id="message_a"),
-                        make_message("npc_bob", "Hi there!", 10),
+                        make_message("npc_alice", "Hello!", 10, msg_id="message_b"),
                     ]
                 )
             ]
         )
 
         assert len(stored(mind)) == 2
+        assert [m.id for m in stored(mind)] == ["message_a", "message_b"]
 
-    def test_message_stored_with_id_is_recognised_when_it_rearrives_without_one(self):
-        """Simulation downgrade: the composite index must cover id-bearing messages."""
+
+class TestEmptyIdIsRefusedLoudly:
+    """An empty id is a producer bug, and there is nowhere to fall through to."""
+
+    def test_empty_id_message_is_refused_and_logged_at_error(self, caplog):
         mind = make_mind()
 
-        mind.update_conversations(
-            [make_observation([make_message("npc_alice", "Hello!", 10, msg_id="message_a")])]
-        )
-        mind.update_conversations([make_observation([make_message("npc_alice", "Hello!", 10)])])
+        with caplog.at_level(logging.ERROR):
+            mind.update_conversations([make_observation([make_message(msg_id="")])])
 
-        assert len(stored(mind)) == 1
-        assert stored(mind)[0].id == "message_a"
-
-    def test_message_stored_without_id_is_upgraded_in_place_when_the_id_arrives(self):
-        """Simulation upgrade: adopt the id onto the held copy, do not append a second."""
-        mind = make_mind()
-
-        mind.update_conversations([make_observation([make_message("npc_alice", "Hello!", 10)])])
-        assert stored(mind)[0].id is None
-
-        mind.update_conversations(
-            [make_observation([make_message("npc_alice", "Hello!", 10, msg_id="message_a")])]
+        assert stored(mind) == [], "A message with no usable identity must not be stored"
+        assert any(
+            "EMPTY id" in record.message and record.levelno >= logging.ERROR
+            for record in caplog.records
         )
 
-        assert len(stored(mind)) == 1
-        # Backfilled, not merely deduplicated — a later id-keyed re-send must hit
-        # the id branch rather than falling through to the composite one.
-        assert stored(mind)[0].id == "message_a"
-
-
-class TestBoundaryIntegrity:
-    """An empty id is a producer bug, not an absent id."""
-
-    def test_empty_id_falls_back_to_composite_and_warns(self, caplog):
+    def test_whitespace_only_id_is_refused(self):
+        """Normalisation and the emptiness check must agree on what blank means."""
         mind = make_mind()
 
-        with caplog.at_level(logging.WARNING):
-            mind.update_conversations(
-                [
-                    make_observation(
-                        [
-                            make_message("npc_alice", "Hello!", 10, msg_id=""),
-                            make_message("npc_alice", "Hello!", 10, msg_id=""),
-                        ]
-                    )
-                ]
-            )
+        mind.update_conversations([make_observation([make_message(msg_id="   ")])])
 
-        assert len(stored(mind)) == 1, "empty ids must dedup via the composite key"
-        assert any("EMPTY id" in record.message for record in caplog.records)
+        assert stored(mind) == []
 
-    def test_distinct_empty_id_messages_are_not_collapsed_together(self):
-        """ "" must never act as an identity — every blank would collide with every other."""
+    def test_a_valid_message_in_the_same_batch_still_lands(self):
+        """Refusal is per-message; one bad message must not cost the others."""
         mind = make_mind()
 
         mind.update_conversations(
@@ -313,48 +250,39 @@ class TestBoundaryIntegrity:
                 make_observation(
                     [
                         make_message("npc_alice", "Hello!", 10, msg_id=""),
-                        make_message("npc_bob", "Hi there!", 10, msg_id=""),
+                        make_message("npc_bob", "Hi there!", 10, msg_id="message_b"),
                     ]
                 )
             ]
         )
 
-        assert len(stored(mind)) == 2
+        assert [m.id for m in stored(mind)] == ["message_b"]
 
-    def test_composite_collision_under_distinct_ids_keeps_both_and_warns(self, caplog):
+    def test_surrounding_whitespace_is_normalised_before_keying(self):
+        """The value validated must be the value stored and keyed on."""
         mind = make_mind()
 
-        with caplog.at_level(logging.WARNING):
-            mind.update_conversations(
-                [
-                    make_observation(
-                        [
-                            make_message("npc_alice", "Hello!", 10, msg_id="message_a"),
-                            make_message("npc_alice", "Hello!", 10, msg_id="message_b"),
-                        ]
-                    )
-                ]
+        mind.update_conversations([make_observation([make_message(msg_id="  message_a  ")])])
+        mind.update_conversations([make_observation([make_message(msg_id="message_a")])])
+
+        assert len(stored(mind)) == 1
+        assert stored(mind)[0].id == "message_a"
+
+
+class TestIdIsRequired:
+    """The model rejects an id-less message rather than accommodating it."""
+
+    def test_conversation_message_requires_an_id(self):
+        with pytest.raises(ValidationError):
+            ConversationMessage.model_validate(
+                {
+                    "speaker_id": "npc_alice",
+                    "speaker_name": "Alice",
+                    "message": "Hello!",
+                    "timestamp": 10,
+                    "is_system": False,
+                }
             )
-
-        assert len(stored(mind)) == 2
-        assert [m.id for m in stored(mind)] == ["message_a", "message_b"]
-        assert any("distinct ids" in record.message for record in caplog.records)
-
-
-class TestIdFieldIsOptional:
-    """Version skew: the field is permanently optional, not transitional."""
-
-    def test_conversation_message_parses_without_an_id(self):
-        msg = ConversationMessage.model_validate(
-            {
-                "speaker_id": "npc_alice",
-                "speaker_name": "Alice",
-                "message": "Hello!",
-                "timestamp": 10,
-                "is_system": False,
-            }
-        )
-        assert msg.id is None
 
     def test_conversation_message_parses_with_an_id(self):
         msg = ConversationMessage.model_validate(
@@ -370,17 +298,82 @@ class TestIdFieldIsOptional:
         assert msg.id == "message_a"
 
 
-@pytest.mark.parametrize(
-    "timestamp",
-    [0, 10, None],
-    ids=["zero", "positive", "absent"],
-)
-def test_dedup_holds_across_timestamp_shapes(timestamp):
-    """Zero is a valid game-minute reading, not a "not set" sentinel."""
-    mind = make_mind()
-    msg = make_message("npc_alice", "Hello!", timestamp)
+class TestMalformedConversationIsLoudNotSilent:
+    """A stricter model must not turn into a silent whole-conversation drop.
 
-    mind.update_conversations([make_observation([msg])])
-    mind.update_conversations([make_observation([msg])])
+    ``_extract_conversation_observations`` validates inside ``except
+    ValidationError: continue``. Most payloads reaching it are other interaction
+    kinds and are skipped routinely — but a payload that IS a conversation and
+    fails validation would otherwise vanish with nothing said, which is strictly
+    worse than the dedup bug this issue is about.
+    """
 
-    assert len(stored(mind)) == 1
+    def _event(self, payload: dict) -> MindEvent:
+        return MindEvent(
+            timestamp=1, event_type=MindEventType.INTERACTION_OBSERVATION, payload=payload
+        )
+
+    def test_id_less_conversation_payload_is_refused_loudly(self, caplog):
+        payload = {
+            "interaction_id": INTERACTION_ID,
+            "interaction_name": "conversation",
+            "participants": ["npc_alice"],
+            "initiator_id": "npc_alice",
+            "conversation_history": [
+                {
+                    "speaker_id": "npc_alice",
+                    "speaker_name": "Alice",
+                    "message": "Hello!",
+                    "timestamp": 10,
+                    "is_system": False,
+                }
+            ],
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            result = _extract_conversation_observations([self._event(payload)], "entity_test")
+
+        assert result == [], "An unparseable conversation must not be handed on as valid"
+        assert any(
+            "MALFORMED conversation observation" in record.message
+            and record.levelno >= logging.ERROR
+            for record in caplog.records
+        ), "A dropped conversation must be reported at ERROR, not swallowed at debug"
+
+    def test_non_conversation_observation_is_still_skipped_quietly(self, caplog):
+        """The routine case must not become noise — sitting and eating land here too."""
+        payload = {"interaction_id": "interaction_sit_1", "interaction_name": "sit"}
+
+        with caplog.at_level(logging.DEBUG):
+            result = _extract_conversation_observations([self._event(payload)], "entity_test")
+
+        assert result == []
+        assert not any(record.levelno >= logging.ERROR for record in caplog.records), (
+            "A non-conversation interaction observation is routine, not an error"
+        )
+
+    def test_a_well_formed_conversation_still_parses(self, caplog):
+        """Paired positive: the loud branch must not swallow the good case."""
+        payload = {
+            "interaction_id": INTERACTION_ID,
+            "interaction_name": "conversation",
+            "participants": ["npc_alice"],
+            "initiator_id": "npc_alice",
+            "conversation_history": [
+                {
+                    "speaker_id": "npc_alice",
+                    "speaker_name": "Alice",
+                    "message": "Hello!",
+                    "timestamp": 10,
+                    "is_system": False,
+                    "id": "message_a",
+                }
+            ],
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            result = _extract_conversation_observations([self._event(payload)], "entity_test")
+
+        assert len(result) == 1
+        assert result[0].conversation_history[0].id == "message_a"
+        assert not any(record.levelno >= logging.ERROR for record in caplog.records)

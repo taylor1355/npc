@@ -231,6 +231,7 @@ class TestMessageDeclarationRendering:
             conversations=[
                 _conversation(
                     ConversationMessage(
+                        id="message_test_observation_rendering_1",
                         speaker_id="alice_npc",
                         speaker_name="Alice",
                         message="Well, I should be going.",
@@ -247,6 +248,7 @@ class TestMessageDeclarationRendering:
             conversations=[
                 _conversation(
                     ConversationMessage(
+                        id="message_test_observation_rendering_2",
                         speaker_id="alice_npc",
                         speaker_name="Alice",
                         message="Do you agree?",
@@ -263,6 +265,7 @@ class TestMessageDeclarationRendering:
             conversations=[
                 _conversation(
                     ConversationMessage(
+                        id="message_test_observation_rendering_3",
                         speaker_id="sim",
                         speaker_name="System",
                         message="Bob left.",
@@ -280,6 +283,7 @@ class TestMessageDeclarationRendering:
             conversations=[
                 _conversation(
                     ConversationMessage(
+                        id="message_test_observation_rendering_4",
                         speaker_id="explorer_npc",
                         speaker_name="Bob",
                         message="Goodbye then.",
@@ -296,7 +300,10 @@ class TestMessageDeclarationRendering:
             conversations=[
                 _conversation(
                     ConversationMessage(
-                        speaker_id="alice_npc", speaker_name="Alice", message="Hello."
+                        id="message_test_observation_rendering_5",
+                        speaker_id="alice_npc",
+                        speaker_name="Alice",
+                        message="Hello.",
                     )
                 )
             ]
@@ -312,6 +319,7 @@ class TestMessageDeclarationRendering:
             conversations=[
                 _conversation(
                     ConversationMessage(
+                        id="message_test_observation_rendering_6",
                         speaker_id="alice_npc",
                         speaker_name="Alice",
                         message="Bye.",
