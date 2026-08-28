@@ -88,6 +88,17 @@ def wire_conversation_interaction() -> dict:
     )
 
 
+def wire_entity_data(*args, **kwargs) -> dict:
+    """The EntityData wire shape, under the name a non-inventory caller wants.
+
+    Identical to :func:`wire_inventory_item` because the simulation builds BOTH
+    inventory items and visible entities with the same ``EntityData.to_dict()``.
+    The alias exists so a vision fixture does not have to call something named
+    "inventory_item" and make a reader stop to work out why.
+    """
+    return wire_inventory_item(*args, **kwargs)
+
+
 def wire_inventory_item(
     entity_id: str,
     display_name: str,
@@ -173,7 +184,7 @@ def wire_full_root_payload(simulation_time: int = 100) -> dict:
         },
         "vision": {
             "visible_entities": [
-                wire_inventory_item("alice_npc", "Alice", (13, 8)),
+                wire_entity_data("alice_npc", "Alice", (13, 8)),
             ]
         },
         "goal": {
