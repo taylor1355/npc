@@ -88,6 +88,160 @@ def wire_conversation_interaction() -> dict:
     )
 
 
+def wire_inventory_item(
+    entity_id: str,
+    display_name: str,
+    position: tuple[int, int] = (0, 0),
+    interactions: dict | None = None,
+) -> dict:
+    """One entry of ``InventoryObservation.items``, verbatim from the wire.
+
+    This IS the Godot ``EntityData.to_dict()`` contract
+    (``src/minds/observations/entity_data.gd``): ``entity_id``,
+    ``display_name``, ``position`` as a two-element LIST (not a tuple -- the
+    simulation converts ``Vector2i`` for Python), ``interactions``, and
+    ``current_interaction`` emitted as ``{}`` rather than omitted when idle.
+
+    Three keys are deliberately absent because ``to_dict()`` does not emit them:
+    ``relationship`` (``InventoryComponent.get_items_as_entity_data`` calls
+    ``EntityData.from_entity_ids`` with ``include_relationships`` defaulting
+    false, so a carried item never carries one), ``entity_type``, and
+    ``distance_to_observer``.
+    """
+    return {
+        "entity_id": entity_id,
+        "display_name": display_name,
+        "position": [position[0], position[1]],
+        "interactions": interactions or {},
+        "current_interaction": {},
+    }
+
+
+def wire_inventory_block(
+    owner_id: str = "carrier_npc",
+    capacity: int = 4,
+    items: list[dict] | None = None,
+) -> dict:
+    """An ``Observation``'s ``inventory`` value, verbatim from the wire.
+
+    This IS the Godot ``InventoryObservation.get_data()`` contract
+    (``src/minds/observations/inventory_observation.gd``): exactly ``owner_id``,
+    ``capacity``, ``used_slots``, ``items`` and nothing else. ``used_slots`` is
+    the simulation's own ``items.size()``, carried rather than re-derived.
+
+    Transcribed from simulation ``origin/main`` @ ``a2ac2f5a``. It is only as
+    good as that transcription -- if ``get_data()`` changes, re-derive this
+    from the source rather than trusting it.
+    """
+    return {
+        "owner_id": owner_id,
+        "capacity": capacity,
+        "used_slots": len(items or []),
+        "items": items or [],
+    }
+
+
+def wire_full_root_payload(simulation_time: int = 100) -> dict:
+    """Every root key the simulation can put on the ``decide_action`` wire.
+
+    ``CompositeObservation.get_data()`` builds ``{entity_id,
+    current_simulation_time}`` plus one key per ``Observation.get_type()`` of
+    every observation added in ``entity_controller.gd`` /
+    ``npc_controller.gd::get_current_state_observation``. That resolves to
+    exactly the eight keys below (verified against simulation ``origin/main``
+    @ ``a2ac2f5a``).
+
+    ``conversations`` is deliberately NOT here: it is a mind-side field lifted
+    out of ``INTERACTION_OBSERVATION`` events by
+    ``server.py::_extract_conversation_observations``, never a wire root key.
+
+    Each nested block is transcribed from its own ``get_data()`` -- note
+    ``needs.max_need_value`` and ``status.position`` as a list.
+    """
+    return {
+        "entity_id": "carrier_npc",
+        "current_simulation_time": simulation_time,
+        "status": {
+            "position": [12, 8],
+            "movement_locked": False,
+            "current_interaction": {},
+            "activity_state": {"state_name": "idle"},
+        },
+        "needs": {
+            "needs": {"hunger": 22.0, "energy": 41.0, "stimulation": 60.0, "social": 35.0},
+            "max_need_value": 100.0,
+        },
+        "vision": {
+            "visible_entities": [
+                wire_inventory_item("alice_npc", "Alice", (13, 8)),
+            ]
+        },
+        "goal": {
+            "contract_version": 1,
+            "urgency_max": 1.3,
+            "active_goal": {
+                "template_id": "satisfy_hunger",
+                "label": "Find something to eat",
+                "urgency": 1.18,
+                "drive_source": "hunger",
+                "preference_alignment": 0.12,
+                "age_minutes": 14,
+                "interruption_threshold": 1.25,
+            },
+            "goals": [
+                {
+                    "template_id": "satisfy_hunger",
+                    "label": "Find something to eat",
+                    "urgency": 1.18,
+                    "drive_source": "hunger",
+                    "preference_alignment": 0.12,
+                    "is_active": True,
+                }
+            ],
+            "options": [],
+            "option_total": 0,
+        },
+        "mood": {
+            "valence": -0.42,
+            "arousal": 0.81,
+            "valence_band": "neg",
+            "arousal_band": "high",
+            "label": "stressed",
+            "valence_baseline": -0.05,
+            "arousal_baseline": 0.5,
+        },
+        "inventory": wire_inventory_block(
+            owner_id="carrier_npc",
+            capacity=4,
+            items=[
+                wire_inventory_item(
+                    "apple_001",
+                    "Ripe Apple",
+                    (12, 8),
+                    interactions={
+                        "consume": {
+                            "name": "consume",
+                            "description": "Eat the apple",
+                            "needs_filled": ["hunger"],
+                            "needs_drained": [],
+                        }
+                    },
+                ),
+                wire_inventory_item("pebble_001", "Smooth Pebble", (12, 8)),
+            ],
+        ),
+    }
+
+
+def create_carrying_observation(simulation_time: int = 100) -> Observation:
+    """An NPC carrying two items, parsed from the wire payload rather than built.
+
+    Built through ``model_validate`` on purpose: constructing the model with
+    Python keywords would bypass exactly the boundary NPC-1116 is about.
+    """
+    return Observation.model_validate(wire_full_root_payload(simulation_time))
+
+
 def create_blacksmith_observation(simulation_time: int = 100) -> Observation:
     """Blacksmith NPC at forge with low energy, seeing tools and customers"""
     return Observation(

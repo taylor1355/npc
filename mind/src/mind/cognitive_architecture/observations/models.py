@@ -3,7 +3,14 @@
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from mind.logging_config import get_logger
 
@@ -275,10 +282,25 @@ class StatusObservation(BaseModel):
 
 
 class NeedsObservation(BaseModel):
-    """Entity needs state"""
+    """Entity needs state.
+
+    The simulation spells the ceiling ``max_need_value``
+    (``needs_observation.gd::get_data``); this field is ``max_value``. The key
+    was therefore dropped on every cycle and the default silently used instead
+    -- correct only by coincidence, since ``needs.gd::MAX_VALUE`` is also 100.0.
+    Change that constant and the mind would keep normalizing against a stale
+    100.0 with nothing failing anywhere (NPC-1116).
+
+    Both spellings are accepted: the wire name so the real value lands, the
+    field name so ``model_dump()`` round-trips and existing keyword
+    construction keeps working.
+    """
 
     needs: dict[str, float]
-    max_value: float = 100.0
+    max_value: float = Field(
+        default=100.0,
+        validation_alias=AliasChoices("max_need_value", "max_value"),
+    )
 
 
 class GoalDetail(BaseModel):
@@ -689,6 +711,38 @@ class VisionObservation(BaseModel):
     visible_entities: list[EntityData]
 
 
+class InventoryObservation(BaseModel):
+    """What this entity is carrying.
+
+    Wire producer: ``inventory_observation.gd::get_data`` -- exactly
+    ``owner_id`` / ``capacity`` / ``used_slots`` / ``items``, emitted every
+    decision cycle for any entity with an InventoryComponent (all production
+    NPC configs). This model's absence is what blocked ``Observation``'s
+    ``extra="forbid"`` (NPC-1116 / NPC-1321): the whole block was discarded
+    before reaching the LLM, silently, on every cycle.
+
+    ``items`` are ``EntityData`` -- the SAME shape vision carries, because the
+    simulation builds both with ``EntityData.to_dict()``. Carried items are
+    co-located with the carrier by construction, so the simulation stomps
+    their ``distance_to_observer`` to 0; that field is not on the wire and is
+    deliberately not declared here.
+
+    ``extra="forbid"`` (precedent: every ``Goal*`` model): this block is new,
+    so there is no legacy payload to break, and a key added simulation-side
+    must be a lockstep signal rather than a silent drop.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    owner_id: str = ""
+    capacity: int = 0
+    #: The simulation's own count, carried rather than re-derived from
+    #: ``len(items)``: they are the same today, and a future partial or paged
+    #: items list must not be able to silently misreport occupancy.
+    used_slots: int = 0
+    items: list[EntityData] = Field(default_factory=list)
+
+
 class ConversationMessage(BaseModel):
     """Single conversation message.
 
@@ -744,11 +798,9 @@ class Observation(BaseModel):
     """Complete structured observation.
 
     ``extra`` stays at pydantic's default ``ignore`` here even though the goal
-    models forbid: the simulation's real payload carries at least one root key
-    this model has never declared (``inventory``, emitted for every NPC with an
-    InventoryComponent — all production NPC configs), so ``extra="forbid"`` at
-    this level would reject every live observation until that surface is
-    declared. Tightening this boundary is [NPC-1116]'s class of work.
+    models forbid. Every root key the simulation emits is now declared below
+    -- ``inventory`` was the last undeclared one -- so tightening this to
+    ``extra="forbid"`` is the remaining step of [NPC-1116].
     """
 
     entity_id: str  # Mind's entity ID in simulation
@@ -758,6 +810,7 @@ class Observation(BaseModel):
     needs: NeedsObservation | None = None
     goal: GoalObservation | None = None
     mood: MoodObservation | None = None
+    inventory: InventoryObservation | None = None
     vision: VisionObservation | None = None
     conversations: list[ConversationObservation] = Field(default_factory=list)
 
@@ -795,6 +848,22 @@ class Observation(BaseModel):
                 f"{self.mood.valence_baseline:+.2f}; arousal {self.mood.arousal:.2f} "
                 f"against a resting {self.mood.arousal_baseline:.2f})"
             )
+
+        # Rendered only when actually carrying something: an absent line means
+        # an empty bag, and every existing fixture without an inventory must
+        # render byte-identically (the control-arm pattern the enrichment
+        # fixtures rely on). Placed between mood and vision because inventory
+        # and vision are the two affordance sources -- they read together.
+        if self.inventory and self.inventory.items:
+            inv = self.inventory
+            carried = []
+            for item in inv.items:
+                affordances = ", ".join(item.interactions.keys())
+                carried.append(
+                    f"  - {item.display_name} (ID: {item.entity_id})"
+                    + (f" [{affordances}]" if affordances else "")
+                )
+            parts.append(f"Carrying ({inv.used_slots} of {inv.capacity}):\n" + "\n".join(carried))
 
         if self.vision and self.vision.visible_entities:
             # Show entity details with IDs and interactions (critical for action selection)

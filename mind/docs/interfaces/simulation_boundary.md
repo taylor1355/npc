@@ -41,7 +41,7 @@ extends the base `entity_controller.gd::get_current_state_observation`.
 | `vision` | `vision_component.gd::create_vision_observation` | `vision` |
 | `goal` | `substrate_component.gd::create_goal_observation` | `goal` |
 | `mood` | `substrate_component.gd::create_mood_observation` | `mood` |
-| `inventory` | `inventory_component.gd::create_observation` | *(not declared — dropped)* |
+| `inventory` | `inventory_component.gd::create_observation` | `inventory` |
 
 The observation types themselves are the simulation's `src/minds/observations/`
 directory — read them there rather than from a list here.
@@ -75,8 +75,8 @@ or `to_dict()` that emits it.
 
 ## Known asymmetries
 
-- `inventory` is emitted every cycle and discarded here: no `Observation` field
-  declares it, and pydantic's default `extra="ignore"` makes the loss silent.
+- `needs.max_need_value` is the wire spelling of `NeedsObservation.max_value`.
+  The field accepts both; the wire name is the one the simulation sends.
 - `entity_data.gd::to_dict` deliberately omits `last_interaction_time` — a raw
   game-minute stamp carrying a not-set sentinel, meaningless to a reader with no
   frame of reference for the simulation clock.

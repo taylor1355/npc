@@ -12,6 +12,7 @@ from mind.cognitive_architecture.observations import (
     EntityData,
     GoalDetail,
     GoalObservation,
+    InventoryObservation,
     MindEvent,
     MindEventType,
     MoodObservation,
@@ -741,3 +742,87 @@ class TestRelationshipEnrichment:
 
         with pytest.raises(ValidationError):
             RelationshipState(familiarity=0.5, sentiment=-2.0)
+
+
+class TestInventoryObservation:
+    """The ``inventory`` root key survives the boundary (NPC-1116).
+
+    Before this model existed the whole block was discarded by pydantic's
+    default ``extra="ignore"`` -- silently, on every decision cycle, for every
+    NPC with an InventoryComponent.
+    """
+
+    def test_inventory_survives_validation(self):
+        """Should parse the wire inventory block into a typed model"""
+        from tests.fixtures.observations import wire_full_root_payload
+
+        obs = Observation.model_validate(wire_full_root_payload())
+
+        assert obs.inventory is not None
+        assert obs.inventory.owner_id == "carrier_npc"
+        assert obs.inventory.capacity == 4
+        assert obs.inventory.used_slots == 2
+        assert [item.entity_id for item in obs.inventory.items] == ["apple_001", "pebble_001"]
+        assert obs.inventory.items[0].display_name == "Ripe Apple"
+        assert "consume" in obs.inventory.items[0].interactions
+
+    def test_used_slots_is_carried_not_derived(self):
+        """Should report the simulation's own count, not ``len(items)``"""
+        from tests.fixtures.observations import wire_inventory_block, wire_inventory_item
+
+        block = wire_inventory_block(items=[wire_inventory_item("apple_001", "Ripe Apple")])
+        block["used_slots"] = 3  # a paged/partial items list, as a future wire could send
+
+        inv = InventoryObservation.model_validate(block)
+
+        assert inv.used_slots == 3
+        assert len(inv.items) == 1
+
+    def test_inventory_block_forbids_extras(self):
+        """Should reject an undeclared key inside the inventory block"""
+        from tests.fixtures.observations import wire_inventory_block
+
+        block = wire_inventory_block()
+        block["weight_kg"] = 3
+
+        with pytest.raises(ValidationError):
+            InventoryObservation.model_validate(block)
+
+    def test_idle_inventory_item_has_no_interaction(self):
+        """Should map the simulation's ``{}`` idle sentinel onto None"""
+        from tests.fixtures.observations import wire_inventory_block, wire_inventory_item
+
+        inv = InventoryObservation.model_validate(
+            wire_inventory_block(items=[wire_inventory_item("apple_001", "Ripe Apple")])
+        )
+
+        assert inv.items[0].current_interaction is None
+
+    def test_empty_inventory_is_valid(self):
+        """Should accept a carrier holding nothing"""
+        from tests.fixtures.observations import wire_inventory_block
+
+        inv = InventoryObservation.model_validate(wire_inventory_block(items=[]))
+
+        assert inv.items == []
+        assert inv.used_slots == 0
+
+
+class TestNeedsCeilingWireKey:
+    """``max_need_value`` is the wire spelling of ``max_value`` (NPC-1116).
+
+    The mismatch was correct only by coincidence -- both spellings resolve to
+    100.0 today -- so nothing failed while the real value was being dropped.
+    """
+
+    def test_max_need_value_wire_key_lands(self):
+        """Should take the ceiling from the simulation's spelling"""
+        needs = NeedsObservation.model_validate({"needs": {"hunger": 1.0}, "max_need_value": 250.0})
+
+        assert needs.max_value == 250.0
+
+    def test_max_value_field_name_still_accepted(self):
+        """Should still accept the field name so ``model_dump()`` round-trips"""
+        original = NeedsObservation(needs={"hunger": 1.0}, max_value=42.0)
+
+        assert NeedsObservation.model_validate(original.model_dump()).max_value == 42.0

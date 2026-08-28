@@ -12,6 +12,7 @@ from mind.cognitive_architecture.observations import (
     EntityData,
     GoalDetail,
     GoalObservation,
+    InventoryObservation,
     MoodObservation,
     NeedsObservation,
     Observation,
@@ -338,3 +339,40 @@ class TestFullyEnrichedArm:
         # The unfamiliar traveller carries no relationship, so exactly one
         # relationship line is rendered across two visible entities.
         assert text.count("Relationship:") == 1
+
+
+class TestInventoryRendering:
+    """Carried items reach the prompt text (NPC-1116).
+
+    A model that parses but renders nothing is still invisible to the LLM,
+    which is the half of the bug that a validation test alone would miss.
+    """
+
+    def test_inventory_renders_into_observation_text(self):
+        """Should name each carried item and its affordances"""
+        from tests.fixtures.observations import create_carrying_observation
+
+        text = str(create_carrying_observation())
+
+        assert "Carrying (2 of 4):" in text
+        assert "Ripe Apple (ID: apple_001) [consume]" in text
+        assert "Smooth Pebble (ID: pebble_001)" in text
+
+    def test_item_without_affordances_renders_no_bracket(self):
+        """Should omit the affordance bracket rather than render an empty one"""
+        from tests.fixtures.observations import create_carrying_observation
+
+        text = str(create_carrying_observation())
+
+        assert "Smooth Pebble (ID: pebble_001) []" not in text
+
+    def test_empty_inventory_renders_nothing(self):
+        """Should be byte-identical to carrying no inventory block at all"""
+        from tests.fixtures.observations import wire_inventory_block
+
+        empty = _base_observation(
+            inventory=InventoryObservation.model_validate(wire_inventory_block(items=[]))
+        )
+
+        assert str(empty) == str(_base_observation())
+        assert str(empty) == GOLDEN_UNENRICHED
