@@ -18,6 +18,8 @@ from mind.cognitive_architecture.observations import (
     GoalStepFactors,
     GoalStepTarget,
     GoalSummary,
+    MindEvent,
+    MindEventType,
     MoodObservation,
     NeedsObservation,
     Observation,
@@ -584,3 +586,143 @@ def create_enriched_observation(simulation_time: int = 100) -> Observation:
         ),
         conversations=[],
     )
+
+
+# --- Event-buffer fixtures (NPC-1335) ---------------------------------------
+#
+# The observation fixtures above return an Observation and no MindEvents at
+# all, which is why any harness built from them measures a decision cycle with
+# an EMPTY recent-events buffer — and therefore measures nothing about how that
+# buffer is rendered. These give the buffer a fixed, committed shape so a
+# rendering cost is reproducible and comparable across commits.
+#
+# Payload keys are the Godot wire keys verbatim (the `get_data()` output of
+# InteractionBidObservation, InteractionBidRejectedObservation,
+# MovementObservation, ConversationObservation), shipped unchanged as
+# MindEvent.payload by mcp_mind_client.gd.
+
+
+def create_movement_events(start_time: int = 100) -> list[MindEvent]:
+    """A short buffer with no conversation: the cheapest realistic shape."""
+    return [
+        MindEvent(
+            timestamp=start_time,
+            event_type=MindEventType.ACTION_CHOSEN,
+            payload={"action": "move_to", "parameters": {"x": 12, "y": 8}},
+        ),
+        MindEvent(
+            timestamp=start_time + 2,
+            event_type=MindEventType.MOVEMENT_COMPLETED,
+            payload={
+                "intended_destination": [12, 8],
+                "actual_destination": [12, 8],
+                "status": "ARRIVED",
+            },
+        ),
+        MindEvent(
+            timestamp=start_time + 3,
+            event_type=MindEventType.INTERACTION_BID_PENDING,
+            payload={
+                "interaction_name": "eat",
+                "bid_type": 0,
+                "bid_id": "bid_a1b2c3d4",
+                "bidder_id": "npc_alice",
+                "provider_id": "item_apple_3",
+                "timestamp": float(start_time + 3),
+                "force": False,
+            },
+        ),
+    ]
+
+
+def create_social_events(start_time: int = 100) -> list[MindEvent]:
+    """A fuller buffer covering the bid lifecycle, still with no conversation."""
+    events = create_movement_events(start_time)
+    events.extend(
+        [
+            MindEvent(
+                timestamp=start_time + 4,
+                event_type=MindEventType.INTERACTION_BID_REJECTED,
+                payload={
+                    "interaction_name": "eat",
+                    "bid_type": 0,
+                    "reason": "Already being used by someone else",
+                    "target_id": "item_apple_3",
+                },
+            ),
+            MindEvent(
+                timestamp=start_time + 5,
+                event_type=MindEventType.INTERACTION_BID_RECEIVED,
+                payload={
+                    "interaction_name": "conversation",
+                    "bid_type": 0,
+                    "bid_id": "bid_e5f6a7b8",
+                    "bidder_id": "npc_carol",
+                    "provider_id": "npc_alice",
+                    "countered_bid_id": "bid_11223344",
+                    "target_interaction_id": "interaction_77",
+                    "existing_participants": ["npc_bob", "npc_dave"],
+                    "counter_reason": "Already talking with others",
+                    "timestamp": float(start_time + 5),
+                    "force": False,
+                },
+            ),
+            MindEvent(
+                timestamp=start_time + 6,
+                event_type=MindEventType.INTERACTION_STARTED,
+                payload={"interaction_name": "conversation", "update_type": "started"},
+            ),
+            MindEvent(
+                timestamp=start_time + 9,
+                event_type=MindEventType.INTERACTION_FINISHED,
+                payload={"interaction_name": "conversation", "update_type": "finished"},
+            ),
+        ]
+    )
+    return events
+
+
+def create_conversation_events(start_time: int = 100) -> list[MindEvent]:
+    """The expensive shape: a buffer carrying an INTERACTION_OBSERVATION.
+
+    That arm renders its raw payload deliberately — it is the only channel
+    carrying conversation content to the LLM (NPC-1298) — so it is the one
+    event type prose rendering barely shrinks. A buffer's conversation-event
+    count therefore dominates any aggregate saving measured over it.
+    """
+    events = create_social_events(start_time)
+    # Inserted before the INTERACTION_FINISHED entry: the buffer arrives in the
+    # simulation's arrival order, and a conversation update necessarily precedes
+    # the end of the conversation it describes.
+    events.insert(
+        -1,
+        MindEvent(
+            timestamp=start_time + 8,
+            event_type=MindEventType.INTERACTION_OBSERVATION,
+            payload={
+                "interaction_name": "conversation",
+                "interaction_id": "interaction_77",
+                "initiator_id": "npc_bob",
+                "participants": ["npc_alice", "npc_bob", "npc_dave"],
+                "conversation_history": [
+                    {
+                        "speaker_id": "npc_bob",
+                        "message": "Have you seen the smith today? I need a blade repaired.",
+                        "timestamp": float(start_time + 7),
+                    },
+                    {
+                        "speaker_id": "npc_alice",
+                        "message": "He was at the forge this morning, hammering away.",
+                        "timestamp": float(start_time + 7),
+                    },
+                    {
+                        "speaker_id": "npc_dave",
+                        "message": "I would not bother him before noon, he gets short with people.",
+                        "timestamp": float(start_time + 8),
+                    },
+                ],
+                "total_message_count": 3,
+            },
+        ),
+    )
+    return events

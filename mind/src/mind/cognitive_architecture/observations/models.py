@@ -54,6 +54,60 @@ def _format_parameter_hint(param_name: str, spec: dict) -> str:
     return f"{text} ({', '.join(qualifiers)})" if qualifiers else text
 
 
+def _format_cell(value: object) -> str | None:
+    """Render a wire ``[x, y]`` destination as ``"(x, y)"``, or None if unusable.
+
+    ``MindEvent.payload`` is an unvalidated ``dict``, so nothing upstream
+    guarantees a movement event carries two-element coordinate lists. Returning
+    None lets the caller degrade to a plainer sentence; indexing directly is
+    what used to raise on the prompt path.
+    """
+    if isinstance(value, list | tuple) and len(value) >= 2:
+        return f"({value[0]}, {value[1]})"
+    return None
+
+
+def _format_bid_details(payload: dict) -> str:
+    """Render the parenthetical detail clause shared by the three bid arms.
+
+    Carries the identifiers a bid response needs to target, and the whole
+    counter-offer when there is one. The counter fields cross the wire (Godot
+    ``InteractionBidObservation.get_data()`` adds them for a counter bid) and
+    the simulation renders them in its own prose channel, but ``recent_events``
+    is the only path by which they reach the LLM — so dropping them here loses
+    them outright rather than merely compacting them.
+
+    ``bid_type`` is deliberately NOT rendered. The wire sends it as a bare
+    ``InteractionBid.BidType`` ordinal, and naming an ordinal here would hardcode
+    a simulation vocabulary this package may not know. The sibling
+    ``MovementObservation`` serializes its enum by name; making the bid
+    serializer match is the simulation-side fix.
+    """
+    parts: list[str] = []
+
+    bidder_id = str(payload.get("bidder_id") or "").strip()
+    if bidder_id:
+        parts.append(f"from {bidder_id}")
+
+    bid_id = str(payload.get("bid_id") or "").strip()
+    if bid_id:
+        parts.append(f"bid {bid_id}")
+
+    if str(payload.get("countered_bid_id") or "").strip():
+        participants = payload.get("existing_participants")
+        if isinstance(participants, list | tuple) and participants:
+            who = ", ".join(str(p) for p in participants)
+        else:
+            who = "others"
+        clause = f"counter-offer: join with {who}"
+        reason = str(payload.get("counter_reason") or "").strip()
+        if reason:
+            clause += f", because {reason}"
+        parts.append(clause)
+
+    return f" ({'; '.join(parts)})" if parts else ""
+
+
 class MindEventType(StrEnum):
     """Event types matching Godot MindEvent.Type enum"""
 
@@ -81,6 +135,19 @@ class MindEvent(BaseModel):
     def __str__(self) -> str:
         """Format event as natural language for LLM.
 
+        This is the ONLY rendering of the event buffer that reaches a prompt
+        (``nodes.formatting.format_recent_events``, NPC-1335). Two consequences
+        bind every arm below:
+
+        1. **It must be total.** The render happens in the argument expression
+           that builds the reflection prompt — upstream of ``call_llm``, and so
+           upstream of its salvage fallback. An exception here does not degrade
+           the cycle, it loses the cycle and its telemetry (the NPC-1195 class).
+           Read ``payload`` defensively; it is an unvalidated dict.
+        2. **What an arm drops is gone.** Nothing downstream re-derives it and
+           no other channel carries it, so an omission here is an omission from
+           the NPC's view of what just happened — not a compaction of it.
+
         The ``payload["interaction_name"]`` reads below are CORRECT — do not
         sweep them into ``WIRE_KEY_INTERACTION_NAME``. Event payloads are a
         different wire source from ``StatusObservation.current_interaction``:
@@ -96,10 +163,16 @@ class MindEvent(BaseModel):
         if event_type == MindEventType.INTERACTION_BID_REJECTED:
             interaction_name = payload.get("interaction_name", "unknown")
             reason = payload.get("reason", "")
+            # target_id is who refused. Kept because "who said no" is what stops
+            # the NPC re-bidding at the same entity next cycle; the wire omits
+            # the key entirely when it is empty.
+            target_id = str(payload.get("target_id") or "").strip()
+            text = f"Interaction bid rejected: {interaction_name}"
+            if target_id:
+                text += f" by {target_id}"
             if reason:
-                return f"Interaction bid rejected: {interaction_name} (Reason: {reason})"
-            else:
-                return f"Interaction bid rejected: {interaction_name}"
+                text += f" (Reason: {reason})"
+            return text
 
         elif event_type == MindEventType.INTERACTION_STARTED:
             interaction_name = payload.get("interaction_name", "unknown")
@@ -117,33 +190,45 @@ class MindEvent(BaseModel):
             message = payload.get("message", "Unknown error")
             return f"Error: {message}"
 
+        # The three bid arms share a detail clause: without the bidder and bid
+        # id, two bids in flight for the same interaction are indistinguishable,
+        # and a bid response has no id to target.
         elif event_type == MindEventType.INTERACTION_BID_PENDING:
             interaction_name = payload.get("interaction_name", "unknown")
-            return f"Interaction bid pending: {interaction_name}"
+            return f"Interaction bid pending: {interaction_name}{_format_bid_details(payload)}"
 
         elif event_type == MindEventType.INTERACTION_BID_RECEIVED:
             interaction_name = payload.get("interaction_name", "unknown")
-            return f"Interaction bid received: {interaction_name}"
+            return f"Interaction bid received: {interaction_name}{_format_bid_details(payload)}"
 
         elif event_type == MindEventType.INTERACTION_BID_CANCELED:
             interaction_name = payload.get("interaction_name", "unknown")
-            return f"Interaction bid canceled: {interaction_name}"
+            return f"Interaction bid canceled: {interaction_name}{_format_bid_details(payload)}"
 
         elif event_type == MindEventType.INTERACTION_OBSERVATION:
-            # Interaction update - format based on payload
+            # The raw payload is KEPT deliberately, and this is the one arm that
+            # compaction would break rather than improve: it is the only channel
+            # by which conversation content reaches the LLM. Observation.
+            # conversations is never populated in production, and
+            # PipelineState.conversation_histories is rendered by no node — so
+            # rendering this as prose without a speaker-aware replacement would
+            # silently blind every NPC to what was said to it. NPC-1298 owns
+            # closing that gap; compact this arm only after it does.
             return f"Interaction update: {payload}"
 
         elif event_type == MindEventType.MOVEMENT_COMPLETED:
             status = payload.get("status", "UNKNOWN")
-            actual_dest = payload.get("actual_destination")
-            intended_dest = payload.get("intended_destination")
+            actual_dest = _format_cell(payload.get("actual_destination"))
+            intended_dest = _format_cell(payload.get("intended_destination"))
 
-            if status == "ARRIVED":
-                return f"Arrived at ({actual_dest[0]}, {actual_dest[1]})"
-            elif status == "STOPPED_SHORT":
-                return f"Moved to ({actual_dest[0]}, {actual_dest[1]}), intended destination ({intended_dest[0]}, {intended_dest[1]}) was blocked"
-            elif status == "BLOCKED":
-                return f"Could not move to ({intended_dest[0]}, {intended_dest[1]}), no valid path"
+            # Each arm requires the coordinates it names; a malformed payload
+            # falls through to the status-only sentence rather than raising.
+            if status == "ARRIVED" and actual_dest:
+                return f"Arrived at {actual_dest}"
+            elif status == "STOPPED_SHORT" and actual_dest and intended_dest:
+                return f"Moved to {actual_dest}, intended destination {intended_dest} was blocked"
+            elif status == "BLOCKED" and intended_dest:
+                return f"Could not move to {intended_dest}, no valid path"
             else:
                 return f"Movement completed with status {status}"
 
@@ -157,7 +242,11 @@ class MindEvent(BaseModel):
                 return f"Chose action: {action_name}"
 
         else:
-            return f"Unknown event type: {event_type}"
+            # Unreachable while every MindEventType member has an arm above.
+            # Degrade to a repr rather than to nothing: a member the simulation
+            # ships before this package learns about it should reach the model
+            # as raw-but-present, not as a content-free line.
+            return f"{event_type}: {payload}"
 
 
 class StatusObservation(BaseModel):
