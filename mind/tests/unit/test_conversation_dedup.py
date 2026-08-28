@@ -37,7 +37,10 @@ from mind.cognitive_architecture.observations import ConversationMessage, MindEv
 from mind.cognitive_architecture.observations.models import ConversationObservation
 from mind.cognitive_architecture.working_memory import WorkingMemory
 from mind.interfaces.mcp.mind import Mind
-from mind.interfaces.mcp.server import _extract_conversation_observations
+from mind.interfaces.mcp.server import (
+    CONVERSATION_MARKER_FIELD,
+    _extract_conversation_observations,
+)
 
 INTERACTION_ID = "interaction_conv_1"
 
@@ -296,6 +299,20 @@ class TestIdIsRequired:
             }
         )
         assert msg.id == "message_a"
+
+
+class TestTheLoudBranchCannotRotUnnoticed:
+    """The malformed-conversation branch keys on a payload FIELD NAME.
+
+    Renaming that field on the wire would leave the discriminator matching
+    nothing: every malformed conversation would take the routine debug branch,
+    and the loud path would be dead while still looking alive. Nothing else
+    would notice, because a check that stops firing reports exactly what a
+    clean tree reports.
+    """
+
+    def test_the_conversation_marker_field_still_exists_on_the_model(self):
+        assert CONVERSATION_MARKER_FIELD in ConversationObservation.model_fields
 
 
 class TestMalformedConversationIsLoudNotSilent:
