@@ -234,6 +234,187 @@ class TestMindEvent:
         formatted = str(event)
         assert formatted == "Could not move to (10, 20), no valid path"
 
+    # --- NPC-1335: __str__ is now the prompt-path renderer for the event
+    # buffer, so every arm must be both informative and total. The tests below
+    # encode the per-event-type fidelity audit that switch demanded.
+
+    @pytest.mark.parametrize("event_type", list(MindEventType))
+    def test_every_event_type_has_an_informative_arm(self, event_type):
+        """Every MindEventType renders something the LLM can act on.
+
+        The buffer is rendered straight into the reflection prompt, so an
+        unhandled member would put a content-free line in front of the model.
+        This passes today only because all members are covered; its job is to
+        go red the day a twelfth one is added without an arm.
+        """
+        event = MindEvent(timestamp=100, event_type=event_type, payload={"interaction_name": "sit"})
+
+        formatted = str(event)
+        assert formatted.strip()
+        # NOT a startswith check against the retired "Unknown event type"
+        # literal: that string no longer appears anywhere in __str__, so the
+        # assertion could not fail and guarded nothing. What must hold is that
+        # the arm SAYS something specific -- the event type named in prose or
+        # at minimum echoed with its payload, never a bare class repr.
+        assert "MindEvent(" not in formatted
+        assert formatted.strip() != ""
+        assert formatted.strip() != str(event_type)
+
+    def test_bid_received_renders_the_counter_offer(self):
+        """A counter-offer must survive into the prompt.
+
+        The counter fields reach the mind on the wire and are rendered by the
+        simulation's own ``InteractionBidObservation.format_for_npc``, but no
+        other path carries them to the LLM — dropping them here loses them
+        outright.
+        """
+        event = MindEvent(
+            timestamp=103,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={
+                "interaction_name": "conversation",
+                "bid_type": 0,
+                "bid_id": "bid_e5f6a7b8",
+                "bidder_id": "npc_carol",
+                "provider_id": "npc_alice",
+                "countered_bid_id": "bid_00112233",
+                "target_interaction_id": "interaction_9",
+                "existing_participants": ["npc_alice", "npc_bob"],
+                "counter_reason": "already talking to someone",
+                "timestamp": 103.0,
+                "force": False,
+            },
+        )
+
+        formatted = str(event)
+        assert "Interaction bid received: conversation" in formatted
+        assert "counter-offer" in formatted
+        assert "npc_alice" in formatted
+        assert "npc_bob" in formatted
+        assert "already talking to someone" in formatted
+
+    def test_bid_received_names_the_bidder_and_bid_id(self):
+        """Who bid, and which bid — a response action needs the id to target."""
+        event = MindEvent(
+            timestamp=103,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={
+                "interaction_name": "conversation",
+                "bid_id": "bid_e5f6a7b8",
+                "bidder_id": "npc_carol",
+            },
+        )
+
+        formatted = str(event)
+        assert "npc_carol" in formatted
+        assert "bid_e5f6a7b8" in formatted
+
+    def test_bid_pending_and_canceled_name_their_bid(self):
+        """With two bids in flight, the interaction name cannot disambiguate."""
+        for event_type, verb in (
+            (MindEventType.INTERACTION_BID_PENDING, "pending"),
+            (MindEventType.INTERACTION_BID_CANCELED, "canceled"),
+        ):
+            event = MindEvent(
+                timestamp=103,
+                event_type=event_type,
+                payload={
+                    "interaction_name": "conversation",
+                    "bid_id": "bid_e5f6a7b8",
+                    "bidder_id": "npc_carol",
+                },
+            )
+
+            formatted = str(event)
+            assert f"Interaction bid {verb}: conversation" in formatted
+            assert "bid_e5f6a7b8" in formatted
+
+    def test_bid_rejected_names_the_rejecting_entity(self):
+        """``target_id`` is who refused — needed to avoid re-bidding at them."""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_REJECTED,
+            payload={
+                "interaction_name": "sit",
+                "reason": "Too far away",
+                "target_id": "chair_7",
+            },
+        )
+
+        formatted = str(event)
+        assert "Interaction bid rejected: sit" in formatted
+        assert "chair_7" in formatted
+        assert "Too far away" in formatted
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"status": "ARRIVED"},
+            {"status": "ARRIVED", "actual_destination": None},
+            {"status": "ARRIVED", "actual_destination": [4]},
+            {"status": "STOPPED_SHORT", "actual_destination": [4, 5]},
+            {"status": "BLOCKED"},
+            {},
+        ],
+    )
+    def test_movement_completed_with_missing_destination_does_not_raise(self, payload):
+        """A malformed movement payload degrades; it must never raise.
+
+        ``payload`` is an unvalidated dict, and this renders inside the
+        argument expression that builds the reflection prompt — upstream of
+        ``call_llm`` and therefore of its salvage fallback. An exception here
+        costs the whole decision cycle and its telemetry (the NPC-1195 class).
+        """
+        event = MindEvent(
+            timestamp=100, event_type=MindEventType.MOVEMENT_COMPLETED, payload=payload
+        )
+
+        formatted = str(event)
+        assert formatted.strip()
+
+    def test_unknown_event_type_still_carries_its_payload(self):
+        """A future enum member degrades to a repr rather than to nothing.
+
+        ``model_construct`` bypasses enum validation to stand in for a member
+        the simulation ships before this package learns about it.
+        """
+        event = MindEvent.model_construct(
+            timestamp=100,
+            event_type="INTERACTION_ESCALATED",
+            payload={"interaction_name": "duel"},
+        )
+
+        formatted = str(event)
+        assert "INTERACTION_ESCALATED" in formatted
+        assert "duel" in formatted
+
+    def test_interaction_observation_still_carries_conversation_content(self):
+        """Pin, not a preference: this arm is the sole speech channel.
+
+        ``Observation.conversations`` is never populated in production and
+        ``PipelineState.conversation_histories`` is rendered by no node, so an
+        INTERACTION_OBSERVATION event's raw payload is the only way anything
+        anyone said reaches the LLM. Compacting this arm would silently blind
+        every NPC to speech. NPC-1298 owns closing that gap; until it does,
+        this test must go red for anyone who tidies the arm up.
+        """
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_OBSERVATION,
+            payload={
+                "interaction_name": "conversation",
+                "participants": ["npc_alice", "npc_bob"],
+                "conversation_history": [
+                    {"speaker_id": "npc_bob", "message": "Have you seen the smith today?"}
+                ],
+                "total_message_count": 1,
+            },
+        )
+
+        formatted = str(event)
+        assert "Have you seen the smith today?" in formatted
+        assert "npc_bob" in formatted
+
 
 class TestBidActionGeneration:
     """Test generation of bid response actions"""
