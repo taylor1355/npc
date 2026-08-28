@@ -199,7 +199,15 @@ class Mind:
 
             for msg in conv_obs.conversation_history:
                 incoming_id = msg.id
-                if incoming_id is not None and not incoming_id.strip():
+                # Normalised once, here, so the value we VALIDATE is the value we STORE
+                # and key on. Checking `.strip()` for emptiness while keying on the
+                # untrimmed original would make " message_a " and "message_a" two
+                # identities for one message -- the test and the thing tested drifting
+                # apart. The simulation mints ids without whitespace, but this boundary
+                # does not get to assume that about a producer it does not version with.
+                if incoming_id is not None:
+                    incoming_id = incoming_id.strip()
+                if incoming_id is not None and not incoming_id:
                     # An EMPTY id is a producer bug, categorically different from
                     # an ABSENT one: the simulation mints in the constructor, so
                     # a blank means the mint path was bypassed. Never treat "" as
