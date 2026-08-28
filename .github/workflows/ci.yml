@@ -18,16 +18,18 @@
 #   - mypy: held at stage `manual` locally and absent here until its error
 #     baseline is cleaned up - NPC-1034 tracks promoting it to both surfaces.
 #
-# Version authority: poetry.lock is the ONLY authority for tool versions in
-# this job - ruff and pytest run via `poetry run`, so there is no third pin to
+# Version authority: uv.lock is the ONLY authority for tool versions in this
+# job - ruff and pytest run via `uv run --frozen`, so there is no third pin to
 # drift (the ruff-pre-commit rev is kept in sync per the note in
 # .pre-commit-config.yaml).
 #
-# Python version: this job runs 3.12 - the interpreter the project actually
-# develops and runs on (the local venv is 3.12.x) - rather than the ^3.11
-# floor mind/pyproject.toml declares. ruff's target-version = "py311" keeps
-# the syntax floor honest; actually TESTING the floor would need a matrix and
-# reconciling the three 3.11 declarations, deferred from PR #22's review.
+# Interpreter: uv is the single authority. It resolves, downloads if needed, and
+# owns the environment, so there is no second interpreter for the venv and the
+# tests to disagree about. `--python 3.12` is the pin (mind/pyproject.toml
+# declares >=3.11,<3.13, and there is deliberately no .python-version file for
+# uv to read); ruff's target-version = "py311" keeps the syntax floor honest.
+# Actually TESTING the 3.11 floor would need a matrix, deferred from PR #22's
+# review.
 #
 # Test scope: tests/unit plus the two integration files that run without live
 # LLM credentials. The OpenRouter-live integration files are excluded from
@@ -65,37 +67,25 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
-        id: setup-python
+      # uv is PINNED to the version that generated mind/uv.lock, so CI and a
+      # developer machine build the same environment from the same file. Raising
+      # it is a deliberate act that pairs with re-running `uv lock`.
+      #
+      # `enable-cache` caches ~/.cache/uv keyed on the lock. That single cache
+      # replaces the venv cache this job used to keep: uv materializes a venv
+      # from its cache by hardlink, so caching the wheels is strictly better
+      # than caching a 2.4 GB tree of copies of them.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
+          version: "0.5.8"
+          enable-cache: true
+          cache-dependency-glob: "mind/uv.lock"
 
-      # pip, not pipx: pipx would run poetry on the runner's SYSTEM Python, so
-      # the project venv would be built on an interpreter setup-python does not
-      # control. Installing with this pip keeps one interpreter authority - the
-      # setup-python interpreter above builds the venv and runs the tests.
-      - run: pip install poetry==1.8.2
-
-      - run: poetry config virtualenvs.in-project true
-
-      # Two caches, split because they version independently:
-      # - The venv is a function of poetry.lock and the interpreter (torch is
-      #   ~2.4GB; restore-keys salvages most wheels when the lock changes). The
-      #   key embeds the FULL patch version from setup-python, so a runner-image
-      #   Python bump can never restore a venv built on a deleted interpreter.
-      # - The huggingface cache is a function of which embedding models the
-      #   tests load (~90MB for all-MiniLM-L6-v2). Its key uses run_id, which
-      #   never hits exactly, so it restores from the newest previous run and
-      #   RE-SAVES every run - a model change updates it instead of freezing it
-      #   at the first snapshot forever.
-      - name: Cache venv
-        uses: actions/cache@v4
-        with:
-          path: mind/.venv
-          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('mind/poetry.lock') }}
-          restore-keys: |
-            venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-
-
+      # A function of which embedding models the tests load (~90MB for
+      # all-MiniLM-L6-v2). Its key uses run_id, which never hits exactly, so it
+      # restores from the newest previous run and RE-SAVES every run - a model
+      # change updates it instead of freezing it at the first snapshot forever.
       - name: Cache huggingface models
         uses: actions/cache@v4
         with:
@@ -104,13 +94,22 @@ jobs:
           restore-keys: |
             hf-${{ runner.os }}-
 
-      - run: poetry install --sync
+      # `--frozen` everywhere below: install exactly what uv.lock records and
+      # never re-resolve. A lock that does not match pyproject.toml then fails
+      # the run instead of being silently repaired inside CI, which is the whole
+      # point of committing it.
+      #
+      # No group flags: pyproject's `default-groups = ["dev", "cpu"]` installs
+      # the dev tools and the CPU torch build. CI must never pull the CUDA
+      # build - there is no GPU on the runner and it is roughly ten times the
+      # download.
+      - run: uv sync --frozen --python 3.12
 
       - name: Ruff lint
-        run: poetry run ruff check src tests
+        run: uv run --frozen ruff check src tests
 
       - name: Ruff format
-        run: poetry run ruff format --check src tests
+        run: uv run --frozen ruff format --check src tests
 
       - name: Stub credentials file (read at import time by project_config.py)
         run: |
@@ -118,4 +117,4 @@ jobs:
           printf "OPENROUTER_API_KEY: 'ci-dummy'\nPERPLEXITY_API_KEY: 'ci-dummy'\n" > ../credentials/api_keys.cfg
 
       - name: Tests (scope matches the pytest-unit pre-commit hook)
-        run: poetry run pytest tests/unit tests/integration/test_http_endpoints.py tests/integration/test_memory_retrieval.py -q
+        run: uv run --frozen pytest tests/unit tests/integration/test_http_endpoints.py tests/integration/test_memory_retrieval.py -q

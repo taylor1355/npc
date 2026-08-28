@@ -7,8 +7,11 @@ This repository implements the cognitive architecture for NPCs, providing LLM-ba
 ### Installation
 
 ```bash
-poetry install
+uv sync --frozen
 ```
+
+This installs the CPU build of torch. Opt in to CUDA with
+`uv sync --no-group cpu --group cuda`; `pyproject.toml` explains the tradeoff.
 
 ### Configuration
 
@@ -21,7 +24,7 @@ export OPENROUTER_API_KEY="your-api-key"
 
 ```bash
 # Start the Mind MCP server (default: localhost:3000)
-poetry run python src/mind/interfaces/mcp/main.py
+uv run python -m mind.interfaces.mcp.main
 ```
 
 The Godot simulation connects to this server for NPC cognitive processing.
@@ -87,10 +90,10 @@ The Godot simulation connects to this server for NPC cognitive processing.
 
 ```bash
 # Run all tests
-poetry run pytest
+uv run pytest
 
 # Integration tests only
-poetry run pytest tests/test_mcp_integration.py -v
+uv run pytest tests/integration -v
 
 # Interactive development notebook
 jupyter notebook notebooks/test_cognitive_pipeline.ipynb
@@ -107,4 +110,4 @@ See [docs/planning/roadmap.md](docs/planning/roadmap.md) for current priorities 
 - **ChromaDB** - Vector database for semantic memory
 - **Pydantic** - Type-safe data models
 - **FastMCP** - MCP protocol implementation
-- **Poetry** - Dependency management
+- **uv** - Dependency management and environment resolution

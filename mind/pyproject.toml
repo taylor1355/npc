@@ -1,56 +1,166 @@
-[tool.poetry]
+# Python environment for the mind (cognitive backend) project.
+#
+# Managed by uv, not Poetry. `uv.lock` is the reproducibility artifact and is
+# committed; `poetry.lock` is gone, and there is deliberately no parallel Poetry
+# path left to fall back to.
+#
+# WHY THE MIGRATION (measured 2026-08-27, this machine — WSL2/Ubuntu, ext4 root)
+#
+# Creating a worktree cost HOURS. A single `poetry install` ran past two hours
+# without finishing; two venvs each reached 3.9 GB / 359 packages with torch and
+# chromadb still absent, and sustained write throughput measured ~115 KB/s via
+# /proc/<pid>/io. Poetry also keys its venv on the project PATH, so every
+# worktree minted its own multi-GB copy. The sibling simulation repo made the
+# same move ([NPC-1389], its PR #503) and its environment now installs in
+# hundreds of milliseconds from uv's cache.
+#
+#     uv sync                  # build/refresh the environment from uv.lock
+#     uv run pytest ...        # run inside it without activating anything
+#     uv lock                  # re-resolve after editing this file
+#
+# The environment location is NOT this directory by default. The simulation
+# repo's `tools/setup_mind.sh` sets UV_PROJECT_ENVIRONMENT to a fixed ext4 path
+# so the multi-GB venv never lands on the 9p/DrvFs mount the source is served
+# over — and, unlike Poetry's per-path hashing, every worktree then shares ONE
+# environment.
+
+[project]
 name = "mind"
 version = "0.1.0"
-packages = [
-    { include = "mind", from = "src" }
-]
-description = ""
-authors = ["Taylor Hearn <hearntaylor@gmail.com>"]
+description = "Cognitive architecture and MCP server for autonomous NPC minds."
 readme = "README.md"
+authors = [{ name = "Taylor Hearn", email = "hearntaylor@gmail.com" }]
 
-[[tool.poetry.source]]
-name = "pytorch"
+# Poetry declared `python = "^3.11"`, i.e. >=3.11,<4.0. The FLOOR is preserved
+# exactly; the ceiling is new and is what makes the migration possible at all.
+# Poetry locks for the one environment it is run in, so its `<4.0` was never
+# resolved against. uv resolves UNIVERSALLY across this range, so an open-ended
+# ceiling asks it to satisfy interpreters no dependency here ships wheels for.
+# 3.11 is the interpreter every local venv was actually built on; 3.12 is what
+# CI runs. `<3.13` covers both and nothing speculative.
+#
+# `mind/.python-version` was DELETED alongside this. It said 3.12.7 while every
+# Poetry venv on this machine was py3.11 — Poetry never read it, so the pin was
+# inert. uv DOES read it, so keeping it would have turned a bootstrap that can
+# use the interpreter already on the machine into a mandatory ~30 MB managed
+# download of a patch release nothing else names. CI pins its interpreter
+# explicitly instead, where the pin is load-bearing and visible.
+requires-python = ">=3.11,<3.13"
+
+# Every constraint below is the Poetry caret translated literally
+# (`^1.2.3` -> `>=1.2.3,<2`; `^0.4.1` -> `>=0.4.1,<0.5`). Nothing was widened,
+# narrowed, added, or dropped. `torch` is the ONE dependency that moved, into
+# the cpu/cuda groups below — see the note there for why, and note it is still
+# installed by a bare `uv sync`.
+dependencies = [
+    "ipykernel>=6.29.5,<7",
+    "sentence-transformers>=3.0.1,<4",
+    "config>=0.5.1,<0.6",
+    "pydantic>=2.9.0,<3",
+    "rich>=13.8.1,<14",
+    "json-repair>=0.29.5,<0.30",
+    "google-api-python-client>=2.149.0,<3",
+    "google-auth-httplib2>=0.2.0,<0.3",
+    "google-auth-oauthlib>=1.2.1,<2",
+    "EZGmail>=2024.8.13,<2025",
+    "openai>=1.12.0,<2",
+    "PerplexiPy>=1.1.3,<2",
+    "aiofiles>=24.1.0,<25",
+    "portpicker>=1.6.0,<2",
+    "mcp>=1.2.0,<2",
+    "fastmcp>=0.4.1,<0.5",
+    "langgraph>=1.0.2",
+    "langchain-core>=1.0.4",
+    "langchain-openai>=0.3.0",
+    "chromadb>=1.5.0,<2",
+    "posthog<3.6.0",
+    "langchain>=1.0.5,<2",
+]
+
+[dependency-groups]
+
+# Unchanged from `[tool.poetry.group.dev.dependencies]`. Installed by a bare
+# `uv sync` (see default-groups), exactly as `poetry install` installed it.
+dev = [
+    "nbstripout>=0.8.1,<0.9",
+    "pytest>=8.4.2,<9",
+    "pytest-asyncio>=1.2.0,<2",
+    "ruff>=0.14.1,<0.15",
+    "mypy>=1.18.2,<2",
+    "pre-commit>=4.3.0,<5",
+    "pytest-cov>=7.0.0,<8",
+]
+
+# TORCH: CPU BY DEFAULT, CUDA BY EXPLICIT OPT-IN.
+#
+# Nothing in src/ or tests/ imports torch — `grep -rn "import torch" src tests`
+# is empty. Its single consumer is SentenceTransformer("all-MiniLM-L6-v2"),
+# constructed in `vector_db_memory.py::VectorDBMemory.__init__`: a 22M-parameter
+# model embedding short strings one at a time, where CPU inference is
+# single-digit milliseconds and the GPU's batch advantage does not apply. torch
+# is declared here only to decide WHICH BUILD gets installed — left alone it
+# arrives transitively from sentence-transformers, and PyPI's Linux torch wheel
+# is the CUDA one, which is the multi-GB cost this migration exists to stop
+# paying by default.
+#
+# CUDA stays reachable — the machine has an RTX 4090 visible in WSL:
+#
+#     uv sync                                   # CPU  (default)
+#     uv sync --no-group cpu --group cuda       # CUDA (cu121)
+#
+# Groups rather than `[project.optional-dependencies]` extras, deliberately: uv
+# has `default-groups` but no equivalent for extras at this version, and an
+# extra would make "CPU by default" mean "CPU if you remember the flag" —
+# forgetting it would silently install the CUDA build off PyPI. `default-groups`
+# makes the default TRUE rather than merely documented.
+#
+# `conflicts` is what lets one package name resolve from two different indexes;
+# without it uv refuses the manifest outright. One consequence is visible in
+# uv.lock: it carries a THIRD torch fork (plain PyPI) for the neither-group
+# combination, reachable only via `uv sync --no-default-groups`. That is an
+# explicit opt-out of the default, not a silent fallback.
+cpu = ["torch>=2.2.0,<3"]
+cuda = ["torch>=2.2.0,<3"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+# `explicit`: reachable only for packages routed here by [tool.uv.sources], so
+# it never shadows PyPI for anything else.
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
 url = "https://download.pytorch.org/whl/cu121"
-priority = "explicit"
+explicit = true
 
-[tool.poetry.dependencies]
-python = "^3.11"
-ipykernel = "^6.29.5"
-torch = { version = "^2.2.0", source = "pytorch" }
-sentence-transformers = "^3.0.1"
-config = "^0.5.1"
-pydantic = "^2.9.0"
-rich = "^13.8.1"
-json-repair = "^0.29.5"
-google-api-python-client = "^2.149.0"
-google-auth-httplib2 = "^0.2.0"
-google-auth-oauthlib = "^1.2.1"
-EZGmail = "^2024.8.13"
-openai = "^1.12.0"
-PerplexiPy = "^1.1.3"
-aiofiles = "^24.1.0"
-portpicker = "^1.6.0"
-mcp = "^1.2.0"
-fastmcp = "^0.4.1"
-langgraph = ">=1.0.2"
-langchain-core = ">=1.0.4"
-langchain-openai = ">=0.3.0"
-chromadb = "^1.5.0"
-posthog = "<3.6.0"
-langchain = "^1.0.5"
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cu121", group = "cuda" },
+]
 
-[tool.poetry.group.dev.dependencies]
-nbstripout = "^0.8.1"
-pytest = "^8.4.2"
-pytest-asyncio = "^1.2.0"
-ruff = "^0.14.1"
-mypy = "^1.18.2"
-pre-commit = "^4.3.0"
-pytest-cov = "^7.0.0"
+[tool.uv]
+# Both must be listed: naming any group here REPLACES uv's built-in default of
+# ["dev"], so omitting dev would silently stop installing the test and lint
+# tools that CI and pre-commit both run.
+default-groups = ["dev", "cpu"]
+conflicts = [[{ group = "cpu" }, { group = "cuda" }]]
 
+# Unlike the simulation repo's tooling manifest, this IS a distributable
+# package: `mind.*` is imported by its own tests and by the MCP server entry
+# point (`python -m mind.interfaces.mcp.main`), so `uv sync` must install it
+# into the environment rather than merely resolving its dependencies.
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Replaces `packages = [{ include = "mind", from = "src" }]`. `src/mind` has no
+# __init__.py (namespace package) and the internal imports are absolute
+# `from mind.…`, so the wheel must map src/mind -> mind. Stated explicitly
+# because hatchling's auto-detection cannot infer a src layout on its own.
+[tool.hatch.build.targets.wheel]
+packages = ["src/mind"]
 
 [tool.ruff]
 line-length = 100
@@ -86,8 +196,8 @@ ignore_missing_imports = true
 no_implicit_optional = true
 
 # Module resolution. The package is a namespace package (no src/mind/__init__.py) laid
-# out as packages = [{ include = "mind", from = "src" }], while all internal imports are
-# absolute `from mind.…`. Without mypy_path, `src` is on neither the search path nor the
+# out so the wheel maps src/mind -> mind, while all internal imports are absolute
+# `from mind.…`. Without mypy_path, `src` is on neither the search path nor the
 # cwd, so explicit_package_bases picks `mind/` as the base and checks
 # src/mind/interfaces/mcp/server.py as module `src.mind.interfaces.mcp.server`. The
 # absolute imports then resolve to nothing, and ignore_missing_imports degrades them to

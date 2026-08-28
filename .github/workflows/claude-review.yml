@@ -171,8 +171,8 @@ jobs:
             working tree is not part of the PR, so never quote it as evidence of
             what the PR contains.
 
-            **3. You cannot run the test suite here.** `poetry run pytest` needs a
-            full `poetry install` (torch, plus a HuggingFace model download), which
+            **3. You cannot run the test suite here.** `uv run pytest` needs a
+            full `uv sync` (torch, plus a HuggingFace model download), which
             this job deliberately does not perform -- that is what
             `.github/workflows/ci.yml` is for, and it runs on the same PR. For
             anything covered only by the tests, say plainly that you could not
@@ -227,7 +227,7 @@ jobs:
             ## Testing
             - Tests use pytest (`asyncio_mode = auto`), split into
               `mind/tests/unit/` and `mind/tests/integration/`; run via
-              `poetry run pytest`. Test files are named `test_*.py`.
+              `uv run pytest`. Test files are named `test_*.py`.
             - New behavior should add unit tests; bug fixes should add a regression
               test that fails before the fix. Flag new logic with no test coverage
               and bug-fix PRs with no regression test.

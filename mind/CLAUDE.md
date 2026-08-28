@@ -66,6 +66,8 @@ src/mind/
 `google/gemini-2.5-flash-lite`; per-node means 551.2 / 2,802.5 / 2,012.9 for
 memory_query / cognitive_update / action_selection). Reproduce with the harness in
 NPC-1318's baseline comment: `PYTHONPATH=$PWD/src:$PWD python measure_baseline.py`
+(**that harness is not in this repo** — it exists only as an attachment on the Linear
+issue, so reproducing the number means retrieving it from there first)
 from a mind checkout with credentials linked. The reflection merge removes the
 duplicated prompt content between the two retired nodes; re-measure with the same
 harness rather than extrapolating.
@@ -130,20 +132,24 @@ Godot (GDScript)
 ### Server
 ```bash
 # Start MCP server (default: localhost:3000)
-poetry run python src/mind/interfaces/mcp/main.py
+uv run python -m mind.interfaces.mcp.main
 
 # With environment variable for API key
 export OPENROUTER_API_KEY="your-key"
-poetry run python src/mind/interfaces/mcp/main.py
+uv run python -m mind.interfaces.mcp.main
 ```
 
 ### Testing
 ```bash
 # Run all tests
-poetry run pytest
+uv run pytest
 
 # Integration tests only
-poetry run pytest tests/test_mcp_integration.py -v
+uv run pytest tests/integration -v
+
+# The scope CI and the pre-commit hook actually gate (the two OpenRouter-live
+# integration files are excluded from both)
+uv run pytest tests/unit tests/integration/test_http_endpoints.py     tests/integration/test_memory_retrieval.py -q
 
 # Interactive development
 jupyter notebook notebooks/test_cognitive_pipeline.ipynb
@@ -151,12 +157,22 @@ jupyter notebook notebooks/test_cognitive_pipeline.ipynb
 
 ### Development
 ```bash
-# Install dependencies
-poetry install
+# Build/refresh the environment from uv.lock (never re-resolves)
+uv sync --frozen
+
+# Re-resolve after editing pyproject.toml, then commit uv.lock
+uv lock
+
+# Opt in to the CUDA torch build (the default is CPU - see pyproject.toml)
+uv sync --no-group cpu --group cuda
 
 # Check code structure
 tree src/mind/cognitive_architecture/nodes/
 ```
+
+The environment lives wherever `UV_PROJECT_ENVIRONMENT` points, and `mind/.venv`
+only when it points nowhere. The simulation repo's `tools/setup_mind.sh` sets it to
+a shared path outside this tree, so one environment serves every worktree.
 
 ### Commit hooks and notebook stripping
 
@@ -203,7 +219,7 @@ Two things make the hook work, and both are easy to break:
   pre-commit runs hooks from the repo root, which has no `pyproject.toml`. Run from the
   root, mypy loads no config at all and reports `Config File: Default`.
 - Every setting lives in `mind/pyproject.toml`'s `[tool.mypy]`, and the hook entry
-  passes **no flags**. This is deliberate: `poetry run mypy src/mind` — the obvious
+  passes **no flags**. This is deliberate: `uv run mypy src/mind` — the obvious
   thing to run by hand — must behave identically to the hook.
   `mypy_path = "$MYPY_CONFIG_FILE_DIR/src"` is the load-bearing one; without it the
   absolute `from mind.…` imports resolve to nothing and `ignore_missing_imports`
@@ -279,4 +295,4 @@ See [docs/planning/roadmap.md](docs/planning/roadmap.md) for detailed planning.
 - **ChromaDB** - Vector database for semantic memory
 - **Pydantic** - Type-safe data models
 - **FastMCP** - MCP protocol implementation
-- **Poetry** - Dependency management
+- **uv** - Dependency management and environment resolution
