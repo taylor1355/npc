@@ -428,18 +428,21 @@ def create_conversation_observation(simulation_time: int = 100) -> Observation:
                 participants=["social_npc", "alice_npc"],
                 conversation_history=[
                     ConversationMessage(
+                        id="message_observations_1",
                         speaker_id="alice_npc",
                         speaker_name="Alice",
                         message="Hello! How are you doing today?",
                         timestamp=simulation_time - 5,
                     ),
                     ConversationMessage(
+                        id="message_observations_2",
                         speaker_id="social_npc",
                         speaker_name="Bob",
                         message="I'm doing well, thanks! Just finished some work.",
                         timestamp=simulation_time - 3,
                     ),
                     ConversationMessage(
+                        id="message_observations_3",
                         speaker_id="alice_npc",
                         speaker_name="Alice",
                         message="That's great! What have you been working on?",

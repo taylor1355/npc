@@ -72,6 +72,16 @@ def _success_response(request_id: str, action: dict, telemetry: dict) -> dict:
     }
 
 
+# The payload field whose presence marks an INTERACTION_OBSERVATION as a
+# CONVERSATION rather than some other interaction kind. Named here rather than
+# written as a literal at the branch: if the wire field is ever renamed, the
+# literal would match nothing, every malformed conversation would quietly take
+# the debug branch, and the loud path below would be dead while still looking
+# alive. `test_the_conversation_marker_field_still_exists_on_the_model` fails
+# on a rename so the coupling cannot rot unnoticed.
+CONVERSATION_MARKER_FIELD = "conversation_history"
+
+
 def _extract_conversation_observations(
     events: list[MindEvent], entity_id: str
 ) -> list[ConversationObservation]:
@@ -94,10 +104,30 @@ def _extract_conversation_observations(
                 conv_obs = ConversationObservation.model_validate(event.payload)
                 conversations.append(conv_obs)
             except ValidationError as e:
-                # Not a conversation observation or malformed - skip it
-                logger.debug(
-                    f"[{entity_id}] Skipping non-conversation interaction observation: {e}"
-                )
+                # Two very different cases reach this handler, and collapsing them is
+                # what made a stricter model dangerous here.
+                #
+                # INTERACTION_OBSERVATION covers every interaction kind - sitting,
+                # eating, and the rest - so most payloads that fail to validate are
+                # simply not conversations. That is routine and stays at debug.
+                #
+                # But a payload that IS a conversation and still fails validation is a
+                # real malformation, and skipping it silently drops the ENTIRE
+                # conversation from the mind's perception - worse than any dedup bug,
+                # because nothing anywhere would say so. Since ConversationMessage.id
+                # became required, a message missing one lands exactly here. Say it
+                # loudly and stay inert.
+                payload = event.payload if isinstance(event.payload, dict) else {}
+                if CONVERSATION_MARKER_FIELD in payload:
+                    logger.error(
+                        f"[{entity_id}] MALFORMED conversation observation for interaction "
+                        f"{payload.get('interaction_id')!r} - dropping the whole conversation "
+                        f"from this cycle's perception. Validation error: {e}"
+                    )
+                else:
+                    logger.debug(
+                        f"[{entity_id}] Skipping non-conversation interaction observation: {e}"
+                    )
                 continue
     return conversations
 

@@ -159,7 +159,18 @@ class Mind:
         )
 
     def update_conversations(self, conversations: list) -> None:
-        """Aggregate conversation updates into full history
+        """Aggregate conversation updates into full history.
+
+        Observations arrive as overlapping rolling windows, so the same message
+        is re-sent on many cycles and must be stored exactly once. Identity is
+        the message's ``id`` and nothing else: the simulation mints one for
+        every message as a class invariant, so there is no id-less message to
+        accommodate and no second keying strategy to keep alive beside this one.
+
+        The index is rebuilt per conversation and **mutated inside the loop**.
+        Building it once up front was a distinct defect from the keying one: a
+        single batch carrying the same message twice stored it twice, and that
+        stays true of an id-only key.
 
         Args:
             conversations: List of ConversationObservation objects
@@ -171,16 +182,37 @@ class Mind:
             if interaction_id not in self.conversation_histories:
                 self.conversation_histories[interaction_id] = []
 
-            # Append new messages (avoid duplicates by checking timestamps)
-            existing_timestamps = {
-                msg.timestamp
-                for msg in self.conversation_histories[interaction_id]
-                if msg.timestamp is not None
-            }
+            stored = self.conversation_histories[interaction_id]
+            seen_ids = {msg.id for msg in stored}
 
             for msg in conv_obs.conversation_history:
-                if msg.timestamp is None or msg.timestamp not in existing_timestamps:
-                    self.conversation_histories[interaction_id].append(msg)
+                # Normalised once, here, so the value we VALIDATE is the value we
+                # STORE and key on. Checking `.strip()` for emptiness while keying on
+                # the untrimmed original would make " message_a " and "message_a" two
+                # identities for one message — the test and the thing tested drifting
+                # apart.
+                message_id = msg.id.strip()
+                if not message_id:
+                    # An empty id is a producer bug: the simulation mints in the
+                    # constructor and logs an error if it ever serializes a blank,
+                    # so a blank arriving here means that invariant was bypassed.
+                    # There is nowhere to fall through to — "" cannot be an
+                    # identity, since every blank would collide with every other —
+                    # so the message is refused, loudly. Loud and inert beats
+                    # silently collapsing distinct messages into one.
+                    logger.error(
+                        f"[{self.entity_id}] Conversation message in {interaction_id} arrived "
+                        f"with an EMPTY id (speaker={msg.speaker_id!r}) — the producer's mint "
+                        f"invariant was bypassed. Refusing the message; it cannot be identified."
+                    )
+                    continue
+
+                if message_id in seen_ids:
+                    continue
+
+                msg.id = message_id
+                stored.append(msg)
+                seen_ids.add(message_id)
 
     def update_events(self, new_events: list[MindEvent], current_time: int) -> None:
         """Update event buffer with retention policy
