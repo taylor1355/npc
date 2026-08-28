@@ -403,8 +403,19 @@ class TestVectorDBMemory:
         timestamped one, so hardcoded backstory permanently outranked
         experience, by a margin that widened with playtime.
 
-        Content is near-identical so relevance is effectively matched and
-        recency is the only thing left to decide the order.
+        Two details of the setup are load-bearing under min-max normalization,
+        and both remove an uncontrolled variable rather than weakening the
+        property:
+
+        - **Two timestamped memories, not one.** Recency is normalized over the
+          candidates that scored on it, so a single timestamped memory leaves
+          that term no range and it degenerates to the neutral midpoint. Recency
+          is inherently comparative here, and a realistic store has several lived
+          memories.
+        - **Relevance weighted to zero.** These contents are near-identical, and
+          min-max *amplifies* a tiny cosine difference across the full interval.
+          Left in, the assertion would turn on embedding noise rather than on the
+          recency inversion it exists to catch.
         """
         # The initial_long_term_memories path: no timestamp, never rated.
         memory_store.add_memory(content="Alice worked at the blacksmith forge", importance=5.0)
@@ -416,18 +427,29 @@ class TestVectorDBMemory:
             timestamp=100_000,
         )
 
+        # A second lived memory, long ago, so recency has a range to normalize over.
+        memory_store.add_memory(
+            content="Alice worked at the blacksmith forge long ago",
+            importance=5.0,
+            timestamp=40_000,
+        )
+
         query = VectorDBQuery(
             query="Alice at the blacksmith forge",
-            top_k=2,
+            top_k=3,
             current_simulation_time=100_000,
+            weights=RetrievalWeights(relevance=0.0, importance=1.0, recency=1.0),
         )
         results = await memory_store.search(query)
 
-        assert len(results) == 2
+        assert len(results) == 3
         assert results[0].timestamp == 100_000, (
             "a memory that actually happened must outrank untimestamped backstory"
         )
+        # The untimestamped seed lands between the two lived memories: abstaining
+        # on recency, it is neither floated by a 1.0 sentinel nor sunk by a 0 one.
         assert results[1].timestamp is None
+        assert results[2].timestamp == 40_000
 
     async def test_an_unrated_memory_reads_back_as_unrated(self, memory_store):
         """None round-trips as None, not as a fabricated default.

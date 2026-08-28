@@ -28,11 +28,13 @@ from mind.cognitive_architecture.memory.retrieval import (
     RetrievalWeights,
     ScoredCandidate,
     candidate_pool_size,
-    combined_score,
+    collect_raw_scores,
     default_terms,
     rank,
     reinforced_time,
+    score_pool,
     should_reinforce,
+    term_statistics,
 )
 
 # 0.995 ** 10 and 0.995 ** 1000, to 8dp. Literals rather than expressions so that
@@ -67,10 +69,37 @@ def context(now: int | None = NOW) -> RetrievalContext:
     return RetrievalContext(query="anything", current_simulation_time=now)
 
 
-def score_of(candidate: ScoredCandidate, weights: RetrievalWeights | None = None) -> float | None:
-    return combined_score(
-        candidate, context(), weights or RetrievalWeights(), default_terms()
-    ).total
+def breakdowns_for(
+    candidates: list[ScoredCandidate],
+    weights: RetrievalWeights | None = None,
+    now: int | None = NOW,
+) -> list:
+    """Score a pool, returned in input order.
+
+    There is deliberately no single-candidate `score_of` helper any more.
+    Normalization is min-max **over the pool**, so a lone candidate is degenerate
+    on every term at once and always totals 0.5. A helper that hid that would
+    invite tests which look like they constrain the arithmetic but constrain
+    nothing.
+    """
+    return score_pool(candidates, context(now), weights or RetrievalWeights(), default_terms())
+
+
+def totals_for(
+    candidates: list[ScoredCandidate],
+    weights: RetrievalWeights | None = None,
+    now: int | None = NOW,
+) -> list[float | None]:
+    return [b.total for b in breakdowns_for(candidates, weights, now)]
+
+
+def order_of(
+    candidates: list[ScoredCandidate], weights: RetrievalWeights | None = None
+) -> list[str]:
+    ranked = rank(
+        candidates, context(), weights or RetrievalWeights(), default_terms(), len(candidates)
+    )
+    return [candidate.memory_id for _, candidate in ranked]
 
 
 class TestModuleBoundary:
@@ -132,10 +161,28 @@ class TestKnownInputRanking:
 
         assert [c.memory_id for _, c in ranked] == ["best", "middle", "worst"]
 
-        # (relevance + importance + recency) / 3, each term on its own [0,1] scale.
-        assert ranked[0][0].total == pytest.approx((0.8 + 0.9 + 1.0) / 3, abs=1e-6)
-        assert ranked[1][0].total == pytest.approx((0.5 + 0.5 + DECAY_10_HOURS) / 3, abs=1e-6)
-        assert ranked[2][0].total == pytest.approx((0.1 + 0.2 + DECAY_1000_HOURS) / 3, abs=1e-6)
+        # Min-max over the pool. `best` is the pool maximum on all three terms
+        # and `worst` the pool minimum on all three, so they land exactly on the
+        # interval endpoints - a property fixed-scale normalization does not have
+        # and a sharp check that the normalizer ran at all.
+        assert ranked[0][0].total == pytest.approx(1.0, abs=1e-9)
+        assert ranked[2][0].total == pytest.approx(0.0, abs=1e-9)
+
+        # `middle`, hand-computed against the pool's observed ranges:
+        #   relevance  (0.5 - 0.1) / (0.8 - 0.1)                    = 0.5714286
+        #   importance (0.5 - 0.2) / (0.9 - 0.2)                    = 0.4285714
+        #   recency    (0.95111014 - 0.00665397) / (1 - 0.00665397) = 0.9507826
+        assert ranked[1][0].total == pytest.approx(
+            (0.5714286 + 0.4285714 + 0.9507826) / 3, abs=1e-5
+        )
+
+        # The raw, pre-normalization values stay on the terms' own absolute
+        # scales, so the decay base and the /60 conversion remain pinned.
+        assert ranked[1][0].raw_contributions["recency"] == pytest.approx(DECAY_10_HOURS, abs=1e-6)
+        assert ranked[2][0].raw_contributions["recency"] == pytest.approx(
+            DECAY_1000_HOURS, abs=1e-6
+        )
+        assert ranked[0][0].raw_contributions["importance"] == pytest.approx(0.9, abs=1e-9)
 
     def test_top_k_truncates_after_scoring_not_before(self):
         """The pool is scored whole; top_k selects from the ranking, not the input order."""
@@ -151,10 +198,13 @@ class TestKnownInputRanking:
 
     def test_weights_are_ratios_not_required_to_sum_to_one(self):
         """Doubling every weight cannot change any score - they are relative."""
-        candidate = make_candidate("m", distance=0.3, importance=7.0, timestamp=NOW - 600)
+        pool = [
+            make_candidate("a", distance=0.3, importance=7.0, timestamp=NOW - 600),
+            make_candidate("b", distance=0.7, importance=3.0, timestamp=NOW - 6000),
+        ]
 
-        unit = score_of(candidate, RetrievalWeights(relevance=1.0, importance=1.0, recency=1.0))
-        doubled = score_of(candidate, RetrievalWeights(relevance=2.0, importance=2.0, recency=2.0))
+        unit = totals_for(pool, RetrievalWeights(relevance=1.0, importance=1.0, recency=1.0))
+        doubled = totals_for(pool, RetrievalWeights(relevance=2.0, importance=2.0, recency=2.0))
 
         assert unit == pytest.approx(doubled, abs=1e-12)
 
@@ -172,37 +222,59 @@ class TestKnownInputRanking:
 
 
 class TestMonotonicity:
-    """Hold two terms fixed, sweep the third; the total must move with it."""
+    """Sweep one term across a pool with the other two held fixed.
 
-    def test_total_increases_as_distance_decreases(self):
-        totals = [
-            score_of(make_candidate(f"d{i}", distance=d))
+    **This property changed shape under min-max normalization**, and the change
+    is real rather than cosmetic. Previously each candidate had an absolute score
+    and monotonicity was a statement about one memory in isolation. A score now
+    exists only relative to its pool, so "the total rises with the term" is only
+    meaningful *within one pool of co-scored candidates* - which is what these
+    build. Holding the other two terms fixed also makes them degenerate, so they
+    contribute an identical constant to every candidate and the swept term alone
+    decides the order: the sharpest possible form of the property.
+    """
+
+    def test_ranking_follows_relevance_when_the_other_terms_are_fixed(self):
+        pool = [
+            make_candidate(f"d{i}", distance=d)
             for i, d in enumerate([1.0, 0.8, 0.6, 0.4, 0.2, 0.0])
         ]
 
-        assert totals == sorted(totals), (
+        assert order_of(pool) == ["d5", "d4", "d3", "d2", "d1", "d0"], (
             "score must rise as cosine distance falls; using raw distance instead "
-            f"of (1 - distance) inverts this. Got {totals}"
+            "of (1 - distance) inverts this"
         )
-        assert totals[0] < totals[-1]
 
-    def test_total_increases_with_importance(self):
-        totals = [score_of(make_candidate(f"i{i}", importance=v)) for i, v in enumerate(range(11))]
+    def test_ranking_follows_importance_when_the_other_terms_are_fixed(self):
+        pool = [make_candidate(f"i{v}", importance=float(v)) for v in range(11)]
 
-        assert totals == sorted(totals)
-        assert totals[0] < totals[-1]
+        assert order_of(pool) == [f"i{v}" for v in range(10, -1, -1)]
 
-    def test_total_decreases_as_a_memory_ages(self):
+    def test_ranking_follows_age_when_the_other_terms_are_fixed(self):
         # 0, 1, 6, 24 and 240 game hours old.
-        totals = [
-            score_of(make_candidate(f"t{i}", timestamp=NOW - minutes))
-            for i, minutes in enumerate([0, 60, 360, 1440, 14400])
+        ages = [0, 60, 360, 1440, 14400]
+        pool = [make_candidate(f"t{i}", timestamp=NOW - m) for i, m in enumerate(ages)]
+
+        assert order_of(pool) == ["t0", "t1", "t2", "t3", "t4"], (
+            "recency must decay with age; a decay base above 1.0 inverts this"
+        )
+
+    def test_totals_are_strictly_ordered_not_merely_sorted(self):
+        """Distinct inputs must produce distinct scores.
+
+        `order_of` above would be satisfied by an implementation that collapsed
+        every candidate onto one value and returned them in input order, which is
+        exactly what a broken normalizer does.
+        """
+        pool = [
+            make_candidate(f"d{i}", distance=d)
+            for i, d in enumerate([1.0, 0.8, 0.6, 0.4, 0.2, 0.0])
         ]
 
-        assert totals == sorted(totals, reverse=True), (
-            f"recency must decay with age; a decay base above 1.0 inverts this. Got {totals}"
-        )
-        assert totals[0] > totals[-1]
+        totals = totals_for(pool)
+
+        assert len(set(totals)) == len(totals)
+        assert totals == sorted(totals)
 
 
 class TestNormalizationBounds:
@@ -240,21 +312,121 @@ class TestNormalizationBounds:
         assert RecencyTerm().score(make_candidate("m", timestamp=NOW), context()) == 1.0
 
 
+class TestMinMaxNormalization:
+    """Park's normalization, and the cases where it has no range to work with."""
+
+    def test_the_pool_extremes_land_on_the_interval_endpoints(self):
+        """The defining property. Under fixed scales none of these reach 0 or 1."""
+        pool = [
+            make_candidate("mid", distance=0.5, importance=5.0),
+            make_candidate("best", distance=0.4, importance=6.0),
+            make_candidate("worst", distance=0.6, importance=4.0),
+        ]
+
+        by_id = dict(zip([c.memory_id for c in pool], breakdowns_for(pool)))
+
+        assert by_id["best"].contributions["relevance"] == pytest.approx(1.0)
+        assert by_id["worst"].contributions["relevance"] == pytest.approx(0.0)
+        assert by_id["mid"].contributions["relevance"] == pytest.approx(0.5)
+
+    def test_a_narrow_raw_band_is_stretched_to_the_full_interval(self):
+        """Why min-max and equal weights are a package.
+
+        These three differ by 0.02 of raw cosine similarity - the narrow band
+        real embeddings occupy. Under fixed scales that band contributes almost
+        nothing against a recency term spanning the whole interval, whatever the
+        weights say. Min-max restores its influence.
+        """
+        pool = [make_candidate(f"c{i}", distance=d) for i, d in enumerate([0.50, 0.49, 0.48])]
+
+        relevance = [b.contributions["relevance"] for b in breakdowns_for(pool)]
+
+        assert relevance == pytest.approx([0.0, 0.5, 1.0], abs=1e-9)
+        # The raw values really were nearly identical.
+        raw = [b.raw_contributions["relevance"] for b in breakdowns_for(pool)]
+        assert max(raw) - min(raw) == pytest.approx(0.02, abs=1e-9)
+
+    def test_a_term_that_cannot_discriminate_contributes_the_midpoint(self):
+        """min == max means the term carries no information for this pool.
+
+        0.5 rather than 1.0: candidates with different abstention patterns divide
+        by different live weights, so a constant is not a uniform shift and does
+        move the ranking. The neutral midpoint is the least distorting choice.
+        """
+        pool = [
+            make_candidate("a", distance=0.5, importance=5.0, timestamp=NOW),
+            make_candidate("b", distance=0.5, importance=5.0, timestamp=NOW),
+        ]
+
+        for breakdown in breakdowns_for(pool):
+            assert breakdown.contributions["relevance"] == 0.5
+            assert breakdown.contributions["importance"] == 0.5
+            assert breakdown.contributions["recency"] == 0.5
+            assert breakdown.total == pytest.approx(0.5, abs=1e-9)
+
+    def test_a_single_candidate_is_scored_rather_than_dropped(self):
+        """A pool of one is degenerate on every term at once.
+
+        Abstaining on a degenerate term would be cleaner in principle, but it
+        would drop the only candidate of a perfectly valid top_k=1 query and
+        return nothing. It must score.
+        """
+        ranked = rank(
+            [make_candidate("only")], context(), RetrievalWeights(), default_terms(), top_k=1
+        )
+
+        assert [c.memory_id for _, c in ranked] == ["only"]
+        assert ranked[0][0].total == pytest.approx(0.5, abs=1e-9)
+
+    def test_a_term_only_one_candidate_scored_cannot_discriminate(self):
+        """A documented consequence, not a defect - and a real behaviour change.
+
+        When exactly one candidate has a timestamp, the recency range collapses
+        to a point, so recency contributes the neutral midpoint and cannot
+        separate that candidate from an abstaining one. Recency is inherently
+        comparative under min-max: with a single observation there is nothing to
+        be recent *relative to*.
+
+        This is why the store-level backstory regression test weights relevance
+        to zero and supplies two timestamped memories - stated here so the
+        behaviour is visible rather than smoothed away.
+        """
+        pool = [
+            make_candidate("dated", timestamp=NOW),
+            make_candidate("undated", timestamp=None),
+        ]
+
+        dated, undated = breakdowns_for(pool)
+
+        assert dated.contributions["recency"] == 0.5
+        assert undated.abstained == ["recency"]
+        assert dated.total == pytest.approx(undated.total, abs=1e-9)
+
+    def test_raw_contributions_survive_normalization(self):
+        """The absolute values stay available for diagnosis and measurement."""
+        pool = [
+            make_candidate("a", distance=0.2, importance=8.0, timestamp=NOW),
+            make_candidate("b", distance=0.6, importance=3.0, timestamp=NOW - 600),
+        ]
+
+        a, b = breakdowns_for(pool)
+
+        assert a.raw_contributions["relevance"] == pytest.approx(0.8, abs=1e-9)
+        assert b.raw_contributions["importance"] == pytest.approx(0.3, abs=1e-9)
+        assert b.raw_contributions["recency"] == pytest.approx(DECAY_10_HOURS, abs=1e-6)
+
+
 class TestAbstention:
     """Missing data must not be voted on in either direction."""
 
     def test_missing_timestamp_abstains_on_recency(self):
-        breakdown = combined_score(
-            make_candidate("m", timestamp=None), context(), RetrievalWeights(), default_terms()
-        )
+        breakdown = breakdowns_for([make_candidate("m", timestamp=None)])[0]
 
         assert breakdown.abstained == ["recency"]
         assert "recency" not in breakdown.contributions
 
     def test_missing_current_time_abstains_on_recency(self):
-        breakdown = combined_score(
-            make_candidate("m"), context(now=None), RetrievalWeights(), default_terms()
-        )
+        breakdown = breakdowns_for([make_candidate("m")], now=None)[0]
 
         assert breakdown.abstained == ["recency"]
 
@@ -264,19 +436,37 @@ class TestAbstention:
         The prior behaviour substituted 1.0, which does not merely lose
         information - it ranks the unmeasured candidate above every genuine match.
         """
-        breakdown = combined_score(
-            make_candidate("m", distance=None), context(), RetrievalWeights(), default_terms()
-        )
+        breakdown = breakdowns_for([make_candidate("m", distance=None)])[0]
 
         assert breakdown.abstained == ["relevance"]
         assert breakdown.contributions.get("relevance") is None
 
     def test_never_rated_importance_abstains_rather_than_voting_a_midpoint(self):
-        breakdown = combined_score(
-            make_candidate("m", importance=None), context(), RetrievalWeights(), default_terms()
-        )
+        breakdown = breakdowns_for([make_candidate("m", importance=None)])[0]
 
         assert breakdown.abstained == ["importance"]
+
+    def test_an_abstaining_candidate_is_excluded_from_that_terms_min_and_max(self):
+        """The consistent extension of abstention into the normalizer.
+
+        Abstention already removes a candidate from a term's *weight*; letting it
+        influence that term's *range* would reintroduce, through the normalizer,
+        exactly the vote it was excluded from. Here the untimestamped candidate
+        must not affect the recency range, which the two timestamped ones define
+        between them.
+        """
+        pool = [
+            make_candidate("fresh", timestamp=NOW),
+            make_candidate("stale", timestamp=NOW - 60_000),
+            make_candidate("undated", timestamp=None),
+        ]
+
+        raw = collect_raw_scores(pool, context(), default_terms())
+        stats = term_statistics(raw, default_terms())
+
+        assert stats["recency"].count == 2, "the abstainer must not be counted"
+        assert stats["recency"].maximum == pytest.approx(1.0, abs=1e-9)
+        assert stats["recency"].minimum == pytest.approx(DECAY_1000_HOURS, abs=1e-6)
 
     def test_an_untimestamped_memory_ranks_neither_first_nor_last(self):
         """The paired assertion: both sentinel failures must be excluded.
@@ -310,17 +500,31 @@ class TestAbstention:
         assert seeded_breakdown.total == pytest.approx(0.5, abs=1e-9)
 
     def test_abstention_renormalizes_onto_the_same_scale(self):
-        """A candidate scoring 0.8 on everything it knows totals 0.8 either way.
+        """An abstaining candidate stays comparable, not merely un-penalized.
 
-        This is what makes an abstaining candidate comparable with a complete one
-        rather than merely un-penalized.
+        `complete` and `partial` are identical on relevance and importance and
+        differ only in that `partial` has no timestamp. Both are the pool maximum
+        on every term they scored, so both normalize to 1.0 on those terms - and
+        because the weight renormalization divides by only the live weight, they
+        must tie at exactly 1.0 despite dividing by 3 and 2 respectively. That
+        tie is the composition of min-max with abstention, and it is the
+        interaction most likely to be subtly wrong.
         """
-        # distance 0.2 -> relevance 0.8, importance 8.0 -> 0.8.
-        complete = make_candidate("complete", distance=0.2, importance=8.0, timestamp=NOW)
-        partial = make_candidate("partial", distance=0.2, importance=8.0, timestamp=None)
+        pool = [
+            make_candidate("complete", distance=0.2, importance=8.0, timestamp=NOW),
+            make_candidate("partial", distance=0.2, importance=8.0, timestamp=None),
+            make_candidate("worse", distance=0.9, importance=2.0, timestamp=NOW - 60_000),
+        ]
 
-        assert score_of(partial) == pytest.approx(0.8, abs=1e-9)
-        assert score_of(complete) == pytest.approx((0.8 + 0.8 + 1.0) / 3, abs=1e-9)
+        complete, partial, worse = totals_for(pool)
+
+        assert complete == pytest.approx(1.0, abs=1e-9)
+        assert partial == pytest.approx(1.0, abs=1e-9)
+        assert worse == pytest.approx(0.0, abs=1e-9)
+
+        breakdowns = breakdowns_for(pool)
+        assert breakdowns[0].live_weight == 3.0
+        assert breakdowns[1].live_weight == 2.0
 
     def test_a_candidate_with_nothing_known_is_dropped(self):
         blank = ScoredCandidate(
@@ -331,16 +535,12 @@ class TestAbstention:
         ranked = rank([blank, real], context(now=None), RetrievalWeights(), default_terms(), 5)
 
         assert [c.memory_id for _, c in ranked] == ["real"]
-        assert (
-            combined_score(blank, context(None), RetrievalWeights(), default_terms()).total is None
-        )
+        assert breakdowns_for([blank, real], now=None)[0].total is None
 
     def test_all_weight_on_an_abstaining_term_yields_no_score(self):
         """Not a total of 0.0 - nothing that was weighted could be measured."""
         weights = RetrievalWeights(relevance=0.0, importance=0.0, recency=1.0)
-        breakdown = combined_score(
-            make_candidate("m", timestamp=None), context(), weights, default_terms()
-        )
+        breakdown = breakdowns_for([make_candidate("m", timestamp=None)], weights)[0]
 
         assert breakdown.total is None
 

@@ -91,6 +91,16 @@ Shipped. Memories are scored on three dimensions and combined as
   same call as the chosen action.
 - **Relevance**: cosine similarity to the query.
 
+All three scores are **min-max normalized over the candidate pool** before the
+weighted sum, following Park. That is not mere precedent-following: the terms
+occupy very different *realized* ranges even though all are nominally [0,1], so
+without it equal weights would mean equal coefficients on unequal ranges rather
+than equal influence. Measured on our own embeddings over the cosine top-30 of a
+40-memory store (`tests/unit/memory/test_term_spread_measurement.py`): relevance
+spans 0.31, importance 0.60, recency 0.98 — recency's realized range is about
+3.1x relevance's, and relevance never reaches even the midpoint of its nominal
+interval. Min-max and α=1 are a package.
+
 The weights ship at Park's published setting — all three equal to 1.0 — rather
 than a tuned set, so the defaults are citable rather than incidental. They are
 configurable globally, per mind, and per query. **Tuning them is deliberately
@@ -98,8 +108,9 @@ not done here**: it needs a retrieval-quality evaluation harness that does not
 exist, and the deliverable was weights that are nameable, configurable and
 testable, not optimal.
 
-Two departures from the paper, and the abstention rule that replaces its
-unset-value behaviour, are documented at the head of
+The one remaining departure from the paper (reinforced recency), the abstention
+rule that replaces its unset-value behaviour, and the three consequences of
+pool-relative scoring are documented at the head of
 `cognitive_architecture/memory/retrieval.py`. Adding a fourth term is a new
 `ScoringTerm` plus a weight field; the combiner does not change. [NPC-400]
 
