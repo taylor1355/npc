@@ -19,8 +19,27 @@ class MemoryConsolidationNode(Node):
 
     step_name = "memory_consolidation"
 
-    def __init__(self, memory_store: VectorDBMemory):
+    def __init__(self, memory_store: VectorDBMemory, write_timestamp: int | None):
+        """
+        Args:
+            memory_store: Where consolidated memories land.
+            write_timestamp: Elapsed game minutes to stamp these memories with,
+                or None when the caller genuinely does not know.
+
+                Required, with no default, deliberately. This node runs outside
+                the graph, driven by a caller that assembles a state object for
+                it, and it used to read the stamp off that state's observation -
+                which the only production caller fabricated with
+                current_simulation_time=0. Every lived memory was therefore
+                written at the epoch and decayed from it, while config-seeded
+                memories carrying no timestamp at all scored *perfect* recency,
+                so hardcoded backstory permanently outranked lived experience.
+                Making the stamp an explicit argument means no caller can supply
+                one by accident, and None travels through as an honest
+                abstention instead of as a fake zero.
+        """
         self.memory_store = memory_store
+        self.write_timestamp = write_timestamp
 
     async def process(self, state: PipelineState) -> PipelineState:
         """Consolidate daily memories into long-term storage"""
@@ -35,7 +54,7 @@ class MemoryConsolidationNode(Node):
             self.memory_store.add_memory(
                 content=new_memory.content,
                 importance=new_memory.importance,
-                timestamp=state.observation.current_simulation_time,
+                timestamp=self.write_timestamp,
                 location=location,
             )
 

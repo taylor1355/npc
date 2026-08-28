@@ -1,8 +1,11 @@
 """Unit tests for VectorDBMemory"""
 
+import uuid
+
 import pytest
 from pydantic import ValidationError
 
+from mind.cognitive_architecture.memory.retrieval import RetrievalWeights
 from mind.cognitive_architecture.memory.vector_db_memory import (
     VectorDBMemory,
     VectorDBQuery,
@@ -15,11 +18,31 @@ class TestVectorDBMemory:
 
     @pytest.fixture
     def memory_store(self):
-        """Create a VectorDBMemory instance with test collection"""
-        store = VectorDBMemory(collection_name="test_collection")
+        """A VectorDBMemory whose state cannot reach any other test.
+
+        Isolation used to be a shared collection name plus a teardown `clear()`,
+        and that is not sufficient in either half.
+
+        On chromadb 1.5.9, **deleting a collection poisons collections created
+        afterwards**: a row added later reads back with a deleted row's metadata
+        merged into its own, and it happens across differently-named collections
+        in the same client (a control without any delete stays clean). So one
+        test's `clear()` - whether from this teardown or from
+        `test_clear_removes_all_memories` - could make a later test see tags no
+        memory in it ever had.
+
+        Two changes, because either alone is insufficient: a per-test collection
+        name removes the shared-state half, and resetting chromadb's
+        process-global system cache around every test discards the poisoned
+        state that a delete leaves behind. Teardown no longer deletes anything;
+        the cache reset is what reclaims it.
+        """
+        from chromadb.api.client import SharedSystemClient
+
+        SharedSystemClient.clear_system_cache()
+        store = VectorDBMemory(collection_name=f"test_collection_{uuid.uuid4().hex[:12]}")
         yield store
-        # Cleanup
-        store.clear()
+        SharedSystemClient.clear_system_cache()
 
     async def test_add_and_search_memory(self, memory_store):
         """Should add memory and retrieve it via search"""
@@ -61,8 +84,15 @@ class TestVectorDBMemory:
             importance=9.0,
         )
 
-        # Search
-        query = VectorDBQuery(query="blacksmith", top_k=2, importance_weight=0.5)
+        # Search. Importance weighted above relevance, as the removed
+        # importance_weight=0.5 did (it implied a relevance coefficient of 0.5
+        # against an importance coefficient of 0.5, with recency taking 0.2 -
+        # the ratio, not the absolute numbers, is what this test ever depended on).
+        query = VectorDBQuery(
+            query="blacksmith",
+            top_k=2,
+            weights=RetrievalWeights(relevance=1.0, importance=2.0, recency=1.0),
+        )
         results = await memory_store.search(query)
 
         # High importance should be ranked higher
@@ -71,34 +101,41 @@ class TestVectorDBMemory:
         assert results[0].importance > results[1].importance
 
     async def test_recency_decay(self, memory_store):
-        """Should apply recency decay to old memories"""
-        # Add old memory
+        """Should apply recency decay to old memories.
+
+        Ages are stated in game minutes and the gap is deliberately large: the
+        curve is now Park's exponential (0.995 per game HOUR) rather than the
+        hyperbolic 1/(1 + delta/1000) it replaced, so the previous 900-minute gap
+        was only 15 game hours - about a 7% difference, which is correct
+        behaviour for two memories from the same day but too thin to constrain
+        anything. 1500 game hours apart is a real forgetting-curve difference.
+        """
+        # Roughly 62 game days old.
         memory_store.add_memory(
             content="Long ago blacksmith event",
             importance=8.0,
-            timestamp=100,
+            timestamp=10_000,
         )
 
-        # Add recent memory
+        # Formed this instant.
         memory_store.add_memory(
             content="Recent blacksmith event",
             importance=8.0,
-            timestamp=1000,
+            timestamp=100_000,
         )
 
-        # Search with current time and high recency weight
         query = VectorDBQuery(
             query="blacksmith event",
             top_k=2,
-            current_simulation_time=1000,
-            recency_weight=0.5,
+            current_simulation_time=100_000,
+            weights=RetrievalWeights(relevance=1.0, importance=1.0, recency=2.0),
         )
         results = await memory_store.search(query)
 
         # Should retrieve both
         assert len(results) == 2
         # Recent one should be first due to recency weighting
-        assert results[0].timestamp == 1000
+        assert results[0].timestamp == 100_000
 
     async def test_search_empty_store(self, memory_store):
         """Should return empty list when no memories exist"""
@@ -296,12 +333,15 @@ class TestVectorDBMemory:
             importance=10.0,
         )
 
-        # Modest importance weight: similarity should dominate.
+        # Modest importance weight: similarity should dominate. The removed
+        # importance_weight=0.2 / recency_weight=0.0 pair implied a 0.8 relevance
+        # coefficient against 0.2 importance - the same 4:1 ratio expressed here
+        # explicitly, which is the point of the new model: relevance is a weight
+        # you set, not a leftover.
         query = VectorDBQuery(
             query="forging a sword at the blacksmith forge",
             top_k=2,
-            importance_weight=0.2,
-            recency_weight=0.0,
+            weights=RetrievalWeights(relevance=4.0, importance=1.0, recency=0.0),
         )
         results = await memory_store.search(query)
 
@@ -310,6 +350,303 @@ class TestVectorDBMemory:
         # which is only possible once real similarity feeds the combined score.
         assert "sword" in results[0].content.lower()
         assert results[0].importance < results[1].importance
+
+    async def test_a_high_importance_memory_cosine_missed_can_still_be_retrieved(
+        self, memory_store
+    ):
+        """The candidate pool must be wider than top_k, or the score cannot promote.
+
+        This is the test that proves the formula was structurally inert.
+        `search()` asked ChromaDB for `n_results=min(top_k, count)`, so the
+        candidate set WAS the cosine top-k and the weighted score could only
+        reorder it. At the production top_k of 2 that meant sorting two items,
+        and a memory cosine had not already surfaced was unreachable **at any
+        weight** - which is why the importance and recency weights were close to
+        decorative.
+
+        Here a semantically distant memory of maximum importance sits behind six
+        closer trivia. It is not in the cosine top 2, so it cannot be returned
+        unless the pool is widened before scoring. Weighted heavily toward
+        importance, it must come back first.
+        """
+        # Six on-topic trivia: the cosine top-k for this query.
+        for i in range(6):
+            memory_store.add_memory(
+                content=f"I hammered another horseshoe at the forge, number {i}",
+                importance=1.0,
+            )
+
+        # Off-topic, but the most significant thing that ever happened to her.
+        memory_store.add_memory(
+            content="My mother died in the winter fever and I held her hand at the end",
+            importance=10.0,
+        )
+
+        query = VectorDBQuery(
+            query="working at the forge on horseshoes",
+            top_k=2,
+            weights=RetrievalWeights(relevance=1.0, importance=3.0, recency=1.0),
+        )
+        results = await memory_store.search(query)
+
+        assert len(results) == 2
+        assert "mother" in results[0].content.lower(), (
+            "a high-importance memory outside the cosine top-k must still be "
+            f"retrievable; got {[m.content for m in results]}"
+        )
+
+    async def test_a_lived_memory_outranks_untimestamped_backstory(self, memory_store):
+        """Regression for the recency inversion.
+
+        Untimestamped memories used to score *perfect* recency (1.0). Config
+        seeds are exactly the untimestamped case and lived memories exactly the
+        timestamped one, so hardcoded backstory permanently outranked
+        experience, by a margin that widened with playtime.
+
+        Content is near-identical so relevance is effectively matched and
+        recency is the only thing left to decide the order.
+        """
+        # The initial_long_term_memories path: no timestamp, never rated.
+        memory_store.add_memory(content="Alice worked at the blacksmith forge", importance=5.0)
+
+        # A lived memory, formed just now.
+        memory_store.add_memory(
+            content="Alice worked at the blacksmith forge today",
+            importance=5.0,
+            timestamp=100_000,
+        )
+
+        query = VectorDBQuery(
+            query="Alice at the blacksmith forge",
+            top_k=2,
+            current_simulation_time=100_000,
+        )
+        results = await memory_store.search(query)
+
+        assert len(results) == 2
+        assert results[0].timestamp == 100_000, (
+            "a memory that actually happened must outrank untimestamped backstory"
+        )
+        assert results[1].timestamp is None
+
+    async def test_an_unrated_memory_reads_back_as_unrated(self, memory_store):
+        """None round-trips as None, not as a fabricated default.
+
+        ChromaDB refuses an empty metadata dict, so a memory with no importance,
+        no timestamp and no tags is stored with no metadata at all. It must read
+        back as all-unset rather than raising or acquiring defaults.
+        """
+        added = memory_store.add_memory(content="Something nobody ever rated")
+
+        results = await memory_store.search(
+            VectorDBQuery(query="Something nobody ever rated", top_k=10)
+        )
+        assert results
+
+        # Located by id rather than by rank: this class shares one collection
+        # across its tests, so asserting on results[0] would couple the check to
+        # what the neighbouring tests left behind.
+        match = next((m for m in results if m.id == added.id), None)
+        assert match is not None
+        assert match.importance is None
+        assert match.timestamp is None
+        assert match.tags == []
+
+    @pytest.mark.xfail(
+        reason=(
+            "Upstream chromadb 1.5.9 defect, not our arithmetic: after "
+            "delete_collection + get_or_create_collection under the same name, a "
+            "newly added row reads back with a DELETED row's metadata merged into "
+            "its own. Reproduced with the chromadb API alone, so nothing in this "
+            "repo can fix it here. VectorDBMemory.clear() is the only path that "
+            "reaches the state and has no production call site, so exposure today "
+            "is test-isolation only - which the per-test collection name in the "
+            "memory_store fixture now removes. Left as a documented xfail rather "
+            "than deleted so the day chromadb fixes it is visible."
+        ),
+        strict=False,
+    )
+    async def test_an_unrated_memory_does_not_inherit_a_deleted_memorys_metadata(
+        self, memory_store
+    ):
+        """Pins the upstream metadata-staleness defect described in the xfail marker.
+
+        The sequence matters: write tagged memories, clear, then write an
+        untagged unrated one. Without the clear it passes, which is why this
+        surfaced as cross-test contamination rather than as a direct failure.
+        """
+        memory_store.add_memory(content="Avoided the crowd", tags=["antisocial"])
+        memory_store.add_memory(content="Chatted at the market", tags=["social"])
+        memory_store.clear()
+
+        added = memory_store.add_memory(content="Something nobody ever rated")
+
+        results = await memory_store.search(
+            VectorDBQuery(query="Something nobody ever rated", top_k=10)
+        )
+
+        match = next((m for m in results if m.id == added.id), None)
+        assert match is not None
+        assert match.tags == [], f"inherited a deleted row's metadata: {match.tags}"
+        assert match.importance is None
+
+
+@pytest.mark.asyncio
+class TestRecencyReinforcementPersistence:
+    """Retrieval writes the reinforced anchor back to the store.
+
+    The arithmetic itself is covered in
+    tests/unit/memory/test_retrieval_scoring.py. What is at stake here is the
+    plumbing: that the write happens, that it does not destroy neighbouring
+    metadata, and that a failed write is not silent.
+    """
+
+    def _store(self, alpha):
+        from chromadb.api.client import SharedSystemClient
+
+        SharedSystemClient.clear_system_cache()
+        return VectorDBMemory(
+            collection_name=f"test_reinforce_{uuid.uuid4().hex[:12]}",
+            recency_reinforcement_alpha=alpha,
+        )
+
+    def _stored_metadata(self, store, memory_id):
+        return store.collection.get(ids=[memory_id], include=["metadatas"])["metadatas"][0]
+
+    async def test_retrieval_moves_the_anchor_and_preserves_other_metadata(self):
+        """ChromaDB's update MERGES rather than replaces - verified against 1.5.9.
+
+        This is the load-bearing half: passing only the two changed keys must not
+        drop importance, tags or the creation timestamp. Under replace semantics
+        they would be blanked, and every later retrieval would abstain on
+        importance while looking entirely normal.
+        """
+        store = self._store(alpha=0.3)
+        added = store.add_memory(
+            content="The bandit raid on the north bridge",
+            importance=8.0,
+            timestamp=0,
+            tags=["danger"],
+        )
+
+        await store.search(
+            VectorDBQuery(query="bandit raid north bridge", top_k=1, current_simulation_time=6000)
+        )
+
+        stored = self._stored_metadata(store, added.id)
+        assert stored["effective_time"] == pytest.approx(1800.0, abs=1e-6)
+        assert stored["last_accessed"] == 6000
+        # Untouched by the partial update.
+        assert stored["importance"] == 8.0
+        assert stored["timestamp"] == 0
+        assert stored["tags"] == ["danger"]
+
+    async def test_a_repeatedly_recalled_memory_ends_more_recent_than_a_once_recalled_one(self):
+        """Equal creation time; only retrieval count differs.
+
+        Compared on the stored anchors rather than through one combined query, so
+        the assertion is about the reinforcement and not about which phrasing the
+        embedding model happened to prefer.
+        """
+        store = self._store(alpha=0.3)
+        often = store.add_memory(content="The bandit raid on the north bridge", timestamp=0)
+        once = store.add_memory(content="The harvest festival in the village square", timestamp=0)
+
+        for _ in range(5):
+            await store.search(
+                VectorDBQuery(
+                    query="bandit raid north bridge", top_k=1, current_simulation_time=6000
+                )
+            )
+        await store.search(
+            VectorDBQuery(
+                query="harvest festival village square", top_k=1, current_simulation_time=6000
+            )
+        )
+
+        often_anchor = self._stored_metadata(store, often.id)["effective_time"]
+        once_anchor = self._stored_metadata(store, once.id)["effective_time"]
+
+        assert often_anchor > once_anchor
+        assert once_anchor < 6000, "one recall must not erase the memory's whole age"
+
+    async def test_alpha_one_reproduces_last_access_decay_end_to_end(self):
+        store = self._store(alpha=1.0)
+        added = store.add_memory(content="The bandit raid on the north bridge", timestamp=0)
+
+        await store.search(
+            VectorDBQuery(query="bandit raid north bridge", top_k=1, current_simulation_time=6000)
+        )
+
+        assert self._stored_metadata(store, added.id)["effective_time"] == pytest.approx(6000.0)
+
+    async def test_alpha_zero_reproduces_creation_time_decay_end_to_end(self):
+        store = self._store(alpha=0.0)
+        added = store.add_memory(content="The bandit raid on the north bridge", timestamp=0)
+
+        await store.search(
+            VectorDBQuery(query="bandit raid north bridge", top_k=1, current_simulation_time=6000)
+        )
+
+        assert self._stored_metadata(store, added.id)["effective_time"] == pytest.approx(0.0)
+
+    async def test_a_reset_clock_does_not_drag_the_anchor_backwards(self):
+        """Scenario restart under a retained collection - open question D-5.
+
+        Writing an EMA update against a reset clock would persist a pulled-back
+        anchor, and repeated retrieval would drag it below `now` until the
+        clamp's warning stopped firing. Refusing the write keeps the damage
+        read-time only.
+        """
+        store = self._store(alpha=0.3)
+        added = store.add_memory(content="The bandit raid on the north bridge", timestamp=100_000)
+
+        await store.search(
+            VectorDBQuery(query="bandit raid north bridge", top_k=1, current_simulation_time=5)
+        )
+
+        assert self._stored_metadata(store, added.id)["effective_time"] == pytest.approx(100_000.0)
+
+    async def test_a_failed_reinforcement_write_is_reported_not_swallowed(
+        self, monkeypatch, caplog
+    ):
+        """A silently-failed write means the memory stops aging correctly forever.
+
+        Retrieval itself must still succeed - the caller asked for memories and
+        we have them - but the failure has to reach the log naming the memory, or
+        the store degrades invisibly.
+        """
+        import logging
+
+        store = self._store(alpha=0.3)
+        added = store.add_memory(content="The bandit raid on the north bridge", timestamp=0)
+
+        def explode(*args, **kwargs):
+            raise RuntimeError("simulated ChromaDB write failure")
+
+        monkeypatch.setattr(store.collection, "update", explode)
+
+        with caplog.at_level(logging.ERROR, logger="mind"):
+            results = await store.search(
+                VectorDBQuery(
+                    query="bandit raid north bridge", top_k=1, current_simulation_time=6000
+                )
+            )
+
+        assert results, "retrieval must still return what it found"
+        assert any(added.id in record.getMessage() for record in caplog.records), (
+            "the failed write must be reported and name the memory it affected"
+        )
+
+    def test_an_out_of_range_alpha_is_rejected_at_construction(self):
+        """Outside [0, 1] the update pushes the anchor past the present, or back
+        beyond the memory's own creation. Reject where it is configured."""
+        for bad_alpha in (-0.1, 1.1):
+            with pytest.raises(ValueError):
+                VectorDBMemory(
+                    collection_name=f"test_bad_alpha_{uuid.uuid4().hex[:8]}",
+                    recency_reinforcement_alpha=bad_alpha,
+                )
 
 
 @pytest.fixture

@@ -417,6 +417,11 @@ class MCPServer:
                 mind.update_conversations(conversation_obs)
                 mind.update_events(mind_events, obs.current_simulation_time)
 
+                # Remember when "now" was, so consolidation - which runs outside
+                # the decision cycle and carries no observation - can stamp the
+                # memories it writes with a real game time.
+                mind.last_simulation_time = obs.current_simulation_time
+
                 state = PipelineState(
                     observation=obs,
                     available_actions=obs.get_available_actions(
@@ -496,11 +501,22 @@ class MCPServer:
 
             mind = self.minds[mind_id]
 
-            # Create dummy state for consolidation
-            # TODO: Track latest observation for better location/timestamp
+            write_timestamp = mind.last_simulation_time
+            if write_timestamp is None:
+                logger.warning(
+                    f"Consolidating mind {mind_id} before it has ever decided - no observed "
+                    "simulation time is available, so these memories are written without a "
+                    "timestamp and will abstain on recency rather than claim a false one."
+                )
+
+            # Carrier state for the consolidation node. Its observation supplies
+            # only the location; the memory timestamp is passed explicitly, since
+            # this call has no observation of its own to read one from.
+            # TODO: track the last observed location too, so consolidated memories
+            # are placed as well as timed.
             dummy_obs = Observation(
                 entity_id=mind.entity_id,
-                current_simulation_time=0,
+                current_simulation_time=write_timestamp if write_timestamp is not None else 0,
             )
             dummy_state = PipelineState(
                 observation=dummy_obs,
@@ -508,7 +524,9 @@ class MCPServer:
             )
 
             # Run consolidation
-            consolidation_node = MemoryConsolidationNode(mind.memory_store)
+            consolidation_node = MemoryConsolidationNode(
+                mind.memory_store, write_timestamp=write_timestamp
+            )
             await consolidation_node.process(dummy_state)
 
             # Clear daily buffer and return count

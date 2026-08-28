@@ -23,7 +23,7 @@ class TestMemoryConsolidationNode:
     @pytest.fixture
     def node(self, mock_memory_store):
         """Create a MemoryConsolidationNode with mocked store"""
-        return MemoryConsolidationNode(mock_memory_store)
+        return MemoryConsolidationNode(mock_memory_store, write_timestamp=1500)
 
     @pytest.fixture
     def basic_state(self):
@@ -72,13 +72,52 @@ class TestMemoryConsolidationNode:
         assert second_call.kwargs["content"] == "Customer was very pleased"
         assert second_call.kwargs["importance"] == 7.5
 
-    async def test_includes_timestamp_from_observation(self, node, mock_memory_store, basic_state):
-        """Should include current simulation time as timestamp"""
+    async def test_writes_the_explicit_timestamp(self, node, mock_memory_store, basic_state):
+        """Should stamp memories with the timestamp the caller supplied"""
         await node.process(basic_state)
 
-        # All calls should have the simulation time
+        # All calls should have the supplied game time
         for call in mock_memory_store.add_memory.call_args_list:
             assert call.kwargs["timestamp"] == 1500
+
+    async def test_an_unknown_timestamp_is_written_as_none_not_as_zero(
+        self, mock_memory_store, basic_state
+    ):
+        """Regression for the consolidation write path.
+
+        The only production caller had no observation of its own and fabricated
+        one with current_simulation_time=0, which the node read - so every lived
+        memory was stamped at the epoch and decayed from it, while untimestamped
+        config seeds scored perfect recency and permanently outranked them.
+
+        0 is a *valid* game-minute reading (the clock starts there), so it cannot
+        double as "unknown". None must travel through untouched, letting the
+        recency term abstain rather than claim a false measurement.
+        """
+        node = MemoryConsolidationNode(mock_memory_store, write_timestamp=None)
+
+        await node.process(basic_state)
+
+        assert mock_memory_store.add_memory.call_args_list
+        for call in mock_memory_store.add_memory.call_args_list:
+            assert call.kwargs["timestamp"] is None
+
+    async def test_the_observation_time_is_not_used_as_the_write_timestamp(
+        self, node, mock_memory_store, basic_state
+    ):
+        """The stamp comes from the constructor, never from the carrier state.
+
+        basic_state's observation carries current_simulation_time=1500 as well,
+        so this pins the source by making them disagree: if the node fell back to
+        reading the observation, it would write 1500 rather than 9999.
+        """
+        node = MemoryConsolidationNode(mock_memory_store, write_timestamp=9999)
+        assert basic_state.observation.current_simulation_time == 1500
+
+        await node.process(basic_state)
+
+        for call in mock_memory_store.add_memory.call_args_list:
+            assert call.kwargs["timestamp"] == 9999
 
     async def test_includes_location_from_observation(self, node, mock_memory_store, basic_state):
         """Should include location from observation status"""

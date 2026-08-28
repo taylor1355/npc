@@ -45,6 +45,15 @@ class Mind:
     # Pending incoming interaction bids (keyed by bid_id from payload)
     pending_incoming_bids: dict[str, MindEvent] = field(default_factory=dict)
 
+    # Elapsed game minutes as of the last decide_action. Consolidation runs
+    # outside the decision cycle (the simulation calls it on wake), so it has no
+    # observation of its own and needs the mind to have remembered when "now"
+    # last was - otherwise consolidated memories carry no usable timestamp and
+    # the recency term is fed a constant. None until the first decision: a mind
+    # can be consolidated before it has ever decided, and that is genuinely
+    # "unknown", not "time zero".
+    last_simulation_time: int | None = None
+
     @classmethod
     def from_config(cls, mind_id: str, entity_id: str, config: MindConfig) -> Self:
         """Create a Mind instance from configuration
@@ -68,12 +77,17 @@ class Mind:
             storage_path=config.memory_storage_path,
         )
 
-        # Seed initial long-term memories
+        # Seed initial long-term memories. No importance and no timestamp: these
+        # have never been rated by anything, and they did not happen at a moment
+        # in the simulation. The previous hardcoded importance=5.0 was a
+        # fabricated rating that outranked every genuinely mundane lived memory.
         for memory_content in config.initial_long_term_memories:
-            memory_store.add_memory(content=memory_content, importance=5.0)
+            memory_store.add_memory(content=memory_content)
 
         # Initialize pipeline
-        pipeline = CognitivePipeline(llm=llm, memory_store=memory_store)
+        pipeline = CognitivePipeline(
+            llm=llm, memory_store=memory_store, retrieval_weights=config.retrieval_weights
+        )
 
         # Initialize working memory
         working_memory = config.initial_working_memory or WorkingMemory()
@@ -121,8 +135,13 @@ class Mind:
             storage_path=config.memory_storage_path,
         )
 
-        # Initialize pipeline
-        pipeline = CognitivePipeline(llm=llm, memory_store=memory_store)
+        # Initialize pipeline. Threading retrieval_weights here as well as in
+        # from_config is load-bearing: a relinked mind that silently reverted to
+        # the default weights would think differently from the same mind before
+        # its release, with nothing in the logs to say so (the NPC-1023 shape).
+        pipeline = CognitivePipeline(
+            llm=llm, memory_store=memory_store, retrieval_weights=config.retrieval_weights
+        )
 
         # Initialize working memory
         working_memory = config.initial_working_memory or WorkingMemory()

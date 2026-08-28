@@ -76,15 +76,32 @@ The memory system combines multiple approaches for flexible and efficient retrie
 
 #### Memory Stream with Cognitive Scoring
 
-Based on cognitive science research, memories are scored on three dimensions:
+Shipped. Memories are scored on three dimensions and combined as
+`score = α·recency + β·importance + γ·relevance`:
 
-- **Recency**: Exponential decay from last access time
-- **Importance**: LLM-assigned significance score (e.g., 1-10 scale)
-- **Relevance**: Cosine similarity to current query
+- **Recency**: exponential decay, base 0.995 per game **hour**, measured from a
+  *reinforced* anchor rather than a fixed event. The anchor starts at the
+  memory's creation time and is pulled toward the present by an exponential
+  moving average on every retrieval, so recency measures how persistently a
+  memory has mattered rather than only when it was formed. Park's
+  decay-from-last-retrieval and plain decay-from-creation are the two endpoints
+  of the reinforcement constant (1.0 and 0.0), not alternatives to it. The
+  default retains 70% of a memory's age per recall, so two recalls halve it.
+- **Importance**: the LLM's 1-10 poignancy rating, emitted by reflection in the
+  same call as the chosen action.
+- **Relevance**: cosine similarity to the query.
 
-The retrieval score combines these factors: `score = α·recency + β·importance + γ·relevance`
+The weights ship at Park's published setting — all three equal to 1.0 — rather
+than a tuned set, so the defaults are citable rather than incidental. They are
+configurable globally, per mind, and per query. **Tuning them is deliberately
+not done here**: it needs a retrieval-quality evaluation harness that does not
+exist, and the deliverable was weights that are nameable, configurable and
+testable, not optimal.
 
-The specific weights (α, β, γ) will be tuned through experimentation.
+Two departures from the paper, and the abstention rule that replaces its
+unset-value behaviour, are documented at the head of
+`cognitive_architecture/memory/retrieval.py`. Adding a fourth term is a new
+`ScoringTerm` plus a weight field; the combiner does not change. [NPC-400]
 
 #### Reflection Trees
 

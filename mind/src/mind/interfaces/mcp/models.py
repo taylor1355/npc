@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from mind.apis.langchain_llm import LangChainModel
+from mind.cognitive_architecture.memory.retrieval import RetrievalWeights
 from mind.cognitive_architecture.state import PipelineState, StepTokenUsage
 from mind.cognitive_architecture.working_memory import WorkingMemory
 from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_MEMORY_STORAGE_PATH
@@ -32,8 +33,22 @@ class MindConfig(BaseModel):
     embedding_model: str = DEFAULT_EMBEDDING_MODEL
     memory_storage_path: str = DEFAULT_MEMORY_STORAGE_PATH
 
+    # Per-mind override of the memory retrieval weights. None uses the shipped
+    # defaults (Park's equal weights). Additive with a default, so existing
+    # create_mind payloads are unaffected; the simulation-side serializer needs
+    # no change until something actually wants to set it. This is the per-NPC
+    # door NPC-406 walks through.
+    retrieval_weights: RetrievalWeights | None = None
+
     # Initial state
     initial_working_memory: WorkingMemory | None = None
+
+    # Seed memories, written with NO importance rating and NO timestamp. They
+    # have never been through reflection, so nothing has rated them, and the
+    # retrieval scorer abstains on both dimensions rather than voting a
+    # fabricated midpoint. Batch-rating them at create_mind is a possible later
+    # refinement (NPC-400 open question D-2, option C); it is off the per-cycle
+    # token budget but was not needed to make retrieval correct.
     initial_long_term_memories: list[str] = Field(default_factory=list)
 
     # Personality dimensions (numeric trait dimensions from substrate, 0.0-1.0)

@@ -1,6 +1,14 @@
-"""Memory subsystem for the cognitive architecture"""
+"""Memory subsystem for the cognitive architecture.
 
-from .models import Memory
-from .vector_db_memory import VectorDBMemory
+Exports the pure data models only. VectorDBMemory is deliberately NOT re-exported
+here: importing a submodule runs this file, so an eager storage import at the
+package level pulled chromadb and sentence_transformers into every consumer of
+anything in the package - including PipelineState, via state.py's `Memory`
+import, and including the scoring module whose whole point is to have no storage
+dependency. Import it from its own module: `from .vector_db_memory import
+VectorDBMemory`, which is what every call site already did.
+"""
 
-__all__ = ["Memory", "VectorDBMemory"]
+from .models import Memory, VectorDBMetadata
+
+__all__ = ["Memory", "VectorDBMetadata"]
