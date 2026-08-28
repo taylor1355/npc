@@ -9,7 +9,6 @@ provider's cache (NPC-1319).
 """
 
 from pathlib import Path
-from pprint import pformat
 
 from json_repair import loads as json_repair_loads
 from langchain_core.language_models import BaseChatModel
@@ -21,6 +20,7 @@ from mind.cognitive_architecture.nodes.base import LLMNode, entity_tag
 from mind.cognitive_architecture.nodes.formatting import (
     format_goal_options,
     format_personality,
+    format_recent_events,
     format_substrate_goal,
 )
 from mind.cognitive_architecture.nodes.formatting import (
@@ -124,7 +124,7 @@ class ReflectionNode(LLMNode):
             substrate_goal=format_substrate_goal(goal_obs),
             goal_options=format_goal_options(goal_obs),
             retrieved_memories=memories_text,
-            recent_events=pformat(state.recent_events),
+            recent_events=format_recent_events(state.recent_events),
             observation_text=str(state.observation),
             available_actions=actions_text,
         )

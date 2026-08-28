@@ -3,7 +3,14 @@
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from mind.logging_config import get_logger
 
@@ -54,6 +61,60 @@ def _format_parameter_hint(param_name: str, spec: dict) -> str:
     return f"{text} ({', '.join(qualifiers)})" if qualifiers else text
 
 
+def _format_cell(value: object) -> str | None:
+    """Render a wire ``[x, y]`` destination as ``"(x, y)"``, or None if unusable.
+
+    ``MindEvent.payload`` is an unvalidated ``dict``, so nothing upstream
+    guarantees a movement event carries two-element coordinate lists. Returning
+    None lets the caller degrade to a plainer sentence; indexing directly is
+    what used to raise on the prompt path.
+    """
+    if isinstance(value, list | tuple) and len(value) >= 2:
+        return f"({value[0]}, {value[1]})"
+    return None
+
+
+def _format_bid_details(payload: dict) -> str:
+    """Render the parenthetical detail clause shared by the three bid arms.
+
+    Carries the identifiers a bid response needs to target, and the whole
+    counter-offer when there is one. The counter fields cross the wire (Godot
+    ``InteractionBidObservation.get_data()`` adds them for a counter bid) and
+    the simulation renders them in its own prose channel, but ``recent_events``
+    is the only path by which they reach the LLM — so dropping them here loses
+    them outright rather than merely compacting them.
+
+    ``bid_type`` is deliberately NOT rendered. The wire sends it as a bare
+    ``InteractionBid.BidType`` ordinal, and naming an ordinal here would hardcode
+    a simulation vocabulary this package may not know. The sibling
+    ``MovementObservation`` serializes its enum by name; making the bid
+    serializer match is the simulation-side fix.
+    """
+    parts: list[str] = []
+
+    bidder_id = str(payload.get("bidder_id") or "").strip()
+    if bidder_id:
+        parts.append(f"from {bidder_id}")
+
+    bid_id = str(payload.get("bid_id") or "").strip()
+    if bid_id:
+        parts.append(f"bid {bid_id}")
+
+    if str(payload.get("countered_bid_id") or "").strip():
+        participants = payload.get("existing_participants")
+        if isinstance(participants, list | tuple) and participants:
+            who = ", ".join(str(p) for p in participants)
+        else:
+            who = "others"
+        clause = f"counter-offer: join with {who}"
+        reason = str(payload.get("counter_reason") or "").strip()
+        if reason:
+            clause += f", because {reason}"
+        parts.append(clause)
+
+    return f" ({'; '.join(parts)})" if parts else ""
+
+
 class MindEventType(StrEnum):
     """Event types matching Godot MindEvent.Type enum"""
 
@@ -81,6 +142,19 @@ class MindEvent(BaseModel):
     def __str__(self) -> str:
         """Format event as natural language for LLM.
 
+        This is the ONLY rendering of the event buffer that reaches a prompt
+        (``nodes.formatting.format_recent_events``, NPC-1335). Two consequences
+        bind every arm below:
+
+        1. **It must be total.** The render happens in the argument expression
+           that builds the reflection prompt — upstream of ``call_llm``, and so
+           upstream of its salvage fallback. An exception here does not degrade
+           the cycle, it loses the cycle and its telemetry (the NPC-1195 class).
+           Read ``payload`` defensively; it is an unvalidated dict.
+        2. **What an arm drops is gone.** Nothing downstream re-derives it and
+           no other channel carries it, so an omission here is an omission from
+           the NPC's view of what just happened — not a compaction of it.
+
         The ``payload["interaction_name"]`` reads below are CORRECT — do not
         sweep them into ``WIRE_KEY_INTERACTION_NAME``. Event payloads are a
         different wire source from ``StatusObservation.current_interaction``:
@@ -96,10 +170,16 @@ class MindEvent(BaseModel):
         if event_type == MindEventType.INTERACTION_BID_REJECTED:
             interaction_name = payload.get("interaction_name", "unknown")
             reason = payload.get("reason", "")
+            # target_id is who refused. Kept because "who said no" is what stops
+            # the NPC re-bidding at the same entity next cycle; the wire omits
+            # the key entirely when it is empty.
+            target_id = str(payload.get("target_id") or "").strip()
+            text = f"Interaction bid rejected: {interaction_name}"
+            if target_id:
+                text += f" by {target_id}"
             if reason:
-                return f"Interaction bid rejected: {interaction_name} (Reason: {reason})"
-            else:
-                return f"Interaction bid rejected: {interaction_name}"
+                text += f" (Reason: {reason})"
+            return text
 
         elif event_type == MindEventType.INTERACTION_STARTED:
             interaction_name = payload.get("interaction_name", "unknown")
@@ -117,33 +197,45 @@ class MindEvent(BaseModel):
             message = payload.get("message", "Unknown error")
             return f"Error: {message}"
 
+        # The three bid arms share a detail clause: without the bidder and bid
+        # id, two bids in flight for the same interaction are indistinguishable,
+        # and a bid response has no id to target.
         elif event_type == MindEventType.INTERACTION_BID_PENDING:
             interaction_name = payload.get("interaction_name", "unknown")
-            return f"Interaction bid pending: {interaction_name}"
+            return f"Interaction bid pending: {interaction_name}{_format_bid_details(payload)}"
 
         elif event_type == MindEventType.INTERACTION_BID_RECEIVED:
             interaction_name = payload.get("interaction_name", "unknown")
-            return f"Interaction bid received: {interaction_name}"
+            return f"Interaction bid received: {interaction_name}{_format_bid_details(payload)}"
 
         elif event_type == MindEventType.INTERACTION_BID_CANCELED:
             interaction_name = payload.get("interaction_name", "unknown")
-            return f"Interaction bid canceled: {interaction_name}"
+            return f"Interaction bid canceled: {interaction_name}{_format_bid_details(payload)}"
 
         elif event_type == MindEventType.INTERACTION_OBSERVATION:
-            # Interaction update - format based on payload
+            # The raw payload is KEPT deliberately, and this is the one arm that
+            # compaction would break rather than improve: it is the only channel
+            # by which conversation content reaches the LLM. Observation.
+            # conversations is never populated in production, and
+            # PipelineState.conversation_histories is rendered by no node — so
+            # rendering this as prose without a speaker-aware replacement would
+            # silently blind every NPC to what was said to it. NPC-1298 owns
+            # closing that gap; compact this arm only after it does.
             return f"Interaction update: {payload}"
 
         elif event_type == MindEventType.MOVEMENT_COMPLETED:
             status = payload.get("status", "UNKNOWN")
-            actual_dest = payload.get("actual_destination")
-            intended_dest = payload.get("intended_destination")
+            actual_dest = _format_cell(payload.get("actual_destination"))
+            intended_dest = _format_cell(payload.get("intended_destination"))
 
-            if status == "ARRIVED":
-                return f"Arrived at ({actual_dest[0]}, {actual_dest[1]})"
-            elif status == "STOPPED_SHORT":
-                return f"Moved to ({actual_dest[0]}, {actual_dest[1]}), intended destination ({intended_dest[0]}, {intended_dest[1]}) was blocked"
-            elif status == "BLOCKED":
-                return f"Could not move to ({intended_dest[0]}, {intended_dest[1]}), no valid path"
+            # Each arm requires the coordinates it names; a malformed payload
+            # falls through to the status-only sentence rather than raising.
+            if status == "ARRIVED" and actual_dest:
+                return f"Arrived at {actual_dest}"
+            elif status == "STOPPED_SHORT" and actual_dest and intended_dest:
+                return f"Moved to {actual_dest}, intended destination {intended_dest} was blocked"
+            elif status == "BLOCKED" and intended_dest:
+                return f"Could not move to {intended_dest}, no valid path"
             else:
                 return f"Movement completed with status {status}"
 
@@ -157,7 +249,11 @@ class MindEvent(BaseModel):
                 return f"Chose action: {action_name}"
 
         else:
-            return f"Unknown event type: {event_type}"
+            # Unreachable while every MindEventType member has an arm above.
+            # Degrade to a repr rather than to nothing: a member the simulation
+            # ships before this package learns about it should reach the model
+            # as raw-but-present, not as a content-free line.
+            return f"{event_type}: {payload}"
 
 
 class StatusObservation(BaseModel):
@@ -275,10 +371,25 @@ class StatusObservation(BaseModel):
 
 
 class NeedsObservation(BaseModel):
-    """Entity needs state"""
+    """Entity needs state.
+
+    The simulation spells the ceiling ``max_need_value``
+    (``needs_observation.gd::get_data``); this field is ``max_value``. The key
+    was therefore dropped on every cycle and the default silently used instead
+    -- correct only by coincidence, since ``needs.gd::MAX_VALUE`` is also 100.0.
+    Change that constant and the mind would keep normalizing against a stale
+    100.0 with nothing failing anywhere (NPC-1116).
+
+    Both spellings are accepted: the wire name so the real value lands, the
+    field name so ``model_dump()`` round-trips and existing keyword
+    construction keeps working.
+    """
 
     needs: dict[str, float]
-    max_value: float = 100.0
+    max_value: float = Field(
+        default=100.0,
+        validation_alias=AliasChoices("max_need_value", "max_value"),
+    )
 
 
 class GoalDetail(BaseModel):
@@ -689,6 +800,38 @@ class VisionObservation(BaseModel):
     visible_entities: list[EntityData]
 
 
+class InventoryObservation(BaseModel):
+    """What this entity is carrying.
+
+    Wire producer: ``inventory_observation.gd::get_data`` -- exactly
+    ``owner_id`` / ``capacity`` / ``used_slots`` / ``items``, emitted every
+    decision cycle for any entity with an InventoryComponent (all production
+    NPC configs). This model's absence is what blocked ``Observation``'s
+    ``extra="forbid"`` (NPC-1116 / NPC-1321): the whole block was discarded
+    before reaching the LLM, silently, on every cycle.
+
+    ``items`` are ``EntityData`` -- the SAME shape vision carries, because the
+    simulation builds both with ``EntityData.to_dict()``. Carried items are
+    co-located with the carrier by construction, so the simulation stomps
+    their ``distance_to_observer`` to 0; that field is not on the wire and is
+    deliberately not declared here.
+
+    ``extra="forbid"`` (precedent: every ``Goal*`` model): this block is new,
+    so there is no legacy payload to break, and a key added simulation-side
+    must be a lockstep signal rather than a silent drop.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    owner_id: str = ""
+    capacity: int = 0
+    #: The simulation's own count, carried rather than re-derived from
+    #: ``len(items)``: they are the same today, and a future partial or paged
+    #: items list must not be able to silently misreport occupancy.
+    used_slots: int = 0
+    items: list[EntityData] = Field(default_factory=list)
+
+
 class ConversationMessage(BaseModel):
     """Single conversation message.
 
@@ -743,13 +886,37 @@ class ConversationObservation(BaseModel):
 class Observation(BaseModel):
     """Complete structured observation.
 
-    ``extra`` stays at pydantic's default ``ignore`` here even though the goal
-    models forbid: the simulation's real payload carries at least one root key
-    this model has never declared (``inventory``, emitted for every NPC with an
-    InventoryComponent — all production NPC configs), so ``extra="forbid"`` at
-    this level would reject every live observation until that surface is
-    declared. Tightening this boundary is [NPC-1116]'s class of work.
+    ``extra="forbid"``: the built-in mind and the simulation ship in lockstep,
+    so a root key this model does not declare is contract drift, not noise
+    (precedent: every ``Goal*`` model; decided on NPC-1116). Every root key the
+    simulation emits is declared below -- verified against simulation
+    ``origin/main`` @ a2ac2f5a by resolving ``get_type()`` for every
+    observation added in ``entity_controller.gd`` and
+    ``npc_controller.gd::get_current_state_observation``. The wire root key set
+    is mechanically ``{entity_id, current_simulation_time}`` plus one key per
+    ``get_type()``, because ``composite_observation.gd::get_data`` builds it
+    that way and nothing filters it afterwards.
+
+    This is the one place in this module that RAISES rather than degrades, and
+    the exception is deliberate. Elsewhere a malformed payload degrades because
+    the alternative is a SILENT stop; here the failure is loud by construction
+    -- ``server.py`` returns an error response and
+    ``mcp_mind_client.gd::_on_decide_action_response`` logs it at ERROR, naming
+    the offending key, before falling back to wait. Loud-and-inert is the trade;
+    silent-and-wrong is what NPC-1116 exists to end.
+
+    CONSEQUENCE FOR RELEASE ORDERING: a new observation type must land HERE
+    FIRST, and be deployed -- the server is a long-lived process. Merging a
+    simulation-side ``add_observation`` before the matching field exists here
+    takes every MCP NPC to wait, every cycle, until a code change ships.
+
+    ``conversations`` is declared but never on the wire: it is lifted out of
+    ``INTERACTION_OBSERVATION`` events by
+    ``server.py::_extract_conversation_observations``. It stays declared so
+    ``model_dump()`` round-trips through ``model_validate`` under forbid.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     entity_id: str  # Mind's entity ID in simulation
     current_simulation_time: int
@@ -758,6 +925,7 @@ class Observation(BaseModel):
     needs: NeedsObservation | None = None
     goal: GoalObservation | None = None
     mood: MoodObservation | None = None
+    inventory: InventoryObservation | None = None
     vision: VisionObservation | None = None
     conversations: list[ConversationObservation] = Field(default_factory=list)
 
@@ -795,6 +963,22 @@ class Observation(BaseModel):
                 f"{self.mood.valence_baseline:+.2f}; arousal {self.mood.arousal:.2f} "
                 f"against a resting {self.mood.arousal_baseline:.2f})"
             )
+
+        # Rendered only when actually carrying something: an absent line means
+        # an empty bag, and every existing fixture without an inventory must
+        # render byte-identically (the control-arm pattern the enrichment
+        # fixtures rely on). Placed between mood and vision because inventory
+        # and vision are the two affordance sources -- they read together.
+        if self.inventory and self.inventory.items:
+            inv = self.inventory
+            carried = []
+            for item in inv.items:
+                affordances = ", ".join(item.interactions.keys())
+                carried.append(
+                    f"  - {item.display_name} (ID: {item.entity_id})"
+                    + (f" [{affordances}]" if affordances else "")
+                )
+            parts.append(f"Carrying ({inv.used_slots} of {inv.capacity}):\n" + "\n".join(carried))
 
         if self.vision and self.vision.visible_entities:
             # Show entity details with IDs and interactions (critical for action selection)

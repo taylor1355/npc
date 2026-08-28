@@ -41,7 +41,7 @@ extends the base `entity_controller.gd::get_current_state_observation`.
 | `vision` | `vision_component.gd::create_vision_observation` | `vision` |
 | `goal` | `substrate_component.gd::create_goal_observation` | `goal` |
 | `mood` | `substrate_component.gd::create_mood_observation` | `mood` |
-| `inventory` | `inventory_component.gd::create_observation` | *(not declared — dropped)* |
+| `inventory` | `inventory_component.gd::create_observation` | `inventory` |
 
 The observation types themselves are the simulation's `src/minds/observations/`
 directory — read them there rather than from a list here.
@@ -75,13 +75,42 @@ or `to_dict()` that emits it.
 
 ## Known asymmetries
 
-- `inventory` is emitted every cycle and discarded here: no `Observation` field
-  declares it, and pydantic's default `extra="ignore"` makes the loss silent.
+- `needs.max_need_value` is the wire spelling of `NeedsObservation.max_value`.
+  The field accepts both; the wire name is the one the simulation sends.
 - `entity_data.gd::to_dict` deliberately omits `last_interaction_time` — a raw
   game-minute stamp carrying a not-set sentinel, meaningless to a reader with no
   frame of reference for the simulation clock.
 - `ACTION_CHOSEN` is a `MindEventType` member with no counterpart in
   `mind_event.gd::Type`, so the simulation never emits it.
+
+## Parsing posture
+
+`Observation` is `extra="forbid"` (NPC-1116). A root key this server does not
+declare raises a `ValidationError`, `server.py` returns an error response, and
+`mcp_mind_client.gd::_on_decide_action_response` logs it at ERROR and falls back
+to a wait. That is loud but **total**: every MCP NPC stops acting, every cycle,
+until a code change ships.
+
+The consequence is a cross-repo ordering rule that runs opposite to the old one:
+
+- **A new observation type must be declared here first, and deployed**, before
+  the simulation-side `add_observation` merges. The server is a long-lived
+  process launched from `.mind_launch.json` against a sibling clone, so pulling
+  simulation `main` without restarting it is enough to cause the outage.
+- Nested blocks are **not** uniformly forbidding. The `Goal*` family and
+  `InventoryObservation` forbid; `StatusObservation`, `NeedsObservation`,
+  `VisionObservation`, `MoodObservation`, `EntityData` and `VisibleInteraction`
+  keep pydantic's default `ignore`. **Root forbid catches a new BLOCK, not a new
+  FIELD inside an existing block.**
+- `ConversationObservation` must never gain forbid: `server.py` validates it
+  inside `try/except ValidationError: continue`, so forbidding there would
+  silently skip every `INTERACTION_OBSERVATION` — the same bug one layer over.
+
+**The parity audit cannot see this class of defect.** `audit_mcp_parity.py`
+scans `audit_scope.substrate_files` for substrate-component getters and exports;
+inventory is not substrate state, and the audit stays green through both this
+bug and any regression of it. Forbid is the mechanism precisely because auditing
+is not.
 
 ## See also
 

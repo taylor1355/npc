@@ -20,6 +20,7 @@ from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from mind.cognitive_architecture.observations import (
     GoalDetail,
     GoalObservation,
+    MindEvent,
     MindEventType,
     Observation,
     StatusObservation,
@@ -197,6 +198,60 @@ class TestReflectionNode:
 
         assert result.working_memory is not None
         assert "No relevant memories found" in rendered_prompt(mock_llm)
+
+    @staticmethod
+    def _recent_events_section(prompt: str) -> str:
+        """The rendered Recent Events section, sliced from its own headings.
+
+        Slicing makes these contract tests rather than substring tests: a repr
+        leaking in anywhere else in the prompt cannot make them pass, and a
+        repr leaking in *here* cannot be masked by prose elsewhere.
+        """
+        return prompt.split("### Recent Events")[1].split("### Current Observation")[0]
+
+    async def test_recent_events_render_as_prose_not_repr(self, node, mock_llm, basic_state):
+        """The event buffer reaches the model as sentences, not Python reprs (NPC-1335)"""
+        basic_state.recent_events = [
+            MindEvent(
+                timestamp=101,
+                event_type=MindEventType.INTERACTION_BID_RECEIVED,
+                payload={
+                    "interaction_name": "conversation",
+                    "bidder_id": "npc_carol",
+                    "bid_id": "bid_e5f6a7b8",
+                    "bid_type": 0,
+                },
+            ),
+            MindEvent(
+                timestamp=105,
+                event_type=MindEventType.MOVEMENT_COMPLETED,
+                payload={
+                    "status": "ARRIVED",
+                    "intended_destination": [10, 20],
+                    "actual_destination": [10, 20],
+                },
+            ),
+        ]
+
+        await node.process(basic_state)
+
+        section = self._recent_events_section(rendered_prompt(mock_llm))
+        assert "MindEvent(" not in section
+        assert "event_type=<MindEventType" not in section
+        assert "Interaction bid received: conversation" in section
+        assert "Arrived at (10, 20)" in section
+        # One line per event, so exactly one separator between the two.
+        assert section.strip().count("\n") == 1
+
+    async def test_empty_recent_events_render_a_sentinel(self, node, mock_llm, basic_state):
+        """An empty buffer must say so rather than render "[]" or nothing"""
+        basic_state.recent_events = []
+
+        await node.process(basic_state)
+
+        section = self._recent_events_section(rendered_prompt(mock_llm)).strip()
+        assert section
+        assert section != "[]"
 
     async def test_handles_empty_new_memories_list(self, node, mock_llm, basic_state):
         """Should handle LLM returning no new memories"""

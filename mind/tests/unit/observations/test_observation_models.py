@@ -12,6 +12,7 @@ from mind.cognitive_architecture.observations import (
     EntityData,
     GoalDetail,
     GoalObservation,
+    InventoryObservation,
     MindEvent,
     MindEventType,
     MoodObservation,
@@ -232,6 +233,187 @@ class TestMindEvent:
 
         formatted = str(event)
         assert formatted == "Could not move to (10, 20), no valid path"
+
+    # --- NPC-1335: __str__ is now the prompt-path renderer for the event
+    # buffer, so every arm must be both informative and total. The tests below
+    # encode the per-event-type fidelity audit that switch demanded.
+
+    @pytest.mark.parametrize("event_type", list(MindEventType))
+    def test_every_event_type_has_an_informative_arm(self, event_type):
+        """Every MindEventType renders something the LLM can act on.
+
+        The buffer is rendered straight into the reflection prompt, so an
+        unhandled member would put a content-free line in front of the model.
+        This passes today only because all members are covered; its job is to
+        go red the day a twelfth one is added without an arm.
+        """
+        event = MindEvent(timestamp=100, event_type=event_type, payload={"interaction_name": "sit"})
+
+        formatted = str(event)
+        assert formatted.strip()
+        # NOT a startswith check against the retired "Unknown event type"
+        # literal: that string no longer appears anywhere in __str__, so the
+        # assertion could not fail and guarded nothing. What must hold is that
+        # the arm SAYS something specific -- the event type named in prose or
+        # at minimum echoed with its payload, never a bare class repr.
+        assert "MindEvent(" not in formatted
+        assert formatted.strip() != ""
+        assert formatted.strip() != str(event_type)
+
+    def test_bid_received_renders_the_counter_offer(self):
+        """A counter-offer must survive into the prompt.
+
+        The counter fields reach the mind on the wire and are rendered by the
+        simulation's own ``InteractionBidObservation.format_for_npc``, but no
+        other path carries them to the LLM — dropping them here loses them
+        outright.
+        """
+        event = MindEvent(
+            timestamp=103,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={
+                "interaction_name": "conversation",
+                "bid_type": 0,
+                "bid_id": "bid_e5f6a7b8",
+                "bidder_id": "npc_carol",
+                "provider_id": "npc_alice",
+                "countered_bid_id": "bid_00112233",
+                "target_interaction_id": "interaction_9",
+                "existing_participants": ["npc_alice", "npc_bob"],
+                "counter_reason": "already talking to someone",
+                "timestamp": 103.0,
+                "force": False,
+            },
+        )
+
+        formatted = str(event)
+        assert "Interaction bid received: conversation" in formatted
+        assert "counter-offer" in formatted
+        assert "npc_alice" in formatted
+        assert "npc_bob" in formatted
+        assert "already talking to someone" in formatted
+
+    def test_bid_received_names_the_bidder_and_bid_id(self):
+        """Who bid, and which bid — a response action needs the id to target."""
+        event = MindEvent(
+            timestamp=103,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={
+                "interaction_name": "conversation",
+                "bid_id": "bid_e5f6a7b8",
+                "bidder_id": "npc_carol",
+            },
+        )
+
+        formatted = str(event)
+        assert "npc_carol" in formatted
+        assert "bid_e5f6a7b8" in formatted
+
+    def test_bid_pending_and_canceled_name_their_bid(self):
+        """With two bids in flight, the interaction name cannot disambiguate."""
+        for event_type, verb in (
+            (MindEventType.INTERACTION_BID_PENDING, "pending"),
+            (MindEventType.INTERACTION_BID_CANCELED, "canceled"),
+        ):
+            event = MindEvent(
+                timestamp=103,
+                event_type=event_type,
+                payload={
+                    "interaction_name": "conversation",
+                    "bid_id": "bid_e5f6a7b8",
+                    "bidder_id": "npc_carol",
+                },
+            )
+
+            formatted = str(event)
+            assert f"Interaction bid {verb}: conversation" in formatted
+            assert "bid_e5f6a7b8" in formatted
+
+    def test_bid_rejected_names_the_rejecting_entity(self):
+        """``target_id`` is who refused — needed to avoid re-bidding at them."""
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_REJECTED,
+            payload={
+                "interaction_name": "sit",
+                "reason": "Too far away",
+                "target_id": "chair_7",
+            },
+        )
+
+        formatted = str(event)
+        assert "Interaction bid rejected: sit" in formatted
+        assert "chair_7" in formatted
+        assert "Too far away" in formatted
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"status": "ARRIVED"},
+            {"status": "ARRIVED", "actual_destination": None},
+            {"status": "ARRIVED", "actual_destination": [4]},
+            {"status": "STOPPED_SHORT", "actual_destination": [4, 5]},
+            {"status": "BLOCKED"},
+            {},
+        ],
+    )
+    def test_movement_completed_with_missing_destination_does_not_raise(self, payload):
+        """A malformed movement payload degrades; it must never raise.
+
+        ``payload`` is an unvalidated dict, and this renders inside the
+        argument expression that builds the reflection prompt — upstream of
+        ``call_llm`` and therefore of its salvage fallback. An exception here
+        costs the whole decision cycle and its telemetry (the NPC-1195 class).
+        """
+        event = MindEvent(
+            timestamp=100, event_type=MindEventType.MOVEMENT_COMPLETED, payload=payload
+        )
+
+        formatted = str(event)
+        assert formatted.strip()
+
+    def test_unknown_event_type_still_carries_its_payload(self):
+        """A future enum member degrades to a repr rather than to nothing.
+
+        ``model_construct`` bypasses enum validation to stand in for a member
+        the simulation ships before this package learns about it.
+        """
+        event = MindEvent.model_construct(
+            timestamp=100,
+            event_type="INTERACTION_ESCALATED",
+            payload={"interaction_name": "duel"},
+        )
+
+        formatted = str(event)
+        assert "INTERACTION_ESCALATED" in formatted
+        assert "duel" in formatted
+
+    def test_interaction_observation_still_carries_conversation_content(self):
+        """Pin, not a preference: this arm is the sole speech channel.
+
+        ``Observation.conversations`` is never populated in production and
+        ``PipelineState.conversation_histories`` is rendered by no node, so an
+        INTERACTION_OBSERVATION event's raw payload is the only way anything
+        anyone said reaches the LLM. Compacting this arm would silently blind
+        every NPC to speech. NPC-1298 owns closing that gap; until it does,
+        this test must go red for anyone who tidies the arm up.
+        """
+        event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_OBSERVATION,
+            payload={
+                "interaction_name": "conversation",
+                "participants": ["npc_alice", "npc_bob"],
+                "conversation_history": [
+                    {"speaker_id": "npc_bob", "message": "Have you seen the smith today?"}
+                ],
+                "total_message_count": 1,
+            },
+        )
+
+        formatted = str(event)
+        assert "Have you seen the smith today?" in formatted
+        assert "npc_bob" in formatted
 
 
 class TestBidActionGeneration:
@@ -741,3 +923,146 @@ class TestRelationshipEnrichment:
 
         with pytest.raises(ValidationError):
             RelationshipState(familiarity=0.5, sentiment=-2.0)
+
+
+class TestInventoryObservation:
+    """The ``inventory`` root key survives the boundary (NPC-1116).
+
+    Before this model existed the whole block was discarded by pydantic's
+    default ``extra="ignore"`` -- silently, on every decision cycle, for every
+    NPC with an InventoryComponent.
+    """
+
+    def test_inventory_survives_validation(self):
+        """Should parse the wire inventory block into a typed model"""
+        from tests.fixtures.observations import wire_full_root_payload
+
+        obs = Observation.model_validate(wire_full_root_payload())
+
+        assert obs.inventory is not None
+        assert obs.inventory.owner_id == "carrier_npc"
+        assert obs.inventory.capacity == 4
+        assert obs.inventory.used_slots == 2
+        assert [item.entity_id for item in obs.inventory.items] == ["apple_001", "pebble_001"]
+        assert obs.inventory.items[0].display_name == "Ripe Apple"
+        assert "consume" in obs.inventory.items[0].interactions
+
+    def test_used_slots_is_carried_not_derived(self):
+        """Should report the simulation's own count, not ``len(items)``"""
+        from tests.fixtures.observations import wire_inventory_block, wire_inventory_item
+
+        block = wire_inventory_block(items=[wire_inventory_item("apple_001", "Ripe Apple")])
+        block["used_slots"] = 3  # a paged/partial items list, as a future wire could send
+
+        inv = InventoryObservation.model_validate(block)
+
+        assert inv.used_slots == 3
+        assert len(inv.items) == 1
+
+    def test_inventory_block_forbids_extras(self):
+        """Should reject an undeclared key inside the inventory block"""
+        from tests.fixtures.observations import wire_inventory_block
+
+        block = wire_inventory_block()
+        block["weight_kg"] = 3
+
+        with pytest.raises(ValidationError):
+            InventoryObservation.model_validate(block)
+
+    def test_idle_inventory_item_has_no_interaction(self):
+        """Should map the simulation's ``{}`` idle sentinel onto None"""
+        from tests.fixtures.observations import wire_inventory_block, wire_inventory_item
+
+        inv = InventoryObservation.model_validate(
+            wire_inventory_block(items=[wire_inventory_item("apple_001", "Ripe Apple")])
+        )
+
+        assert inv.items[0].current_interaction is None
+
+    def test_empty_inventory_is_valid(self):
+        """Should accept a carrier holding nothing"""
+        from tests.fixtures.observations import wire_inventory_block
+
+        inv = InventoryObservation.model_validate(wire_inventory_block(items=[]))
+
+        assert inv.items == []
+        assert inv.used_slots == 0
+
+
+class TestNeedsCeilingWireKey:
+    """``max_need_value`` is the wire spelling of ``max_value`` (NPC-1116).
+
+    The mismatch was correct only by coincidence -- both spellings resolve to
+    100.0 today -- so nothing failed while the real value was being dropped.
+    """
+
+    def test_max_need_value_wire_key_lands(self):
+        """Should take the ceiling from the simulation's spelling"""
+        needs = NeedsObservation.model_validate({"needs": {"hunger": 1.0}, "max_need_value": 250.0})
+
+        assert needs.max_value == 250.0
+
+    def test_max_value_field_name_still_accepted(self):
+        """Should still accept the field name so ``model_dump()`` round-trips"""
+        original = NeedsObservation(needs={"hunger": 1.0}, max_value=42.0)
+
+        assert NeedsObservation.model_validate(original.model_dump()).max_value == 42.0
+
+
+class TestObservationRootForbid:
+    """An undeclared root key raises instead of vanishing (NPC-1116).
+
+    The wire root key set is mechanically ``{entity_id,
+    current_simulation_time}`` plus one key per ``Observation.get_type()``, so
+    a key this model does not declare is contract drift rather than noise. The
+    trade is deliberate and one-directional: the failure is loud (an error
+    response, logged at ERROR simulation-side, naming the key) but total for
+    MCP NPCs, which is why every emitted root key must be declared here BEFORE
+    the simulation-side emission merges.
+    """
+
+    def test_undeclared_root_key_is_rejected_by_observation(self):
+        """Should raise on a root key no field declares"""
+        payload = {
+            "entity_id": "x",
+            "current_simulation_time": 1,
+            # W4's key. It exists nowhere in the simulation tree today, so this
+            # test doubles as the proof that the cross-repo ordering gate is
+            # still free to establish: the mind must declare it first.
+            "shared_place": {"place_id": "tavern"},
+        }
+
+        with pytest.raises(ValidationError):
+            Observation.model_validate(payload)
+
+    def test_root_forbid_is_falsifiable(self):
+        """Should keep forbid set, so a future merge cannot silently revert it"""
+        assert Observation.model_config["extra"] == "forbid"
+
+    def test_full_wire_payload_parses_under_forbid(self):
+        """Should accept every root key the simulation actually emits.
+
+        The single test that would have caught a missed key before it reached a
+        live NPC. It is only as good as ``wire_full_root_payload``'s
+        transcription -- re-derive that from the simulation's ``get_data()``
+        rather than trusting it if the producers change.
+        """
+        from tests.fixtures.observations import wire_full_root_payload
+
+        obs = Observation.model_validate(wire_full_root_payload())
+
+        assert obs.entity_id == "carrier_npc"
+        assert obs.status is not None
+        assert obs.needs is not None
+        assert obs.vision is not None
+        assert obs.goal is not None
+        assert obs.mood is not None
+        assert obs.inventory is not None
+
+    def test_model_dump_round_trips_under_forbid(self):
+        """Should re-validate its own dump -- integration tests rely on this"""
+        from tests.fixtures.observations import create_carrying_observation
+
+        original = create_carrying_observation()
+
+        assert Observation.model_validate(original.model_dump()).inventory is not None

@@ -10,7 +10,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from mind.cognitive_architecture.observations import GoalObservation, Observation
+    from mind.cognitive_architecture.observations import (
+        GoalObservation,
+        MindEvent,
+        Observation,
+    )
 
 
 def format_personality(
@@ -34,6 +38,37 @@ def format_personality(
         dims_text = "No personality dimensions provided"
 
     return traits_text, dims_text
+
+
+def format_recent_events(events: list[MindEvent]) -> str:
+    """Render the recent-events buffer as one prose line per event.
+
+    This is the only render path for the buffer. It used to be ``pformat`` —
+    Python ``repr`` of the Pydantic models, enum members, quoted dict keys and
+    all — which spent the majority of its tokens on syntax the model cannot act
+    on, while ``MindEvent.__str__`` (the sentence the simulation's own prose
+    channel is modelled on) went unused on the prompt path (NPC-1335).
+
+    Every token here is an uncached one: ``{recent_events}`` sits below the
+    reflection prompt's cache breakpoint, in the per-call dynamic suffix, so
+    what this returns is billed at the full input rate on every single call.
+
+    The timestamp prefix is kept because ``pformat`` carried it and position
+    alone cannot replace it: the buffer spans ``EVENT_RETENTION_TIME_MINUTES``
+    of game time, and ``interfaces/mcp/mind.py`` assigns its truncated slice
+    from a ``reverse=True`` sort without re-sorting — so a full buffer arrives
+    newest-first while a partial one arrives oldest-first. Until that is fixed,
+    the timestamps are what make the ordering legible.
+
+    Returns a sentinel string when the buffer is empty. Mandatory, not
+    defensive, for the same reason as ``format_substrate_goal``: LangChain
+    PromptTemplate raises on a missing declared variable, and an empty join
+    would leave the "### Recent Events" heading followed by a blank line, which
+    reads to a model as a formatting error rather than as "nothing happened".
+    """
+    if not events:
+        return "Nothing has happened recently."
+    return "\n".join(f"[t={event.timestamp}] {event}" for event in events)
 
 
 def format_interaction_status(observation: Observation | None) -> str:

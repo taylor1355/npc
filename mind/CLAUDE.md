@@ -64,13 +64,32 @@ src/mind/
 **Performance:** the pre-merge baseline, measured live (NPC-1318, 2026-08-20), was
 **5,367 tokens per decision cycle** (mean over 10 cycles, cold memory store,
 `google/gemini-2.5-flash-lite`; per-node means 551.2 / 2,802.5 / 2,012.9 for
-memory_query / cognitive_update / action_selection). Reproduce with the harness in
-NPC-1318's baseline comment: `PYTHONPATH=$PWD/src:$PWD python measure_baseline.py`
-(**that harness is not in this repo** — it exists only as an attachment on the Linear
-issue, so reproducing the number means retrieving it from there first)
-from a mind checkout with credentials linked. The reflection merge removes the
-duplicated prompt content between the two retired nodes; re-measure with the same
-harness rather than extrapolating.
+memory_query / cognitive_update / action_selection).
+
+**That figure cannot currently be reproduced, and two things stop it.** The
+harness that produced it (`measure_baseline.py`, named in NPC-1318's baseline
+comment) was never committed to this repo and exists on no machine here — so any
+instruction to "re-run the same harness" is a rebuild, and a rebuilt harness is
+not byte-identical to the one that produced 5,367. And its per-node table names
+`cognitive_update` and `action_selection`, nodes NPC-1319 retired, so only the
+per-cycle total could ever have been compared forward. Treat 5,367 as a recorded
+historical figure, not a live baseline; a replacement harness should be committed
+here rather than run from a temporary worktree.
+
+What *is* reproducible is the offline rendering A/B, which needs no LLM and no
+credentials:
+
+```bash
+PYTHONPATH=$PWD/src:$PWD python tools/measure_recent_events_rendering.py
+```
+
+It counts the recent-events buffer under the old `pformat` rendering against the
+current one over committed fixtures (`tests/fixtures/observations.py`,
+`create_*_events`), and prints the commit it ran at. Those tokens are all
+uncached — `{recent_events}` sits below the reflection prompt's cache
+breakpoint. A live per-cycle number measured against fixtures with an **empty**
+event buffer says nothing about this cost either way, which is the trap the
+observation fixtures set: none of them carries a `MindEvent`.
 
 ### Memory System
 
