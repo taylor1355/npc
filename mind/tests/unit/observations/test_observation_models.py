@@ -12,6 +12,7 @@ from mind.cognitive_architecture.observations import (
     EntityData,
     GoalDetail,
     GoalObservation,
+    InventoryObservation,
     MindEvent,
     MindEventType,
     MoodObservation,
@@ -741,3 +742,146 @@ class TestRelationshipEnrichment:
 
         with pytest.raises(ValidationError):
             RelationshipState(familiarity=0.5, sentiment=-2.0)
+
+
+class TestInventoryObservation:
+    """The ``inventory`` root key survives the boundary (NPC-1116).
+
+    Before this model existed the whole block was discarded by pydantic's
+    default ``extra="ignore"`` -- silently, on every decision cycle, for every
+    NPC with an InventoryComponent.
+    """
+
+    def test_inventory_survives_validation(self):
+        """Should parse the wire inventory block into a typed model"""
+        from tests.fixtures.observations import wire_full_root_payload
+
+        obs = Observation.model_validate(wire_full_root_payload())
+
+        assert obs.inventory is not None
+        assert obs.inventory.owner_id == "carrier_npc"
+        assert obs.inventory.capacity == 4
+        assert obs.inventory.used_slots == 2
+        assert [item.entity_id for item in obs.inventory.items] == ["apple_001", "pebble_001"]
+        assert obs.inventory.items[0].display_name == "Ripe Apple"
+        assert "consume" in obs.inventory.items[0].interactions
+
+    def test_used_slots_is_carried_not_derived(self):
+        """Should report the simulation's own count, not ``len(items)``"""
+        from tests.fixtures.observations import wire_inventory_block, wire_inventory_item
+
+        block = wire_inventory_block(items=[wire_inventory_item("apple_001", "Ripe Apple")])
+        block["used_slots"] = 3  # a paged/partial items list, as a future wire could send
+
+        inv = InventoryObservation.model_validate(block)
+
+        assert inv.used_slots == 3
+        assert len(inv.items) == 1
+
+    def test_inventory_block_forbids_extras(self):
+        """Should reject an undeclared key inside the inventory block"""
+        from tests.fixtures.observations import wire_inventory_block
+
+        block = wire_inventory_block()
+        block["weight_kg"] = 3
+
+        with pytest.raises(ValidationError):
+            InventoryObservation.model_validate(block)
+
+    def test_idle_inventory_item_has_no_interaction(self):
+        """Should map the simulation's ``{}`` idle sentinel onto None"""
+        from tests.fixtures.observations import wire_inventory_block, wire_inventory_item
+
+        inv = InventoryObservation.model_validate(
+            wire_inventory_block(items=[wire_inventory_item("apple_001", "Ripe Apple")])
+        )
+
+        assert inv.items[0].current_interaction is None
+
+    def test_empty_inventory_is_valid(self):
+        """Should accept a carrier holding nothing"""
+        from tests.fixtures.observations import wire_inventory_block
+
+        inv = InventoryObservation.model_validate(wire_inventory_block(items=[]))
+
+        assert inv.items == []
+        assert inv.used_slots == 0
+
+
+class TestNeedsCeilingWireKey:
+    """``max_need_value`` is the wire spelling of ``max_value`` (NPC-1116).
+
+    The mismatch was correct only by coincidence -- both spellings resolve to
+    100.0 today -- so nothing failed while the real value was being dropped.
+    """
+
+    def test_max_need_value_wire_key_lands(self):
+        """Should take the ceiling from the simulation's spelling"""
+        needs = NeedsObservation.model_validate({"needs": {"hunger": 1.0}, "max_need_value": 250.0})
+
+        assert needs.max_value == 250.0
+
+    def test_max_value_field_name_still_accepted(self):
+        """Should still accept the field name so ``model_dump()`` round-trips"""
+        original = NeedsObservation(needs={"hunger": 1.0}, max_value=42.0)
+
+        assert NeedsObservation.model_validate(original.model_dump()).max_value == 42.0
+
+
+class TestObservationRootForbid:
+    """An undeclared root key raises instead of vanishing (NPC-1116).
+
+    The wire root key set is mechanically ``{entity_id,
+    current_simulation_time}`` plus one key per ``Observation.get_type()``, so
+    a key this model does not declare is contract drift rather than noise. The
+    trade is deliberate and one-directional: the failure is loud (an error
+    response, logged at ERROR simulation-side, naming the key) but total for
+    MCP NPCs, which is why every emitted root key must be declared here BEFORE
+    the simulation-side emission merges.
+    """
+
+    def test_undeclared_root_key_is_rejected_by_observation(self):
+        """Should raise on a root key no field declares"""
+        payload = {
+            "entity_id": "x",
+            "current_simulation_time": 1,
+            # W4's key. It exists nowhere in the simulation tree today, so this
+            # test doubles as the proof that the cross-repo ordering gate is
+            # still free to establish: the mind must declare it first.
+            "shared_place": {"place_id": "tavern"},
+        }
+
+        with pytest.raises(ValidationError):
+            Observation.model_validate(payload)
+
+    def test_root_forbid_is_falsifiable(self):
+        """Should keep forbid set, so a future merge cannot silently revert it"""
+        assert Observation.model_config["extra"] == "forbid"
+
+    def test_full_wire_payload_parses_under_forbid(self):
+        """Should accept every root key the simulation actually emits.
+
+        The single test that would have caught a missed key before it reached a
+        live NPC. It is only as good as ``wire_full_root_payload``'s
+        transcription -- re-derive that from the simulation's ``get_data()``
+        rather than trusting it if the producers change.
+        """
+        from tests.fixtures.observations import wire_full_root_payload
+
+        obs = Observation.model_validate(wire_full_root_payload())
+
+        assert obs.entity_id == "carrier_npc"
+        assert obs.status is not None
+        assert obs.needs is not None
+        assert obs.vision is not None
+        assert obs.goal is not None
+        assert obs.mood is not None
+        assert obs.inventory is not None
+
+    def test_model_dump_round_trips_under_forbid(self):
+        """Should re-validate its own dump -- integration tests rely on this"""
+        from tests.fixtures.observations import create_carrying_observation
+
+        original = create_carrying_observation()
+
+        assert Observation.model_validate(original.model_dump()).inventory is not None
