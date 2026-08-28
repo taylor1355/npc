@@ -139,8 +139,41 @@ class Mind:
             llm_model=config.llm_model,
         )
 
+    @staticmethod
+    def _composite_message_key(msg: ConversationMessage) -> tuple:
+        """Identity for a message carrying no id, from the fields the wire always has.
+
+        ``speaker_id`` is part of the key because a timestamp alone is not an
+        identity: the simulation truncates game time to whole minutes, and two
+        different speakers routinely land in the same minute (a participant's
+        message and the system's "message limit reached" notice are appended in
+        the same tick, with no game time between them).
+
+        ``timestamp`` may be ``None``; that is a legitimate tuple element rather
+        than a reason to skip dedup, which is what makes an unstamped message
+        deduplicate like any other.
+        """
+        return (msg.timestamp, msg.speaker_id, msg.message)
+
     def update_conversations(self, conversations: list) -> None:
-        """Aggregate conversation updates into full history
+        """Aggregate conversation updates into full history.
+
+        Observations arrive as overlapping rolling windows, so the same message
+        is re-sent on many cycles and must be stored exactly once.
+
+        Dedup has **two branches, and the composite key is not a migration
+        step** — it is the permanent fallback for any message whose producer
+        sent no id (see ``ConversationMessage.id``: an older simulation is a
+        shape this server must accept forever, because the two halves are
+        deployed independently).
+
+        1. **By id** when the message carries one — durable across re-sends and
+           immune to two speakers sharing a truncated timestamp.
+        2. **By composite key** ``(timestamp, speaker_id, message)`` otherwise.
+
+        Both indices are updated *inside* the loop, so a batch containing the
+        same message twice stores it once. Building them once up front was the
+        defect that let intra-batch duplicates through.
 
         Args:
             conversations: List of ConversationObservation objects
@@ -152,16 +185,67 @@ class Mind:
             if interaction_id not in self.conversation_histories:
                 self.conversation_histories[interaction_id] = []
 
-            # Append new messages (avoid duplicates by checking timestamps)
-            existing_timestamps = {
-                msg.timestamp
-                for msg in self.conversation_histories[interaction_id]
-                if msg.timestamp is not None
-            }
+            stored = self.conversation_histories[interaction_id]
+
+            by_id = {msg.id: msg for msg in stored if msg.id}
+            # Built from ALL stored messages, not just id-less ones, so a message
+            # stored WITH an id is still recognised when it re-arrives WITHOUT one
+            # (the simulation downgraded between cycles). First writer wins: on a
+            # composite collision the index points at the earliest copy, which is
+            # the one an upgrade should backfill onto.
+            by_composite: dict[tuple, ConversationMessage] = {}
+            for msg in stored:
+                by_composite.setdefault(self._composite_message_key(msg), msg)
 
             for msg in conv_obs.conversation_history:
-                if msg.timestamp is None or msg.timestamp not in existing_timestamps:
-                    self.conversation_histories[interaction_id].append(msg)
+                incoming_id = msg.id
+                if incoming_id is not None and not incoming_id.strip():
+                    # An EMPTY id is a producer bug, categorically different from
+                    # an ABSENT one: the simulation mints in the constructor, so
+                    # a blank means the mint path was bypassed. Never treat "" as
+                    # an identity (every such message would collide with every
+                    # other) — say so and fall through to the composite branch,
+                    # which still deduplicates it correctly.
+                    logger.warning(
+                        f"[{self.entity_id}] Conversation message arrived with an EMPTY id "
+                        f"in {interaction_id} (speaker={msg.speaker_id!r}) — the producer's "
+                        f"mint path was bypassed. Falling back to the composite key."
+                    )
+                    incoming_id = None
+
+                if incoming_id:
+                    if incoming_id in by_id:
+                        continue
+
+                    key = self._composite_message_key(msg)
+                    prior = by_composite.get(key)
+                    if prior is not None and not prior.id:
+                        # Upgrade path: we already hold this message from a cycle
+                        # that carried no id. Backfill the id onto the copy we
+                        # hold rather than appending a second copy of one message.
+                        prior.id = incoming_id
+                        by_id[incoming_id] = prior
+                        continue
+                    if prior is not None and prior.id and prior.id != incoming_id:
+                        # Distinct ids mean the producer considers these distinct
+                        # messages, so keep both — the composite key is the weaker
+                        # identity and must not overrule an explicit one.
+                        logger.warning(
+                            f"[{self.entity_id}] Two messages in {interaction_id} share a "
+                            f"composite key but carry distinct ids "
+                            f"({prior.id!r} vs {incoming_id!r}) — keeping both."
+                        )
+
+                    stored.append(msg)
+                    by_id[incoming_id] = msg
+                    by_composite.setdefault(key, msg)
+                    continue
+
+                key = self._composite_message_key(msg)
+                if key in by_composite:
+                    continue
+                stored.append(msg)
+                by_composite[key] = msg
 
     def update_events(self, new_events: list[MindEvent], current_time: int) -> None:
         """Update event buffer with retention policy

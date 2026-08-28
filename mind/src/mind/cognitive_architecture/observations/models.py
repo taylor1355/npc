@@ -705,6 +705,14 @@ class ConversationMessage(BaseModel):
     post-migration shape therefore loses nothing: before the simulation change
     lands perception stays exactly as dark as it already was, and after it lands
     it works. A legacy field would be dead the day it merged.
+
+    ``id`` is the simulation's per-message identity, and it is **permanently
+    optional — not transitional**. The simulation ships as a game binary while
+    this runs as a separately-launched MCP server, so there is no deploy step
+    that updates both at once: an older simulation sending no id is a shape this
+    model must accept forever, and ``None`` here means exactly "the producer did
+    not send one". Dedup falls back to a composite key for those messages; see
+    ``Mind.update_conversations``.
     """
 
     speaker_id: str
@@ -713,6 +721,7 @@ class ConversationMessage(BaseModel):
     timestamp: int | None = None
     is_system: bool = False
     declarations: list[dict] = Field(default_factory=list)
+    id: str | None = None
 
     def render_markers(self) -> str:
         """Trailing ``[system] [farewell]``-style markers, or "" when there are none.
