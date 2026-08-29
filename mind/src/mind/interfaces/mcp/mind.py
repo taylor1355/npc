@@ -5,8 +5,14 @@ from typing import Self
 
 from mind.apis.langchain_llm import get_llm
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
-from mind.cognitive_architecture.observations import ConversationMessage, MindEvent, MindEventType
+from mind.cognitive_architecture.observations import (
+    ConversationMessage,
+    MindEvent,
+    MindEventType,
+    Observation,
+)
 from mind.cognitive_architecture.pipeline import CognitivePipeline
+from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.working_memory import NewMemory, WorkingMemory
 from mind.interfaces.mcp.models import MindConfig
 from mind.logging_config import get_logger
@@ -275,3 +281,39 @@ class Mind:
             ]
 
         self.event_buffer = retained
+
+    def build_pipeline_state(self, obs: Observation) -> PipelineState:
+        """The state one decision cycle runs on.
+
+        Extracted out of ``server.py::decide_action`` so that anything measuring
+        or exercising a cycle outside the MCP tool runs on the SAME construction
+        production runs on. The predecessor measurement harness (NPC-1318) was
+        described as mirroring this construction by hand; the mirror went stale
+        silently, and its per-node table outlived the nodes it named.
+        ``decide_action`` is a closure registered inside
+        ``MCPServer._register_tools_and_resources``, so it is not importable —
+        this method is the only shared surface a caller can reach.
+
+        This method READS the mind; it does not advance it. Callers own the
+        per-cycle mutations that must precede it: ``update_conversations`` and
+        ``update_events`` (which applies the retention policy that fills
+        ``event_buffer``), plus stamping ``last_simulation_time``.
+
+        Args:
+            obs: This cycle's observation, already parsed and routed.
+
+        Returns:
+            A PipelineState carrying every input field the pipeline reads.
+        """
+        return PipelineState(
+            observation=obs,
+            available_actions=obs.get_available_actions(
+                pending_incoming_bids=self.pending_incoming_bids
+            ),
+            working_memory=self.working_memory,
+            personality_traits=self.traits,
+            personality_dimensions=self.personality_dimensions,
+            conversation_histories=self.conversation_histories,
+            recent_events=self.event_buffer,
+            pending_incoming_bids=self.pending_incoming_bids,
+        )

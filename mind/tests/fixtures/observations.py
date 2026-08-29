@@ -894,3 +894,95 @@ def create_conversation_events(start_time: int = 100) -> list[MindEvent]:
         ),
     )
     return events
+
+
+def create_saturated_events(start_time: int = 100) -> list[MindEvent]:
+    """The retention CEILING: a buffer holding exactly ``EVENT_BUFFER_MAX_SIZE``.
+
+    The three buffers above top out at 8 events, so a measurement built only
+    from them reports a FLOOR — it says nothing about what a decision cycle
+    costs for an NPC whose buffer is full, which is the steady state for any
+    NPC in a busy area. This one is sized to the retention ceiling so the
+    upper bound is measured rather than extrapolated.
+
+    Two invariants make it actually saturate, and
+    ``tests/unit/test_measurement_fixtures.py`` pins both:
+
+    - The length is ``EVENT_BUFFER_MAX_SIZE`` exactly. If that constant moves,
+      this fixture must move with it or it stops measuring the ceiling.
+    - Every timestamp is within ``EVENT_RETENTION_TIME_MINUTES`` of
+      ``start_time``, so ``Mind.update_events`` retains all of them rather than
+      aging some out and quietly measuring a smaller buffer.
+
+    The added bid is received and then canceled, which exercises the pending-bid
+    cleanup path while leaving the earlier ``bid_e5f6a7b8`` from
+    ``create_social_events`` pending — so the scenario still generates
+    bid-response actions.
+    """
+    events = create_conversation_events(start_time)  # 8
+    events.extend(
+        [
+            MindEvent(
+                timestamp=start_time + 10,
+                event_type=MindEventType.ACTION_CHOSEN,
+                payload={"action": "move_to", "parameters": {"x": 15, "y": 11}},
+            ),
+            MindEvent(
+                timestamp=start_time + 12,
+                event_type=MindEventType.MOVEMENT_COMPLETED,
+                payload={
+                    "intended_destination": [15, 11],
+                    "actual_destination": [14, 11],
+                    "status": "STOPPED_SHORT",
+                },
+            ),
+            MindEvent(
+                timestamp=start_time + 13,
+                event_type=MindEventType.INTERACTION_BID_PENDING,
+                payload={
+                    "interaction_name": "sit",
+                    "bid_type": 0,
+                    "bid_id": "bid_99aa88bb",
+                    "bidder_id": "npc_alice",
+                    "provider_id": "item_bench_1",
+                    "timestamp": float(start_time + 13),
+                    "force": False,
+                },
+            ),
+            MindEvent(
+                timestamp=start_time + 15,
+                event_type=MindEventType.INTERACTION_BID_RECEIVED,
+                payload={
+                    "interaction_name": "trade",
+                    "bid_type": 0,
+                    "bid_id": "bid_c9d0e1f2",
+                    "bidder_id": "npc_dave",
+                    "provider_id": "npc_alice",
+                    "timestamp": float(start_time + 15),
+                    "force": False,
+                },
+            ),
+            MindEvent(
+                timestamp=start_time + 17,
+                event_type=MindEventType.INTERACTION_BID_CANCELED,
+                payload={
+                    "interaction_name": "trade",
+                    "bid_type": 0,
+                    "bid_id": "bid_c9d0e1f2",
+                    "bidder_id": "npc_dave",
+                    "provider_id": "npc_alice",
+                },
+            ),
+            MindEvent(
+                timestamp=start_time + 19,
+                event_type=MindEventType.INTERACTION_STARTED,
+                payload={"interaction_name": "sit", "update_type": "started"},
+            ),
+            MindEvent(
+                timestamp=start_time + 21,
+                event_type=MindEventType.ACTION_CHOSEN,
+                payload={"action": "wait", "parameters": {}},
+            ),
+        ]
+    )
+    return events
