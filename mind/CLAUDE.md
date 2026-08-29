@@ -61,23 +61,44 @@ src/mind/
    pair, NPC-1319). Its prompt's static prefix (scaffold + world knowledge + format
    instructions) is served from the provider's prompt cache for allowlisted models.
 
-**Performance:** the pre-merge baseline, measured live (NPC-1318, 2026-08-20), was
-**5,367 tokens per decision cycle** (mean over 10 cycles, cold memory store,
-`google/gemini-2.5-flash-lite`; per-node means 551.2 / 2,802.5 / 2,012.9 for
-memory_query / cognitive_update / action_selection).
+**Performance: 5,508 tokens per retry-free decision cycle** (mean over 9 clean
+cycles; median 5,436, range 4,810–6,120), measured live at commit `3a1a0f0` on
+`google/gemini-2.5-flash-lite` at temperature 0, over 5 scenarios x 3 reps with
+a populated event buffer and a freshly seeded memory store. Per-node retry-free
+means: memory_query 608.3, reflection 4,899.4. Of the reflection prompt, 3,206
+tokens were served from the provider's cache on every cycle — that is the static
+prefix, and it is the same figure every time because the prefix is formatted once
+at construction.
 
-**That figure cannot currently be reproduced, and two things stop it.** The
-harness that produced it (`measure_baseline.py`, named in NPC-1318's baseline
-comment) was never committed to this repo and exists on no machine here — so any
-instruction to "re-run the same harness" is a rebuild, and a rebuilt harness is
-not byte-identical to the one that produced 5,367. And its per-node table names
-`cognitive_update` and `action_selection`, nodes NPC-1319 retired, so only the
-per-cycle total could ever have been compared forward. Treat 5,367 as a recorded
-historical figure, not a live baseline; a replacement harness should be committed
-here rather than run from a temporary worktree.
+Reproduce it (from the `mind` project root; `--dry-run` first, which spends
+nothing and fails loudly on an empty event buffer):
 
-What *is* reproducible is the offline rendering A/B, which needs no LLM and no
-credentials:
+```bash
+# PYTHONPATH=$PWD because the scenario matrix lives under tests/, which the
+# wheel does not carry ([tool.hatch.build.targets.wheel] packages = ["src/mind"]).
+PYTHONPATH=$PWD uv run --frozen python tools/measure_decision_cycle.py --dry-run
+PYTHONPATH=$PWD uv run --frozen python tools/measure_decision_cycle.py --reps 3 --json raw.json
+PYTHONPATH=$PWD uv run --frozen python tools/measure_decision_cycle.py --replay raw.json
+```
+
+**Read the retry-free figure for cognition and the all-cycles figure for the
+bill.** In that same run 6 of 15 cycles burned reflection retries (40 provider
+round-trips against the 30 a clean run needs), which puts the all-cycles mean at
+9,110 with a median of 5,962 — a distribution about the provider's failure rate
+as much as about the pipeline. The harness prints both, labelled, and flags any
+excess over `2 x cycles`. NPC-1318's comment carries the retry root cause.
+
+**No delta is claimed against the historical 5,367 tok/cycle figure** (NPC-1318,
+2026-08-20), and none is recoverable. That harness was never committed; its
+fixtures carried no `MindEvent`s, so it measured an empty event buffer; NPC-1319
+has since merged two LLM nodes into one, taking a cycle from three provider
+round-trips to two; that merge added a cache breakpoint the old number could not
+see; and NPC-1335 replaced the event rendering. Some of those push the number up
+and some down. Treat 5,367 as a recorded historical figure with no live successor
+to subtract it from.
+
+Also reproducible, and needing no LLM and no credentials, is the offline
+rendering A/B:
 
 ```bash
 PYTHONPATH=$PWD/src:$PWD python tools/measure_recent_events_rendering.py
@@ -87,9 +108,11 @@ It counts the recent-events buffer under the old `pformat` rendering against the
 current one over committed fixtures (`tests/fixtures/observations.py`,
 `create_*_events`), and prints the commit it ran at. Those tokens are all
 uncached — `{recent_events}` sits below the reflection prompt's cache
-breakpoint. A live per-cycle number measured against fixtures with an **empty**
-event buffer says nothing about this cost either way, which is the trap the
-observation fixtures set: none of them carries a `MindEvent`.
+breakpoint. The `create_*_observation` fixtures still carry no `MindEvent` of
+their own, so pairing one with a `create_*_events` buffer is what gives a cycle
+anything to render; `tests/fixtures/measurement.py` does that pairing and
+`tests/unit/test_measurement_fixtures.py` fails if any scenario stops producing
+a populated buffer.
 
 ### Memory System
 

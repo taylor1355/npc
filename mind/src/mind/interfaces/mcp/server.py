@@ -452,18 +452,12 @@ class MCPServer:
                 # memories it writes with a real game time.
                 mind.last_simulation_time = obs.current_simulation_time
 
-                state = PipelineState(
-                    observation=obs,
-                    available_actions=obs.get_available_actions(
-                        pending_incoming_bids=mind.pending_incoming_bids
-                    ),
-                    working_memory=mind.working_memory,
-                    personality_traits=mind.traits,
-                    personality_dimensions=mind.personality_dimensions,
-                    conversation_histories=mind.conversation_histories,
-                    recent_events=mind.event_buffer,
-                    pending_incoming_bids=mind.pending_incoming_bids,
-                )
+                # Built on the Mind rather than inline, so an out-of-process
+                # caller (the decision-cycle measurement harness) runs on the
+                # same construction this tool does instead of a hand-copy that
+                # drifts. The three mutations above stay here: they ADVANCE the
+                # mind, which build_pipeline_state deliberately does not.
+                state = mind.build_pipeline_state(obs)
 
                 # Run cognitive pipeline
                 logger.debug(f"[{request_id}] Running cognitive pipeline for {mind_id}")
