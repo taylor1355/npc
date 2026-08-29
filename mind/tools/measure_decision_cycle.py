@@ -54,6 +54,7 @@ from mind import constants
 from mind.interfaces.mcp.mind import Mind
 from mind.interfaces.mcp.models import DecisionTelemetry
 from tests.fixtures.measurement import (
+    MeasurementScenario,
     apply_cycle_inputs,
     build_measurement_scenarios,
     scenario_config,
@@ -121,7 +122,7 @@ def _dirty() -> str:
     return "dirty" if out else "clean"
 
 
-def _build_mind(scenario, storage_path: str, model: str) -> Mind:
+def _build_mind(scenario: MeasurementScenario, storage_path: str, model: str) -> Mind:
     config = scenario_config(scenario, storage_path)
     if model != config.llm_model:
         config = config.model_copy(update={"llm_model": model})

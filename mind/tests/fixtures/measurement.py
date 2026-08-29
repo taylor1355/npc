@@ -61,7 +61,7 @@ class MeasurementScenario:
 
         ``decide_action`` rejects a cycle whose observation entity_id disagrees
         with the mind's, so a harness that invented its own id would be running
-        a state production would have refused.
+        a state that production would have refused.
         """
         return self.observation.entity_id
 
