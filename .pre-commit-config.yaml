@@ -20,6 +20,18 @@
 # `ruff-format`) while CI only VERIFIES (`ruff check`, `ruff format --check`) -
 # local commits fix, CI gates. Hooks with no CI counterpart are documented as
 # local-only in the workflow file itself.
+#
+# The local hooks run `uv run --frozen`, matching CI. Two properties of that:
+#
+#   - `--frozen` refuses to re-resolve, so editing mind/pyproject.toml without
+#     re-running `uv lock` fails the commit instead of quietly building an
+#     environment no lockfile describes.
+#   - WHERE the environment lives is decided by UV_PROJECT_ENVIRONMENT, not by
+#     this file. The simulation repo's tools/setup_mind.sh sets it to a shared
+#     ext4 path so every worktree reuses one venv; a developer working in this
+#     repo alone sets nothing and gets `mind/.venv`, which is where Poetry put
+#     it too. Do not hardcode either location here - the hook must work for both
+#     callers.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -111,14 +123,14 @@ repos:
       # with a probe that errors only under warn_return_any: run from the root it
       # passes, run from mind/ it fails. Since every setting now lives in that block,
       # running from the wrong directory loses the module-resolution fix too, not just
-      # strictness. poetry's env is also what supplies real pydantic/langgraph types
+      # strictness. The uv-managed env is also what supplies real pydantic/langgraph types
       # rather than Any.
       #
       # The entry passes NO flags: every setting lives in mind/pyproject.toml's
       # [tool.mypy], including the mypy_path/explicit_package_bases pair that makes the
       # absolute `from mind.…` imports resolve at all. That matters beyond tidiness -
       # when the hook carries flags the config lacks, a developer running the obvious
-      # `poetry run mypy src/mind` gets different strictness AND different module names
+      # `uv run mypy src/mind` gets different strictness AND different module names
       # than the hook does. That is the same hook-vs-local disagreement as the trailing
       # pins this PR fixes, so fixing one while introducing the other would be odd.
       #
@@ -138,7 +150,7 @@ repos:
       # Run it:  pre-commit run --hook-stage manual mypy --all-files
       - id: mypy
         name: mypy
-        entry: bash -c 'cd mind && poetry run mypy src/mind'
+        entry: bash -c 'cd mind && uv run --frozen mypy src/mind'
         language: system
         pass_filenames: false
         files: ^mind/src/
@@ -155,7 +167,7 @@ repos:
       # extension too - the two integration files add no new preconditions.
       - id: pytest-unit
         name: pytest-unit
-        entry: bash -c 'cd mind && poetry run pytest tests/unit tests/integration/test_http_endpoints.py tests/integration/test_memory_retrieval.py -q'
+        entry: bash -c 'cd mind && uv run --frozen pytest tests/unit tests/integration/test_http_endpoints.py tests/integration/test_memory_retrieval.py -q'
         language: system
         pass_filenames: false
         files: ^mind/(tests|src)/
