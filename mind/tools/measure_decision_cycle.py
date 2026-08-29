@@ -220,28 +220,36 @@ def _report(records: list[dict], reps: int, scenario_count: int) -> None:
         )
 
     # --- Per node ------------------------------------------------------------
-    # Enumerated from the records, never hardcoded: a future node merge or split
-    # must change this table rather than silently mislabel it.
+    # Split the same two ways as per-cycle, and for the same reason: a retry
+    # multiplies ONE node's tokens, so an all-cycles node mean says as much
+    # about the provider's failure rate as about the node. Step names are
+    # enumerated from the records, never hardcoded, so a future node merge or
+    # split changes this table instead of silently mislabelling it.
     step_names = sorted({name for r in metered for name in r["telemetry"]["per_step"]})
-    print(
-        f"\n{'per node':<26}{'prompt':>9}{'compl':>9}{'total':>9}"
-        f"{'cached':>9}{'cache_wr':>10}{'calls':>8}{'ms':>8}"
-    )
-    for name in step_names:
-        steps = [
-            r["telemetry"]["per_step"][name] for r in metered if name in r["telemetry"]["per_step"]
-        ]
-        ms = [r["telemetry"]["per_step_ms"].get(name, 0) for r in metered]
+    for title, population in (("per node, ALL", metered), ("per node, RETRY-FREE", retry_free)):
         print(
-            f"{name:<26}"
-            f"{statistics.mean(s['prompt_tokens'] for s in steps):>9.1f}"
-            f"{statistics.mean(s['completion_tokens'] for s in steps):>9.1f}"
-            f"{statistics.mean(s['total_tokens'] for s in steps):>9.1f}"
-            f"{statistics.mean(s['cached_prompt_tokens'] for s in steps):>9.1f}"
-            f"{statistics.mean(s['cache_write_tokens'] for s in steps):>10.1f}"
-            f"{sum(s['model_calls'] for s in steps):>8}"
-            f"{statistics.mean(ms):>8.0f}"
+            f"\n{title:<26}{'prompt':>9}{'compl':>9}{'total':>9}"
+            f"{'cached':>9}{'cache_wr':>10}{'calls':>8}{'ms':>8}"
         )
+        for name in step_names:
+            steps = [
+                r["telemetry"]["per_step"][name]
+                for r in population
+                if name in r["telemetry"]["per_step"]
+            ]
+            if not steps:
+                continue
+            ms = [r["telemetry"]["per_step_ms"].get(name, 0) for r in population]
+            print(
+                f"{name:<26}"
+                f"{statistics.mean(s['prompt_tokens'] for s in steps):>9.1f}"
+                f"{statistics.mean(s['completion_tokens'] for s in steps):>9.1f}"
+                f"{statistics.mean(s['total_tokens'] for s in steps):>9.1f}"
+                f"{statistics.mean(s['cached_prompt_tokens'] for s in steps):>9.1f}"
+                f"{statistics.mean(s['cache_write_tokens'] for s in steps):>10.1f}"
+                f"{sum(s['model_calls'] for s in steps):>8}"
+                f"{statistics.mean(ms):>8.0f}"
+            )
 
     # --- Round-trip accounting ----------------------------------------------
     total_calls = sum(r["telemetry"]["model_calls"] for r in ok)
