@@ -57,6 +57,33 @@ class NoAdvertisedParameterError(ActionValidationError):
         )
 
 
+class MutuallyExclusiveParametersError(ActionValidationError):
+    """An act named BOTH, or NEITHER, of a pair of alternative parameters.
+
+    Distinct from its two neighbours above. ``MissingRequiredParameterError``
+    carries one name and means "this one is absent".
+    ``NoAdvertisedParameterError`` carries a set and means "at least one of
+    these" -- an INCLUSIVE disjunction, where supplying several is fine. Here
+    the requirement is EXCLUSIVE: exactly one, never both, never neither.
+
+    The wording deliberately mirrors the simulation's own refusal
+    (``substrate_component.gd::_extent_for``: "mark_zone: names both cells and
+    radius - name exactly one"), so an operator reading the mind log and the
+    simulation log sees one sentence rather than two dialects of it.
+    """
+
+    def __init__(self, param_names: list[str], action_type: str, supplied: list[str]):
+        self.param_names = param_names
+        self.action_type = action_type
+        self.supplied = supplied
+        which = (
+            f"both {' and '.join(supplied)}" if supplied else f"neither {' nor '.join(param_names)}"
+        )
+        super().__init__(
+            f"Action '{action_type}' names {which} - name exactly one of {', '.join(param_names)}."
+        )
+
+
 class MovementLockedError(ActionValidationError):
     """Movement action attempted while movement is locked"""
 
