@@ -193,11 +193,31 @@ def _report(records: list[dict], reps: int, scenario_count: int) -> None:
         return
 
     # --- Per cycle -----------------------------------------------------------
-    label = f"per cycle (n={len(metered)})"
-    print(f"\n{label:<26}{'mean':>9}{'median':>9}{'min':>9}{'max':>9}")
-    for field in ("total_tokens", "prompt_tokens", "completion_tokens", "cached_prompt_tokens"):
-        print(f"{field:<26}{_stats([float(r['telemetry'][field]) for r in metered])}")
-    print(f"{'server_ms':<26}{_stats([float(r['telemetry']['server_ms']) for r in metered])}")
+    #
+    # TWO populations, both published, because they answer different questions
+    # and neither substitutes for the other. ALL CYCLES is what the provider
+    # actually bills — retried round-trips are real spend. RETRY-FREE is the
+    # cost of the cognitive work itself, and it is what a per-cycle cost model
+    # should be fitted on: a retry multiplies one node's tokens without
+    # producing anything extra, so a mean over a mixed population is neither
+    # figure. Publishing only the first hides the cognition; publishing only
+    # the second hides the bill.
+    retry_free = [
+        r for r in metered if r["telemetry"]["model_calls"] == EXPECTED_MODEL_CALLS_PER_CYCLE
+    ]
+    retry_free_keys = {(r["scenario"], r["rep"]) for r in retry_free}
+    fields = ("total_tokens", "prompt_tokens", "completion_tokens", "cached_prompt_tokens")
+    for title, population in (
+        ("per cycle, ALL", metered),
+        ("per cycle, RETRY-FREE", retry_free),
+    ):
+        label = f"{title} (n={len(population)})"
+        print(f"\n{label:<26}{'mean':>9}{'median':>9}{'min':>9}{'max':>9}")
+        for field in fields:
+            print(f"{field:<26}{_stats([float(r['telemetry'][field]) for r in population])}")
+        print(
+            f"{'server_ms':<26}{_stats([float(r['telemetry']['server_ms']) for r in population])}"
+        )
 
     # --- Per node ------------------------------------------------------------
     # Enumerated from the records, never hardcoded: a future node merge or split
@@ -246,12 +266,23 @@ def _report(records: list[dict], reps: int, scenario_count: int) -> None:
     )
 
     # --- Per scenario --------------------------------------------------------
+    #
+    # Retry-free only, and the `retried` column says how many cycles were left
+    # out. A scenario whose retries were averaged in reports a token cost that
+    # is about the provider's failure rate rather than about the scenario, and
+    # the ordering between scenarios inverts — which is the whole reason the
+    # axes columns beside it (events/actions/retrvd) are worth reading.
     print(
-        f"\n{'per scenario':<26}{'n':>4}{'total':>9}{'prompt':>9}{'compl':>9}"
-        f"{'events':>8}{'actions':>9}{'retrvd':>8}"
+        f"\n{'per scenario (retry-free)':<26}{'n':>4}{'total':>9}{'prompt':>9}{'compl':>9}"
+        f"{'events':>8}{'actions':>9}{'retrvd':>8}{'retried':>9}"
     )
     for scenario_id in sorted({r["scenario"] for r in metered}):
-        rows = [r for r in metered if r["scenario"] == scenario_id]
+        all_rows = [r for r in metered if r["scenario"] == scenario_id]
+        rows = [r for r in all_rows if (r["scenario"], r["rep"]) in retry_free_keys]
+        excluded = len(all_rows) - len(rows)
+        if not rows:
+            print(f"{scenario_id:<26}{0:>4}{'  every cycle retried':<45}{excluded:>9}")
+            continue
         print(
             f"{scenario_id:<26}{len(rows):>4}"
             f"{statistics.mean(r['telemetry']['total_tokens'] for r in rows):>9.1f}"
@@ -259,9 +290,29 @@ def _report(records: list[dict], reps: int, scenario_count: int) -> None:
             f"{statistics.mean(r['telemetry']['completion_tokens'] for r in rows):>9.1f}"
             f"{rows[0]['n_events']:>8}{rows[0]['n_actions']:>9}"
             f"{statistics.mean(r['n_retrieved'] for r in rows):>8.1f}"
+            f"{excluded:>9}"
         )
 
     print("\nActions chosen: " + ", ".join(f"{r['scenario']}/{r['rep']}={r['action']}" for r in ok))
+
+
+def replay(path: str) -> int:
+    """Re-render the report from a saved raw dump, spending nothing.
+
+    A summary cannot be re-analysed; raw records can. This is what makes the
+    ``--json`` dump worth writing: when the report grows a new breakdown, an
+    earlier run's numbers can be re-read through it instead of being re-bought.
+    """
+    with open(path) as handle:
+        payload = json.load(handle)
+    records = payload["records"]
+    scenario_count = len({r["scenario"] for r in records}) or 1
+    print(
+        f"REPLAY of {path}: commit={payload.get('commit')} ({payload.get('tree')})  "
+        f"model={payload.get('model')}  reps={payload.get('reps')}"
+    )
+    _report(records, payload.get("reps", 0), scenario_count)
+    return 0
 
 
 async def run(args) -> int:
@@ -353,7 +404,13 @@ def main() -> None:
         action="store_true",
         help="build every pipeline state and print its shape, making no provider call",
     )
+    parser.add_argument(
+        "--replay",
+        help="re-render the report from a previous --json dump; makes no provider call",
+    )
     args = parser.parse_args()
+    if args.replay:
+        sys.exit(replay(args.replay))
     sys.exit(asyncio.run(run(args)))
 
 
