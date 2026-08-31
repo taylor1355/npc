@@ -16,6 +16,46 @@ from mind.cognitive_architecture.observations import (
 )
 
 
+def _with_rest_goal_option(observation: Observation) -> Observation:
+    """Attach the representative rest option used by selection-grounding tests."""
+    observation.goal = GoalObservation.model_validate(
+        {
+            "options": [
+                {
+                    "option_id": "rest:0",
+                    "description": "Sit on the chair",
+                    "score": 0.8,
+                    "segments": [
+                        {
+                            "goal_template_id": "rest",
+                            "goal_label": "Take a rest",
+                            "steps": [
+                                {
+                                    "action": {
+                                        "name": "INTERACT_WITH",
+                                        "parameters": {
+                                            "entity_id": "chair_uuid_123",
+                                            "interaction_name": "sit",
+                                        },
+                                    },
+                                    "factors": {
+                                        "urgency": 1.0,
+                                        "utility": 0.8,
+                                        "responsiveness": 1.0,
+                                        "policy_modifier": 1.0,
+                                    },
+                                    "step_score": 0.8,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    return Observation.model_validate(observation.model_dump())
+
+
 class TestActionModel:
     """Test Action model creation (without validation)"""
 
@@ -359,43 +399,7 @@ class TestActionValidation:
             )
 
     def _observation_with_goal_option(self):
-        observation = self._create_basic_observation()
-        observation.goal = GoalObservation.model_validate(
-            {
-                "options": [
-                    {
-                        "option_id": "rest:0",
-                        "description": "Sit on the chair",
-                        "score": 0.8,
-                        "segments": [
-                            {
-                                "goal_template_id": "rest",
-                                "goal_label": "Take a rest",
-                                "steps": [
-                                    {
-                                        "action": {
-                                            "name": "INTERACT_WITH",
-                                            "parameters": {
-                                                "entity_id": "chair_uuid_123",
-                                                "interaction_name": "sit",
-                                            },
-                                        },
-                                        "factors": {
-                                            "urgency": 1.0,
-                                            "utility": 0.8,
-                                            "responsiveness": 1.0,
-                                            "policy_modifier": 1.0,
-                                        },
-                                        "step_score": 0.8,
-                                    }
-                                ],
-                            }
-                        ],
-                    }
-                ]
-            }
-        )
-        return Observation.model_validate(observation.model_dump())
+        return _with_rest_goal_option(self._create_basic_observation())
 
     def test_selected_option_id_must_resolve(self):
         observation = self._observation_with_goal_option()
@@ -504,7 +508,7 @@ class TestBidResponseValidation:
             },
         )
         state = self._create_mock_state_with_bids({"bid_789": bid_event})
-        state.observation = TestActionValidation()._observation_with_goal_option()
+        state.observation = _with_rest_goal_option(state.observation)
 
         action = Action.model_validate(
             {
@@ -548,7 +552,7 @@ class TestBidResponseValidation:
             },
         )
         state = self._create_mock_state_with_bids({"bid_789": bid_event})
-        state.observation = TestActionValidation()._observation_with_goal_option()
+        state.observation = _with_rest_goal_option(state.observation)
 
         action = Action.model_validate(
             {
