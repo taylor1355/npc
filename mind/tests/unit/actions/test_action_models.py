@@ -325,7 +325,28 @@ class TestActionValidation:
         )
         state = self._create_mock_state(observation)
 
-        with pytest.raises(ValidationError, match="Cannot start a new interaction"):
+        with pytest.raises(ValidationError, match="another interaction is active"):
+            Action.model_validate(
+                {
+                    "action": "interact_with",
+                    "parameters": {
+                        "entity_id": "chair_uuid_123",
+                        "interaction_name": "sit",
+                    },
+                },
+                context={"state": state},
+            )
+
+    def test_interact_with_rejected_while_movement_locked(self):
+        observation = self._create_basic_observation()
+        observation.status = StatusObservation(
+            position=(0, 0),
+            movement_locked=True,
+            activity_state={"state_name": "moving"},
+        )
+        state = self._create_mock_state(observation)
+
+        with pytest.raises(ValidationError, match="movement is locked by the current activity"):
             Action.model_validate(
                 {
                     "action": "interact_with",
@@ -397,7 +418,7 @@ class TestActionValidation:
         observation = self._observation_with_goal_option()
         state = self._create_mock_state(observation)
 
-        with pytest.raises(ValidationError, match="does not match selected Goal Option"):
+        with pytest.raises(ValidationError, match="does not match the selected Goal Option"):
             Action.model_validate(
                 {
                     "action": "wait",

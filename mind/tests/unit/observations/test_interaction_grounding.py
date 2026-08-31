@@ -127,9 +127,22 @@ class TestAvailableActionsGrounding:
     def test_movement_lock_hides_actions_validator_would_reject(self):
         status = _not_interacting_status()
         status.movement_locked = True
-        names = self._action_names(status)
+        chair = EntityData(
+            entity_id="chair_1",
+            display_name="Chair",
+            position=(0, 0),
+            interactions={"sit": {"description": "Sit down"}},
+        )
+        obs = Observation(
+            entity_id="npc",
+            current_simulation_time=1,
+            status=status,
+            vision=VisionObservation(visible_entities=[chair]),
+        )
+        names = {action.name for action in obs.get_available_actions()}
         assert ActionType.MOVE_TO not in names
         assert ActionType.WANDER not in names
+        assert ActionType.INTERACT_WITH not in names
 
     def test_inventory_affordance_is_offered_when_idle(self):
         berry = EntityData(

@@ -5,8 +5,10 @@ from enum import Enum
 from pydantic import BaseModel, Field, ValidationInfo, model_validator
 
 from mind.cognitive_architecture.actions.exceptions import (
+    ActivityLockedError,
     InvalidEntityError,
     InvalidInteractionError,
+    InvalidSelectedOptionError,
     MissingRequiredParameterError,
     MovementLockedError,
     NoAdvertisedParameterError,
@@ -121,10 +123,13 @@ class Action(BaseModel):
             raise MissingRequiredParameterError("interaction_name", self.action)
 
         if observation.is_interacting():
-            raise ValueError(
-                "Cannot start a new interaction while another interaction is active. "
-                "Use 'cancel_interaction', 'continue', or 'act_in_interaction' instead."
+            raise ActivityLockedError(
+                self.action,
+                "another interaction is active; use 'cancel_interaction', 'continue', "
+                "or 'act_in_interaction' instead",
             )
+        if observation.status and observation.status.movement_locked:
+            raise ActivityLockedError(self.action, "movement is locked by the current activity")
 
         # Both visible entities and items in the actor's own inventory are
         # actionable. The simulation uses the same EntityData wire shape for
@@ -162,9 +167,9 @@ class Action(BaseModel):
         )
         if option is None:
             available = [candidate.option_id for candidate in options]
-            raise ValueError(
-                f"selected_option_id '{self.selected_option_id}' is not in this cycle's "
-                f"Goal Options. Available option_ids: {available}"
+            raise InvalidSelectedOptionError(
+                self.selected_option_id,
+                f"not in this cycle's Goal Options. Available option_ids: {available}",
             )
 
         step = next(
@@ -172,8 +177,9 @@ class Action(BaseModel):
             None,
         )
         if step is None:
-            raise ValueError(
-                f"selected_option_id '{self.selected_option_id}' has no executable first step"
+            raise InvalidSelectedOptionError(
+                self.selected_option_id,
+                "the selected Goal Option has no executable first step",
             )
 
         expected_action = step.action.name.lower()
@@ -181,10 +187,10 @@ class Action(BaseModel):
         if expected_action != actual_action or not self._parameters_match(
             self.parameters, step.action.parameters
         ):
-            raise ValueError(
-                f"Action echo {actual_action}({self.parameters}) does not match selected "
-                f"Goal Option '{self.selected_option_id}' first step "
-                f"{expected_action}({step.action.parameters})"
+            raise InvalidSelectedOptionError(
+                self.selected_option_id,
+                f"action echo {actual_action}({self.parameters}) does not match the selected "
+                f"Goal Option first step {expected_action}({step.action.parameters})",
             )
 
     @staticmethod
