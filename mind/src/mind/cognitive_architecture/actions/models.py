@@ -35,10 +35,20 @@ class ActionType(str, Enum):
     MARK_ZONE = "mark_zone"
 
 
-# The simulation's not-supplied sentinel for MarkZoneAction.radius. It is -1 and
-# NOT 0 because a radius of zero is a legitimate mark ("this cell, where I
-# stand"), so a zero sentinel would collide with it.
-MARK_ZONE_RADIUS_ABSENT = -1
+# There is deliberately NO MARK_ZONE_RADIUS_ABSENT constant, and it must not be
+# re-added as one.
+#
+# MarkZoneAction.radius declares -1 as its "not supplied" default, and -1 rather
+# than 0 because a radius of zero is a legitimate mark ("this cell, where I
+# stand"). But the simulation's PREDICATE is `mark.radius >= 0`, not
+# `mark.radius != -1`: every negative value reads as not-supplied there. A
+# constant anchoring the check would therefore have to be compared as
+# `radius != ABSENT`, which accepts -2 as a supplied radius and diverges from the
+# simulation in exactly the direction this module exists to prevent.
+#
+# So the sentinel VALUE is documentation (it explains why the default is -1) and
+# the sentinel TEST is `>= 0`. Binding them to one name would make the two look
+# interchangeable when they are not.
 
 # The two ways one act may name its extent. Exactly one, never both, never
 # neither -- a precedence rule between them would silently discard half of what
