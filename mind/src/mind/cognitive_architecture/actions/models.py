@@ -11,6 +11,7 @@ from mind.cognitive_architecture.actions.exceptions import (
     InvalidSelectedOptionError,
     MissingRequiredParameterError,
     MovementLockedError,
+    MutuallyExclusiveParametersError,
     NoAdvertisedParameterError,
 )
 
@@ -28,6 +29,33 @@ class ActionType(str, Enum):
     ACT_IN_INTERACTION = "act_in_interaction"
     RESPOND_TO_INTERACTION_BID = "respond_to_interaction_bid"
     BATCH_REJECT_INTERACTION_BIDS = "batch_reject_interaction_bids"
+    # The deliberate act of declaring visible ground a named place (NPC-1224 /
+    # NPC-1309). The simulation matches this name upper-cased in
+    # McpMindClient._create_action_from_mcp_response; a name absent from that
+    # match falls through to WaitAction with only a warning, which is why
+    # test_mark_zone_contract.py pins the two sides against each other.
+    MARK_ZONE = "mark_zone"
+
+
+# There is deliberately NO MARK_ZONE_RADIUS_ABSENT constant, and it must not be
+# re-added as one.
+#
+# MarkZoneAction.radius declares -1 as its "not supplied" default, and -1 rather
+# than 0 because a radius of zero is a legitimate mark ("this cell, where I
+# stand"). But the simulation's PREDICATE is `mark.radius >= 0`, not
+# `mark.radius != -1`: every negative value reads as not-supplied there. A
+# constant anchoring the check would therefore have to be compared as
+# `radius != ABSENT`, which accepts -2 as a supplied radius and diverges from the
+# simulation in exactly the direction this module exists to prevent.
+#
+# So the sentinel VALUE is documentation (it explains why the default is -1) and
+# the sentinel TEST is `>= 0`. Binding them to one name would make the two look
+# interchangeable when they are not.
+
+# The two ways one act may name its extent. Exactly one, never both, never
+# neither -- a precedence rule between them would silently discard half of what
+# the caller asked for.
+MARK_ZONE_EXTENT_PARAMS = ["cells", "radius"]
 
 
 class Action(BaseModel):
@@ -101,6 +129,8 @@ class Action(BaseModel):
             self._validate_batch_reject_bids(state)
         elif self.action == ActionType.ACT_IN_INTERACTION:
             self._validate_act_in_interaction(observation)
+        elif self.action == ActionType.MARK_ZONE:
+            self._validate_mark_zone()
 
         self._validate_selected_option(observation)
 
@@ -293,6 +323,77 @@ class Action(BaseModel):
 
         if not any(name in self.parameters for name in advertised):
             raise NoAdvertisedParameterError(list(advertised), self.action)
+
+    def _validate_mark_zone(self):
+        """Validate MARK_ZONE names exactly one extent, and names the place.
+
+        The two "was this supplied?" predicates are the simulation's own,
+        mirrored EXACTLY from ``substrate_component.gd::_extent_for``::
+
+            has_cells  := not mark.cells.is_empty()
+            has_radius := mark.radius >= 0
+
+        Neither is "is the key present", and keying on presence would drift in
+        BOTH directions: it would reject ``{"cells": [], "radius": 3}`` and
+        ``{"cells": [[1, 2]], "radius": -1}``, which the simulation accepts, and
+        accept ``{"cells": [], "radius": -1}``, which it refuses.
+
+        Deliberately absent, each for its own reason:
+
+        - The radius BOUND. The simulation refuses (never clamps) any radius
+          past the marker's sight and names both numbers. Sight radius does not
+          cross the wire, so a bound here would be a guess that could only be
+          wrong.
+        - The ``kind`` VOCABULARY. ``Zone.kind_from_string`` routes anything
+          unrecognised to ``KIND_INVALID`` and the refusal enumerates
+          ``Zone.kind_names()``. Hardcoding it here would make a new
+          ``Zone.Kind`` member need a second edit in this repository -- a new
+          drift surface, traded for nothing.
+        - ``purpose_tags``. Nothing in the simulation's ``src/`` reads
+          ``ZoneAttributes.purpose_tags``, so declaring it would advertise
+          configuration nothing honours (NPC-1229 cut ``purpose=`` on the
+          identical falsifier).
+        """
+        cells = self.parameters.get("cells")
+        has_cells = isinstance(cells, list) and len(cells) > 0
+
+        radius = self.parameters.get("radius")
+        # bool is a subclass of int; `radius: true` is not a radius.
+        if isinstance(radius, bool):
+            radius = None
+        elif isinstance(radius, float) and radius.is_integer():
+            # The simulation's TypeConverters._convert_to_int accepts a float and
+            # truncates, so an integral float is a payload it would honour. A
+            # NON-integral one is refused here rather than silently truncated:
+            # `radius: 2.7` means something the caller cannot have meant.
+            radius = int(radius)
+        has_radius = isinstance(radius, int) and radius >= 0
+
+        if has_cells == has_radius:
+            supplied = [
+                name
+                for name, present in zip(
+                    MARK_ZONE_EXTENT_PARAMS, (has_cells, has_radius), strict=True
+                )
+                if present
+            ]
+            raise MutuallyExclusiveParametersError(MARK_ZONE_EXTENT_PARAMS, self.action, supplied)
+
+        if has_cells:
+            for pair in cells:
+                if not isinstance(pair, list | tuple) or len(pair) < 2:
+                    raise ValueError(
+                        f"Malformed cell entry {pair!r} in 'cells' - cells are [x, y] pairs."
+                    )
+
+        # Required here, though the simulation would accept a blank name and let
+        # ZoneNamer derive one. Naming what you mark in the same act is the
+        # design intent (zone-layer-design.md, section "Names": minds that can
+        # coin, coin), and a mark without a name yields a place this mind did
+        # not choose plus a second round trip to rename it. SimpleMind keeps the
+        # blank path in the simulation; it has no language to coin with.
+        if not str(self.parameters.get("name") or "").strip():
+            raise MissingRequiredParameterError("name", self.action)
 
 
 class AvailableAction(BaseModel):

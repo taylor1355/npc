@@ -94,6 +94,68 @@ provider from a cheap decision.
 
 **Event Types:** `INTERACTION_BID_REJECTED`, `INTERACTION_BID_RECEIVED`, `INTERACTION_STARTED`, `INTERACTION_FINISHED`, `INTERACTION_CANCELED`, `INTERACTION_OBSERVATION`, `ERROR`
 
+#### The NPC action vocabulary is not an MCP tool surface
+
+The six tools on this page are the *server's* API. The verbs an NPC chooses
+between are a different, closed vocabulary carried inside `decide_action`'s
+response, and declaring one means three edits rather than a `@mcp.tool()`:
+
+| Layer | Where | Role |
+|---|---|---|
+| Name | `actions/models.py::ActionType` | Closed `str, Enum`. A name outside it fails validation. |
+| Menu | `observations/models.py::Observation.get_available_actions` | The per-cycle prose menu rendered into `{available_actions}`. |
+| Gate | `Action.validate_executable` | Per-action `_validate_*`; raises, and the error text is fed back for a corrective retry. |
+
+The simulation matches these names upper-cased in
+`McpMindClient._create_action_from_mcp_response`. **A name it does not match
+falls through to `WaitAction` with only a warning** — no exception and no failed
+cycle — so the two vocabularies are pinned against each other, in both
+directions, by `tests/unit/actions/test_mark_zone_contract.py`.
+
+#### mark_zone
+
+Declares a stretch of visible ground to be a named place (NPC-1224 / NPC-1309).
+Offered whenever the observation carries vision.
+
+| Parameter | Meaning |
+|---|---|
+| `cells` | The ground, as `[[x, y], …]`. |
+| `radius` | Alternative to `cells`: a disc of this radius around the marker. |
+| `name` | The coined name. **Required here**, though the simulation would accept a blank one and derive a name itself. |
+| `kind` | Serialized `Zone.Kind`; `gathering_ground` is the one current value. |
+
+**Exactly one of `cells`/`radius` per act** — never both, never neither, because
+a precedence rule between them would silently discard half of what the caller
+asked for. "Supplied" mirrors the simulation's own predicates rather than key
+presence: an empty `cells` list is *not* a supplied extent, and `radius: -1` is
+the not-supplied sentinel (`-1` rather than `0`, because a radius of zero is a
+legitimate one-cell mark). So `{"cells": [], "radius": 3}` is accepted while
+`{"cells": [], "radius": -1}` is refused, even though both name the same keys.
+
+Two things are deliberately **not** validated here, each because the simulation
+is the better authority: the radius **bound** (it refuses anything past the
+marker's sight and names both numbers; sight radius does not cross the wire) and
+the `kind` **vocabulary** (an unrecognised kind is refused there against
+`Zone.kind_names()`, so an allowlist here would make a new kind need a second
+edit in this repository).
+
+`purpose_tags` is **not** a parameter. Nothing in the simulation reads
+`ZoneAttributes.purpose_tags`, so declaring it would advertise configuration
+nothing honours.
+
+#### The `place` observation block
+
+Optional. Carries the substrate's place knowledge: `here` (the innermost known
+zone covering the NPC's cell), a **capped** `known` list with `known_total`
+beside it, the `target` a goal names, and the `mark_budget`. `known_total >
+len(known)` means the list is a truncation, which is the only way to tell "I know
+three places" from "I know thirty and was shown three".
+
+`mark_budget.next_slot_in_minutes` is `-1.0` when a slot is already free —
+deliberately not `0.0`, because a genuinely-zero wait is a real answer. Read
+occupancy from `active`/`cap` and treat a negative value as "no wait", never as a
+duration.
+
 ### consolidate_memories
 
 Moves daily memories from buffer to long-term ChromaDB storage. Typically called at natural break points like sleep or scene transitions.

@@ -612,6 +612,254 @@ class GoalObservation(BaseModel):
         return {key: value for key, value in data.items() if key in cls.model_fields}
 
 
+class PlaceKnowledgeSource(StrEnum):
+    """How this NPC came to know a place, matching Godot ``PlaceKnowledge.Source``.
+
+    A StrEnum rather than a free ``str``, which is the opposite of the choice
+    made for interaction names and declaration kinds. The discriminator is
+    open-registry versus closed enum: an interaction is registered in the
+    simulation and must reach the LLM with no Python change, whereas ``Source``
+    is a three-member GDScript ``enum`` whose serialized names are a save-format
+    contract "from birth" with an out-of-enum ``SOURCE_INVALID`` sentinel for
+    anything that fails to parse. Nothing can widen it quietly. Same reasoning as
+    ``ValenceBand``: structure fails loud.
+
+    ``TOLD`` is the only member that fills ``PlaceDescriptor.told_by``.
+    """
+
+    CREATED = "created"
+    VISITED = "visited"
+    TOLD = "told"
+
+
+class PlaceDescriptor(BaseModel):
+    """One place this NPC knows, as the substrate ranked it this cycle.
+
+    Wire producer: the simulation's ``PlaceDescriptor`` (NPC-1299). The list
+    that carries these is capped, so every field here is paid for on every
+    decision cycle for every MCP NPC -- which is why the renderer below spends
+    tokens on some of them and deliberately not on others.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    zone_id: str
+    name: str = ""
+    #: Serialized ``Zone.Kind``. A free ``str``, not an enum: the kind
+    #: vocabulary is the simulation's, ``Zone.kind_from_string`` routes an
+    #: unrecognised name to ``KIND_INVALID`` there, and a new kind must not need
+    #: a second edit in this repository.
+    kind: str = ""
+    #: The zone's anchor cell. ``[x, y]`` on the wire -- Godot has no JSON vector
+    #: type, so every observation converts (``status_observation.gd``,
+    #: ``entity_data.gd``), and this matches ``StatusObservation.position``.
+    anchor: tuple[int, int] = (0, 0)
+    #: Chebyshev distance from the observer, in cells.
+    distance: int = 0
+    #: The dominant interaction names this place affords, capped simulation-side.
+    affords: list[str] = Field(default_factory=list)
+    provider_count: int = 0
+    source: PlaceKnowledgeSource = PlaceKnowledgeSource.VISITED
+    #: Who told this NPC, for ``TOLD`` only; the wire omits the key otherwise.
+    #: ``source`` is the discriminator, never the emptiness of this string -- but
+    #: an entity id is never blank, so "" is out of domain rather than a value
+    #: masquerading as one.
+    told_by: str = ""
+    #: How long ago this NPC learned the place, in game minutes.
+    age_minutes: int = 0
+    #: True when the place is known but not currently visible. Load-bearing for
+    #: marking, which the simulation structurally refuses for ground the marker
+    #: cannot see.
+    beyond_vision: bool = False
+    #: The ``world_confidence`` analogue. Deliberately UNBOUNDED, following
+    #: ``GoalOption.confidence`` on this same wire family: bounding it here would
+    #: convert a cosmetic numeric excursion into a ValidationError, and in this
+    #: pipeline a ValidationError collapses the cycle into the WAIT fallback.
+    confidence: float = 0.0
+
+    def render_summary(self, here_zone_id: str = "") -> str:
+        """One prompt clause naming this place and why it matters.
+
+        Name-first, because a name is what an NPC can say to another NPC and a
+        zone id is not. ``confidence`` and ``age_minutes`` are deliberately NOT
+        rendered: both are ranking inputs the simulation already applied when it
+        ordered and capped this list, so spending per-cycle tokens restating
+        them buys the model nothing it cannot read from the ordering.
+
+        Never raises -- this runs on the prompt path, where an exception
+        collapses the decision cycle.
+        """
+        facts: list[str] = []
+        if here_zone_id and self.zone_id == here_zone_id:
+            facts.append("here")
+        else:
+            facts.append(f"{self.distance} away")
+            if self.beyond_vision:
+                facts.append("out of sight")
+
+        if self.affords:
+            clause = ", ".join(self.affords)
+            if self.provider_count:
+                clause += f" x{self.provider_count}"
+            facts.append(clause)
+
+        if self.source == PlaceKnowledgeSource.TOLD and self.told_by:
+            facts.append(f"told by {self.told_by}")
+        elif self.source == PlaceKnowledgeSource.CREATED:
+            facts.append("you named it")
+
+        label = self.name.strip() or self.zone_id
+        return f"{label} ({', '.join(facts)})"
+
+
+class CurrentPlace(BaseModel):
+    """The ``here`` block: the innermost known zone covering the observer's cell.
+
+    Deliberately thinner than ``PlaceDescriptor`` -- distance, visibility and
+    provenance are all trivial or uninteresting for the ground you are standing
+    on. When this place is also ranked into ``known``, the full descriptor is
+    there; this block exists so "where am I" is answerable without searching the
+    list.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    zone_id: str
+    name: str = ""
+    kind: str = ""
+
+
+class MarkBudgetState(BaseModel):
+    """How many places this NPC is currently holding, and the wait for the next.
+
+    ``next_slot_in_minutes`` carries the simulation's OWN sentinel:
+    ``MarkBudget.minutes_until_next_slot`` returns ``-1.0`` when a slot is
+    already free, deliberately not ``0.0``, because a genuinely-zero wait is a
+    real answer (a mark whose window expires this very minute). So this field is
+    not a duration until it is known to be non-negative, and ``render_summary``
+    guards it rather than formatting it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    active: int = 0
+    cap: int = 0
+    next_slot_in_minutes: float = -1.0
+
+    def render_summary(self) -> str:
+        """The "you are holding N of M" line, with the wait only when there is one.
+
+        Occupancy is read from ``active``/``cap`` rather than from the sentinel:
+        those two cannot be anything but what they say, whereas a negative
+        ``next_slot_in_minutes`` is a flag wearing a number's clothes. Both
+        guards are applied, so even a self-contradictory pair renders a true
+        sentence rather than "the next frees in -1 minutes".
+        """
+        held = f"You are holding {self.active} of {self.cap} marks."
+        if self.active < self.cap or self.next_slot_in_minutes < 0.0:
+            return held
+        return f"{held[:-1]}; the next frees in {self.next_slot_in_minutes:.0f} minutes."
+
+
+# Place-block wire versions this model set knows how to read. Unknown versions
+# degrade exactly as the goal block's do -- see the validator below.
+KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1})
+
+
+class PlaceObservation(BaseModel):
+    """The substrate's place knowledge: where you are, what you know, what you hold.
+
+    Wire producer: the simulation's ``place_observation.gd``, which NPC-1299
+    ships along with a "Place block wire contract (v1)" documentation section.
+    WRITTEN AHEAD OF THAT PRODUCER, against its approved specification rather
+    than against shipped code -- see the provenance note on
+    ``PLACE_BLOCK_CONTRACT_SAMPLE`` in
+    ``tests/unit/observations/test_place_observation.py``, which is what
+    re-derives this model once the producer lands. Until then a disagreement
+    between the two repositories is a contract question, not a bug in either.
+
+    ``known`` is CAPPED simulation-side and ``known_total`` counts the whole set,
+    so ``known_total > len(known)`` means "you know more places than are listed"
+    -- the distinction between knowing three places and being shown three of
+    thirty. ``here`` and ``target`` are force-included in the ranking when they
+    exist, so a place named in either is also findable in ``known``.
+
+    ``extra="forbid"``, matching every ``Goal*`` model and
+    ``InventoryObservation``: this block is new, there is no legacy payload to
+    break, and a key added simulation-side must be a lockstep signal rather than
+    a silent drop.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: int = 1
+    here: CurrentPlace | None = None
+    known: list[PlaceDescriptor] = Field(default_factory=list)
+    known_total: int = 0
+    target: PlaceDescriptor | None = None
+    mark_budget: MarkBudgetState | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_on_unknown_contract_version(cls, data):
+        """Unknown versions degrade, never raise.
+
+        Identical in shape and reasoning to ``GoalObservation``'s: a raise here
+        collapses ``decide_action`` into an error response, which is an NPC that
+        silently stops acting because the simulation got ahead of the mind. Warn,
+        shed undeclared root keys so a purely additive future version parses
+        despite ``extra="forbid"``, and parse the rest best-effort. Known-version
+        payloads are untouched, so for them an undeclared key stays loud.
+        """
+        if not isinstance(data, dict):
+            return data
+        version = data.get("contract_version", 1)
+        if version in KNOWN_PLACE_CONTRACT_VERSIONS:
+            return data
+        logger.warning(
+            "Place block carries unknown contract_version %s (known: %s); "
+            "parsing best-effort under the newest known contract.",
+            version,
+            sorted(KNOWN_PLACE_CONTRACT_VERSIONS),
+        )
+        return {key: value for key, value in data.items() if key in cls.model_fields}
+
+    def render_summary(self) -> str:
+        """The place block as prompt prose, or "" when there is nothing to say.
+
+        Returning "" for an empty block is what keeps every existing fixture
+        rendering byte-identically: an NPC that knows no places and holds no
+        marks reads exactly as it did before this block existed.
+
+        Never raises; this runs on the prompt path.
+        """
+        lines: list[str] = []
+        here_zone_id = self.here.zone_id if self.here else ""
+
+        if self.here:
+            lines.append(f"You are at {self.here.name.strip() or self.here.zone_id}.")
+
+        if self.known:
+            listed = "; ".join(place.render_summary(here_zone_id) for place in self.known)
+            # The count is rendered only when it tells the model something it
+            # cannot see: that the list it is reading is a truncation.
+            scope = (
+                f" ({len(self.known)} of {self.known_total})"
+                if (self.known_total > len(self.known))
+                else ""
+            )
+            lines.append(f"Places you know{scope}: {listed}")
+
+        if self.target and self.target.zone_id != here_zone_id:
+            label = self.target.name.strip() or self.target.zone_id
+            lines.append(f"Your current goal is aimed at {label}.")
+
+        if self.mark_budget:
+            lines.append(self.mark_budget.render_summary())
+
+        return "\n".join(lines)
+
+
 class ValenceBand(StrEnum):
     """Circumplex valence band, matching Godot SubstrateState.valence_band()."""
 
@@ -933,6 +1181,15 @@ class Observation(BaseModel):
     status: StatusObservation | None = None
     needs: NeedsObservation | None = None
     goal: GoalObservation | None = None
+    # OPTIONAL, and that is load-bearing rather than incidental: it is what
+    # removes any cross-repository merge-ordering constraint in EITHER
+    # direction. This model may merge and deploy before the simulation emits the
+    # block (the field simply reads None), and the simulation may merge first --
+    # without this field, extra="forbid" would REFUSE the whole observation, not
+    # merely ignore the block, taking every MCP NPC to wait every cycle until a
+    # deploy. That is the failure this field exists to prevent. NPC-1299 owns
+    # the producer.
+    place: PlaceObservation | None = None
     mood: MoodObservation | None = None
     inventory: InventoryObservation | None = None
     vision: VisionObservation | None = None
@@ -964,6 +1221,16 @@ class Observation(BaseModel):
         if self.goal and self.goal.active_goal:
             active = self.goal.active_goal
             parts.append(f"Subconscious pull: {active.label} {active.urgency_clause()}")
+
+        # Rendered only when the block carries something. An observation with no
+        # place knowledge is byte-identical to the pre-place rendering, which is
+        # what lets every existing fixture stand as a control arm. Placed after
+        # the goal pull and before mood because where you are and what you know
+        # of it read together with what you are drawn toward.
+        if self.place:
+            place_text = self.place.render_summary()
+            if place_text:
+                parts.append(place_text)
 
         if self.mood:
             parts.append(
@@ -1159,6 +1426,44 @@ class Observation(BaseModel):
                 AvailableAction(
                     name=ActionType.WANDER,
                     description="Wander around aimlessly",
+                )
+            )
+
+        # Marking is offered whenever the NPC can SEE, and gated on nothing else.
+        # Each half of that is a decision:
+        #
+        # * Gated on vision because a mark whose extent is not visible to the
+        #   marker is structurally refused simulation-side (ZonePresence), so
+        #   offering it blind advertises a guaranteed refusal.
+        # * ``is not None``, not truthiness: a VisionObservation carrying no
+        #   entities is a legitimate "I can see, and there is nothing there" --
+        #   which is a perfectly good moment to name empty ground.
+        # * NOT gated on the mark budget or on places already known. Neither is
+        #   on the wire (NPC-1299 owns them), and a field declared here for them
+        #   would parse and read None forever. The interim backstop is the
+        #   simulation's own refusal, which names when the next slot frees.
+        # * NOT gated on is_interacting(). MarkZoneAction is dispatched by the
+        #   component-handler registry BEFORE the state machine and its
+        #   get_target_state() is null, so a mark cannot disturb an active
+        #   interaction.
+        #
+        # Keep this prose tight: the menu renders below the prompt's cache
+        # breakpoint, so every token here is uncached input on every decision
+        # cycle for every MCP NPC.
+        if self.vision is not None:
+            actions.append(
+                AvailableAction(
+                    name=ActionType.MARK_ZONE,
+                    description=(
+                        "Declare a stretch of ground you can see to be a named place. "
+                        "Name it yourself, in your own words."
+                    ),
+                    parameters={
+                        "cells": "Cells to mark, as [[x, y], ...]. Give this OR radius, never both",
+                        "radius": "Disc radius in cells around you. Give this OR cells, never both",
+                        "name": "Required - the name you are giving this place",
+                        "kind": "Optional kind of place; 'gathering_ground' is the known one",
+                    },
                 )
             )
 
