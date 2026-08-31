@@ -1073,6 +1073,22 @@ class Observation(BaseModel):
         """
         return bool(self.status and self.status.is_interacting())
 
+    def actionable_entities(self) -> list[EntityData]:
+        """Entities the actor can target now, from vision or carried inventory.
+
+        Inventory and vision deliberately share ``EntityData`` on the wire. A
+        dictionary keeps one entry per id when an item briefly appears in both
+        sources during pickup/drop boundary frames.
+        """
+        by_id: dict[str, EntityData] = {}
+        if self.vision:
+            for entity in self.vision.visible_entities:
+                by_id[entity.entity_id] = entity
+        if self.inventory:
+            for item in self.inventory.items:
+                by_id[item.entity_id] = item
+        return list(by_id.values())
+
     def get_available_actions(self, pending_incoming_bids: dict[str, "MindEvent"] = None):
         """Build list of available actions from this observation.
 
@@ -1125,21 +1141,26 @@ class Observation(BaseModel):
                     )
                 )
 
-        # General actions (always available)
-        actions.append(
-            AvailableAction(
-                name=ActionType.MOVE_TO,
-                description="Move to a specific grid position",
-                parameters={"destination": "Grid coordinates as tuple (x, y)"},
-            )
+        # Starting a new activity is unavailable while movement is locked or an
+        # interaction is active. Advertising these actions caused the model to
+        # repeatedly select options the simulation could only reject.
+        can_start_activity = not self.is_interacting() and not (
+            self.status and self.status.movement_locked
         )
-
-        actions.append(
-            AvailableAction(
-                name=ActionType.WANDER,
-                description="Wander around aimlessly",
+        if can_start_activity:
+            actions.append(
+                AvailableAction(
+                    name=ActionType.MOVE_TO,
+                    description="Move to a specific grid position",
+                    parameters={"destination": "Grid coordinates as tuple (x, y)"},
+                )
             )
-        )
+            actions.append(
+                AvailableAction(
+                    name=ActionType.WANDER,
+                    description="Wander around aimlessly",
+                )
+            )
 
         # Wait action only available when NOT in an active interaction
         # (wait exits interactions, use cancel_interaction to explicitly end one).
@@ -1200,9 +1221,9 @@ class Observation(BaseModel):
                 )
             )
 
-        # Interaction-based actions from visible entities
-        if self.vision:
-            for entity in self.vision.visible_entities:
+        # Interaction-based actions from visible entities and carried items.
+        if can_start_activity:
+            for entity in self.actionable_entities():
                 for interaction_name, interaction_data in entity.interactions.items():
                     # Extract interaction details
                     desc = interaction_data.get(

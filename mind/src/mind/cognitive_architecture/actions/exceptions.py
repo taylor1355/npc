@@ -65,3 +65,21 @@ class MovementLockedError(ActionValidationError):
             "Movement actions not available - character is locked in current interaction. "
             "Use 'cancel_interaction' or 'continue' instead."
         )
+
+
+class ActivityLockedError(ActionValidationError):
+    """A new activity was attempted while current state blocks transitions."""
+
+    def __init__(self, action_type: str, reason: str):
+        self.action_type = action_type
+        self.reason = reason
+        super().__init__(f"Action '{action_type}' cannot start because {reason}.")
+
+
+class InvalidSelectedOptionError(ActionValidationError):
+    """The selected option handle or its echoed first action is invalid."""
+
+    def __init__(self, option_id: str, detail: str):
+        self.option_id = option_id
+        self.detail = detail
+        super().__init__(f"Invalid selected_option_id '{option_id}': {detail}")
