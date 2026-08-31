@@ -16,8 +16,11 @@ from mind.cognitive_architecture.actions import Action, ActionType
 from mind.cognitive_architecture.nodes.formatting import format_interaction_status
 from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from mind.cognitive_architecture.observations import (
+    EntityData,
+    InventoryObservation,
     Observation,
     StatusObservation,
+    VisionObservation,
 )
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.working_memory import WorkingMemory
@@ -104,6 +107,9 @@ class TestAvailableActionsGrounding:
         assert ActionType.ACT_IN_INTERACTION in names
         assert ActionType.CANCEL_INTERACTION in names
         assert ActionType.WAIT not in names
+        assert ActionType.MOVE_TO not in names
+        assert ActionType.WANDER not in names
+        assert ActionType.INTERACT_WITH not in names
 
     def test_no_act_in_interaction_during_teardown_race(self):
         # current_interaction set, but activity_state already idle.
@@ -117,6 +123,36 @@ class TestAvailableActionsGrounding:
         names = self._action_names(_not_interacting_status())
         assert ActionType.ACT_IN_INTERACTION not in names
         assert ActionType.WAIT in names
+
+    def test_movement_lock_hides_actions_validator_would_reject(self):
+        status = _not_interacting_status()
+        status.movement_locked = True
+        names = self._action_names(status)
+        assert ActionType.MOVE_TO not in names
+        assert ActionType.WANDER not in names
+
+    def test_inventory_affordance_is_offered_when_idle(self):
+        berry = EntityData(
+            entity_id="berry_inventory_1",
+            display_name="Berry",
+            position=(0, 0),
+            interactions={"consume": {"description": "Eat berry"}},
+        )
+        obs = Observation(
+            entity_id="npc",
+            current_simulation_time=1,
+            status=_not_interacting_status(),
+            vision=VisionObservation(visible_entities=[]),
+            inventory=InventoryObservation(owner_id="npc", capacity=5, used_slots=1, items=[berry]),
+        )
+
+        consume = [
+            action
+            for action in obs.get_available_actions()
+            if action.name == ActionType.INTERACT_WITH
+            and "berry_inventory_1" in action.parameters["entity_id"]
+        ]
+        assert len(consume) == 1
 
 
 class TestValidatorGrounding:

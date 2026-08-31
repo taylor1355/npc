@@ -65,7 +65,7 @@ Model what action this person would naturally take given the working memory you 
 The action name must exactly match one of the available action names.
 Include any required parameters for the chosen action.
 
-**Using the Goal Options menu.** When a "Goal Options" section appears below, it lists the concrete moves this person's subconscious has already sized up, each with an `option_id` and a score. If the action you choose is one of those entries, copy its `option_id` verbatim into `selected_option_id` and give a one-sentence `selection_rationale`; the simulation uses that id to recover details the action alone cannot carry. You are equally free to act off-menu (responding to a bid, acting within an interaction, or doing something the menu never offered) — in that case omit `selected_option_id` entirely. Option ids are only valid for this one decision; never reuse one from memory.
+**Using the Goal Options menu.** When a "Goal Options" section appears below, it lists the concrete moves this person's subconscious has already sized up, each with an `option_id` and a score. If the action you choose is one of those entries, copy its `option_id` verbatim into `selected_option_id`, make the action and parameters describe that option's first step exactly, and give a one-sentence `selection_rationale`; the simulation uses that id to recover details the action alone cannot carry. You are equally free to act off-menu (responding to a bid, acting within an interaction, or doing something the menu never offered) — in that case omit `selected_option_id` entirely. Option ids are only valid for this one decision; never reuse one from memory.
 
 ### Ground truth, and how to read what follows
 

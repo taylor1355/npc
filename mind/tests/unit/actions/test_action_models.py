@@ -8,6 +8,8 @@ from pydantic import ValidationError
 from mind.cognitive_architecture.actions import Action
 from mind.cognitive_architecture.observations import (
     EntityData,
+    GoalObservation,
+    InventoryObservation,
     Observation,
     StatusObservation,
     VisionObservation,
@@ -187,6 +189,37 @@ class TestActionValidation:
         assert action.parameters["entity_id"] == "chair_uuid_123"
         assert action.parameters["interaction_name"] == "sit"
 
+    def test_valid_interact_with_inventory_item(self):
+        """Carried items are actionable even when absent from vision."""
+        apple = EntityData(
+            entity_id="apple_inventory_1",
+            display_name="Ripe Apple",
+            position=(0, 0),
+            interactions={"consume": {"description": "Eat the apple"}},
+        )
+        observation = Observation(
+            entity_id="npc_001",
+            current_simulation_time=100,
+            vision=VisionObservation(visible_entities=[]),
+            inventory=InventoryObservation(
+                owner_id="npc_001", capacity=4, used_slots=1, items=[apple]
+            ),
+        )
+        state = self._create_mock_state(observation)
+
+        action = Action.model_validate(
+            {
+                "action": "interact_with",
+                "parameters": {
+                    "entity_id": "apple_inventory_1",
+                    "interaction_name": "consume",
+                },
+            },
+            context={"state": state},
+        )
+
+        assert action.parameters["entity_id"] == "apple_inventory_1"
+
     def test_interact_with_missing_entity_id(self):
         """Should fail if interact_with lacks entity_id"""
         observation = self._create_basic_observation()
@@ -279,6 +312,118 @@ class TestActionValidation:
         )
 
         assert action.action == "interact_with"
+
+    def test_interact_with_rejected_while_already_interacting(self):
+        from tests.fixtures.observations import wire_conversation_interaction
+
+        observation = self._create_basic_observation()
+        observation.status = StatusObservation(
+            position=(0, 0),
+            movement_locked=True,
+            current_interaction=wire_conversation_interaction(),
+            activity_state={"state_name": "interacting"},
+        )
+        state = self._create_mock_state(observation)
+
+        with pytest.raises(ValidationError, match="Cannot start a new interaction"):
+            Action.model_validate(
+                {
+                    "action": "interact_with",
+                    "parameters": {
+                        "entity_id": "chair_uuid_123",
+                        "interaction_name": "sit",
+                    },
+                },
+                context={"state": state},
+            )
+
+    def _observation_with_goal_option(self):
+        observation = self._create_basic_observation()
+        observation.goal = GoalObservation.model_validate(
+            {
+                "options": [
+                    {
+                        "option_id": "rest:0",
+                        "description": "Sit on the chair",
+                        "score": 0.8,
+                        "segments": [
+                            {
+                                "goal_template_id": "rest",
+                                "goal_label": "Take a rest",
+                                "steps": [
+                                    {
+                                        "action": {
+                                            "name": "INTERACT_WITH",
+                                            "parameters": {
+                                                "entity_id": "chair_uuid_123",
+                                                "interaction_name": "sit",
+                                            },
+                                        },
+                                        "factors": {
+                                            "urgency": 1.0,
+                                            "utility": 0.8,
+                                            "responsiveness": 1.0,
+                                            "policy_modifier": 1.0,
+                                        },
+                                        "step_score": 0.8,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+        return Observation.model_validate(observation.model_dump())
+
+    def test_selected_option_id_must_resolve(self):
+        observation = self._observation_with_goal_option()
+        state = self._create_mock_state(observation)
+
+        with pytest.raises(ValidationError, match="not in this cycle's Goal Options"):
+            Action.model_validate(
+                {
+                    "action": "interact_with",
+                    "parameters": {
+                        "entity_id": "chair_uuid_123",
+                        "interaction_name": "sit",
+                    },
+                    "selected_option_id": "Sit on the nearest chair",
+                },
+                context={"state": state},
+            )
+
+    def test_selected_option_action_echo_must_match(self):
+        observation = self._observation_with_goal_option()
+        state = self._create_mock_state(observation)
+
+        with pytest.raises(ValidationError, match="does not match selected Goal Option"):
+            Action.model_validate(
+                {
+                    "action": "wait",
+                    "parameters": {},
+                    "selected_option_id": "rest:0",
+                },
+                context={"state": state},
+            )
+
+    def test_matching_selected_option_is_valid(self):
+        observation = self._observation_with_goal_option()
+        state = self._create_mock_state(observation)
+
+        action = Action.model_validate(
+            {
+                "action": "interact_with",
+                "parameters": {
+                    "entity_id": "chair_uuid_123",
+                    "interaction_name": "sit",
+                },
+                "selected_option_id": "rest:0",
+            },
+            context={"state": state},
+        )
+
+        assert action.selected_option_id == "rest:0"
 
 
 class TestBidResponseValidation:

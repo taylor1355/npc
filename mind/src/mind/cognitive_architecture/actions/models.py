@@ -100,6 +100,8 @@ class Action(BaseModel):
         elif self.action == ActionType.ACT_IN_INTERACTION:
             self._validate_act_in_interaction(observation)
 
+        self._validate_selected_option(observation)
+
         return self
 
     def _validate_movement_lock(self, observation):
@@ -118,20 +120,85 @@ class Action(BaseModel):
         if not interaction_name:
             raise MissingRequiredParameterError("interaction_name", self.action)
 
-        # Check entity visibility
-        if observation.vision:
-            visible_entities = observation.vision.visible_entities
-            visible_ids = [e.entity_id for e in visible_entities]
+        if observation.is_interacting():
+            raise ValueError(
+                "Cannot start a new interaction while another interaction is active. "
+                "Use 'cancel_interaction', 'continue', or 'act_in_interaction' instead."
+            )
 
-            if entity_id not in visible_ids:
-                raise InvalidEntityError(entity_id, visible_ids)
+        # Both visible entities and items in the actor's own inventory are
+        # actionable. The simulation uses the same EntityData wire shape for
+        # both; excluding inventory here made an item visible to the LLM but
+        # structurally impossible to consume.
+        actionable_entities = observation.actionable_entities()
+        if observation.vision is not None or observation.inventory is not None:
+            actionable_ids = [entity.entity_id for entity in actionable_entities]
+
+            if entity_id not in actionable_ids:
+                raise InvalidEntityError(entity_id, actionable_ids)
 
             # Check interaction availability
-            entity = next(e for e in visible_entities if e.entity_id == entity_id)
+            entity = next(entity for entity in actionable_entities if entity.entity_id == entity_id)
             if interaction_name not in entity.interactions:
                 raise InvalidInteractionError(
                     interaction_name, entity_id, list(entity.interactions.keys())
                 )
+
+    def _validate_selected_option(self, observation):
+        """Require an option echo to resolve and describe the same first step.
+
+        ``selected_option_id`` is an authoritative handle in the simulation. A
+        fabricated id or a contradictory action therefore changes what the NPC
+        does after validation. Rejecting the pair here gives reflection one
+        chance to repair its structured output instead of shipping two answers.
+        """
+        if self.selected_option_id is None:
+            return
+
+        options = observation.goal.options if observation.goal else []
+        option = next(
+            (candidate for candidate in options if candidate.option_id == self.selected_option_id),
+            None,
+        )
+        if option is None:
+            available = [candidate.option_id for candidate in options]
+            raise ValueError(
+                f"selected_option_id '{self.selected_option_id}' is not in this cycle's "
+                f"Goal Options. Available option_ids: {available}"
+            )
+
+        step = next(
+            (segment.steps[0] for segment in option.segments if segment.steps),
+            None,
+        )
+        if step is None:
+            raise ValueError(
+                f"selected_option_id '{self.selected_option_id}' has no executable first step"
+            )
+
+        expected_action = step.action.name.lower()
+        actual_action = str(self.action).lower()
+        if expected_action != actual_action or not self._parameters_match(
+            self.parameters, step.action.parameters
+        ):
+            raise ValueError(
+                f"Action echo {actual_action}({self.parameters}) does not match selected "
+                f"Goal Option '{self.selected_option_id}' first step "
+                f"{expected_action}({step.action.parameters})"
+            )
+
+    @staticmethod
+    def _parameters_match(actual: dict, expected: dict) -> bool:
+        """Compare wire parameters while treating tuples and lists alike."""
+
+        def normalize(value):
+            if isinstance(value, (list, tuple)):
+                return [normalize(item) for item in value]
+            if isinstance(value, dict):
+                return {key: normalize(item) for key, item in value.items()}
+            return value
+
+        return normalize(actual) == normalize(expected)
 
     def _validate_move_to(self):
         """Validate MOVE_TO action parameters"""

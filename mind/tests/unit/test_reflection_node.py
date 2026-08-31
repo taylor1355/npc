@@ -738,8 +738,11 @@ class TestReflectionGoalOptions:
             },
             "new_memories": [],
             "chosen_action": {
-                "action": "wait",
-                "parameters": {},
+                "action": "interact_with",
+                "parameters": {
+                    "entity_id": "apple_01",
+                    "interaction_name": "consume"
+                },
                 "selected_option_id": "satisfy_hunger:0",
                 "selection_rationale": "Hunger dominates and the apple is adjacent."
             }
