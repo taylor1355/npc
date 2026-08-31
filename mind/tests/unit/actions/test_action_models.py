@@ -489,6 +489,78 @@ class TestBidResponseValidation:
         assert action.parameters["bid_id"] == "bid_789"
         assert action.parameters["accept"] is True
 
+    def test_valid_bid_response_discards_an_inapplicable_goal_option_echo(self):
+        """Reactive responses stay off-menu even when the model echoes a plan id."""
+        from mind.cognitive_architecture.observations import MindEvent, MindEventType
+
+        bid_event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={
+                "bid_id": "bid_789",
+                "bidder_id": "charlie_001",
+                "bidder_name": "Charlie",
+                "interaction_name": "conversation",
+            },
+        )
+        state = self._create_mock_state_with_bids({"bid_789": bid_event})
+        state.observation = TestActionValidation()._observation_with_goal_option()
+
+        action = Action.model_validate(
+            {
+                "action": "respond_to_interaction_bid",
+                "parameters": {"bid_id": "bid_789", "accept": True},
+                "selected_option_id": "rest:0",
+                "selection_rationale": "The live invitation is more urgent than resting.",
+            },
+            context={"state": state},
+        )
+
+        assert action.selected_option_id is None
+        assert action.selection_rationale == "The live invitation is more urgent than resting."
+
+    def test_inapplicable_option_echo_does_not_bypass_bid_grounding(self):
+        """Normalizing the menu echo must not make a stale bid executable."""
+        state = self._create_mock_state_with_bids({})
+
+        with pytest.raises(ValidationError, match="nonexistent_bid"):
+            Action.model_validate(
+                {
+                    "action": "respond_to_interaction_bid",
+                    "parameters": {"bid_id": "nonexistent_bid", "accept": True},
+                    "selected_option_id": "rest:0",
+                },
+                context={"state": state},
+            )
+
+    def test_batch_bid_rejection_also_discards_a_goal_option_echo(self):
+        """Batch rejection is reactive and cannot execute a retained goal option."""
+        from mind.cognitive_architecture.observations import MindEvent, MindEventType
+
+        bid_event = MindEvent(
+            timestamp=100,
+            event_type=MindEventType.INTERACTION_BID_RECEIVED,
+            payload={
+                "bid_id": "bid_789",
+                "bidder_id": "charlie_001",
+                "bidder_name": "Charlie",
+                "interaction_name": "conversation",
+            },
+        )
+        state = self._create_mock_state_with_bids({"bid_789": bid_event})
+        state.observation = TestActionValidation()._observation_with_goal_option()
+
+        action = Action.model_validate(
+            {
+                "action": "batch_reject_interaction_bids",
+                "parameters": {"ids": "*", "reason": "Resting now."},
+                "selected_option_id": "rest:0",
+            },
+            context={"state": state},
+        )
+
+        assert action.selected_option_id is None
+
     def test_validate_reject_bid_with_reason(self):
         """Should validate reject action when reason is provided"""
         from mind.cognitive_architecture.observations import MindEvent, MindEventType
