@@ -23,37 +23,55 @@ from mind.cognitive_architecture.observations import (
 
 # The ``place`` block's wire shape.
 #
-# PROVENANCE, and it is deliberately unlike ``SIMULATION_ACTION_ARMS`` in
-# tests/unit/actions/test_mark_zone_contract.py: that literal is pinned against
-# SHIPPED simulation code, this one is pinned against an APPROVED SPEC whose
-# producer has not merged yet -- the simulation worktree at origin/main @
-# 0d5fc725, ``docs/plans/NPC-1299.md`` section 2.1 ("PlaceObservation -- shape,
-# cap, version"). Saying which of the two a literal is makes the difference
-# between "this matches what runs" and "this matches what we agreed to build".
+# PROVENANCE: pinned against SHIPPED simulation code, re-derived from
+# ``src/minds/observations/place_observation.gd::get_data`` and
+# ``place_descriptor.gd::to_dict`` on the NPC-1299 branch carrying NPC-1473.
 #
-# RE-DERIVE THIS from ``src/minds/observations/place_observation.gd::get_data``
-# and ``place_descriptor.gd`` once NPC-1299 merges, and replace the citation
-# above with that commit. Until then a mismatch between this literal and the
-# simulation is a contract disagreement to escalate, not a test to edit.
+# It was previously pinned against an APPROVED SPEC whose producer had not
+# merged (``docs/plans/NPC-1299.md`` section 2.1), and the note here said to
+# re-derive once it landed and to treat any mismatch as a contract
+# disagreement rather than a test to edit. That is exactly what happened: the
+# implementation emitted ``current_place`` / ``known_places`` / ``target_place``
+# where the plan illustrated ``here`` / ``known`` / ``target``, and sent a FULL
+# descriptor where the model had narrowed ``current_place`` to three fields.
+# With extra="forbid" on both this model and Observations, that raised and
+# refused the WHOLE observation -- every MCP NPC to wait, every cycle. The
+# distinction the old note drew is what caught it, so keep drawing it.
 #
 # ``told_by`` is absent from the non-TOLD descriptors ON PURPOSE: the wire omits
 # the key except for TOLD, and test_told_by_is_omitted_except_for_told pins it.
+# ``witnessed`` gates ``affords`` / ``provider_count`` / ``witnessed_age_minutes``
+# the same way -- the producer omits all three when it is false.
 PLACE_BLOCK_CONTRACT_SAMPLE = {
-    "contract_version": 1,
-    "here": {
+    "contract_version": 2,
+    # A FULL descriptor: the producer sends current_place.to_dict() off the same
+    # PlaceDescriptor it puts in known_places, where this place also appears.
+    "current_place": {
         "zone_id": "zone_berry",
         "name": "the berry grounds",
         "kind": "gathering_ground",
+        "anchor": [12, 34],
+        "distance": 0,
+        "witnessed": True,
+        "affords": ["harvest"],
+        "provider_count": 4,
+        "witnessed_age_minutes": 5,
+        "source": "created",
+        "age_minutes": 120,
+        "beyond_vision": False,
+        "confidence": 0.95,
     },
-    "known": [
+    "known_places": [
         {
             "zone_id": "zone_berry",
             "name": "the berry grounds",
             "kind": "gathering_ground",
             "anchor": [12, 34],
             "distance": 0,
+            "witnessed": True,
             "affords": ["harvest"],
             "provider_count": 4,
+            "witnessed_age_minutes": 5,
             "source": "created",
             "age_minutes": 120,
             "beyond_vision": False,
@@ -65,8 +83,10 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
             "kind": "gathering_ground",
             "anchor": [30, 34],
             "distance": 18,
+            "witnessed": True,
             "affords": ["drink"],
             "provider_count": 1,
+            "witnessed_age_minutes": 40,
             "source": "told",
             "told_by": "npc_bo",
             "age_minutes": 40,
@@ -79,8 +99,10 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
             "kind": "gathering_ground",
             "anchor": [43, 34],
             "distance": 31,
+            "witnessed": True,
             "affords": [],
             "provider_count": 0,
+            "witnessed_age_minutes": 900,
             "source": "visited",
             "age_minutes": 900,
             "beyond_vision": True,
@@ -88,14 +110,16 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
         },
     ],
     "known_total": 7,
-    "target": {
+    "target_place": {
         "zone_id": "zone_pond",
         "name": "the pond bend",
         "kind": "gathering_ground",
         "anchor": [30, 34],
         "distance": 18,
+        "witnessed": True,
         "affords": ["drink"],
         "provider_count": 1,
+        "witnessed_age_minutes": 40,
         "source": "told",
         "told_by": "npc_bo",
         "age_minutes": 40,
@@ -125,11 +149,11 @@ class TestPlaceBlockParsing:
 
         place = observation.place
         assert place is not None
-        assert place.contract_version == 1
+        assert place.contract_version == 2
         assert place.known_total == 7
-        assert place.here.name == "the berry grounds"
-        assert [p.zone_id for p in place.known] == ["zone_berry", "zone_pond", "zone_green"]
-        assert place.target.zone_id == "zone_pond"
+        assert place.current_place.name == "the berry grounds"
+        assert [p.zone_id for p in place.known_places] == ["zone_berry", "zone_pond", "zone_green"]
+        assert place.target_place.zone_id == "zone_pond"
         assert place.mark_budget.cap == 3
 
     def test_an_undeclared_root_key_is_still_refused(self):
@@ -187,7 +211,7 @@ class TestPlaceBlockParsing:
     def test_told_by_is_omitted_except_for_told(self):
         """Provenance is read from ``source``, never from the emptiness of told_by."""
         place = PlaceObservation.model_validate(PLACE_BLOCK_CONTRACT_SAMPLE)
-        by_id = {p.zone_id: p for p in place.known}
+        by_id = {p.zone_id: p for p in place.known_places}
 
         assert by_id["zone_pond"].source == PlaceKnowledgeSource.TOLD
         assert by_id["zone_pond"].told_by == "npc_bo"
@@ -283,6 +307,6 @@ class TestPlaceRendering:
     def test_rendering_survives_a_nameless_place(self):
         """Runs on the prompt path, where an exception collapses the cycle."""
         rendered = PlaceObservation.model_validate(
-            {"here": {"zone_id": "zone_x"}, "known": [{"zone_id": "zone_x"}]}
+            {"current_place": {"zone_id": "zone_x"}, "known_places": [{"zone_id": "zone_x"}]}
         ).render_summary()
         assert "zone_x" in rendered
