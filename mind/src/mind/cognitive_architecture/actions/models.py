@@ -132,6 +132,18 @@ class Action(BaseModel):
         elif self.action == ActionType.MARK_ZONE:
             self._validate_mark_zone()
 
+        # Bid responses are grounded in the live pending-bid set above, not in
+        # the goal planner's menu. Models occasionally echo the option they were
+        # considering before an invitation arrived. That handle is authoritative
+        # in the simulation, so shipping it would execute the retained plan
+        # instead of the valid response. Normalize this reactive action back to
+        # the off-menu wire shape while retaining its explanatory rationale.
+        if self.action in (
+            ActionType.RESPOND_TO_INTERACTION_BID,
+            ActionType.BATCH_REJECT_INTERACTION_BIDS,
+        ):
+            self.selected_option_id = None
+
         self._validate_selected_option(observation)
 
         return self
