@@ -782,20 +782,30 @@ KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2})
 class PlaceObservation(BaseModel):
     """The substrate's place knowledge: where you are, what you know, what you hold.
 
-    Wire producer: the simulation's ``place_observation.gd``, which NPC-1299
-    ships along with a "Place block wire contract (v1)" documentation section.
-    WRITTEN AHEAD OF THAT PRODUCER, against its approved specification rather
-    than against shipped code -- see the provenance note on
+    Wire producer: the simulation's ``place_observation.gd``. This model is
+    matched against SHIPPED producer code -- see the provenance note on
     ``PLACE_BLOCK_CONTRACT_SAMPLE`` in
-    ``tests/unit/observations/test_place_observation.py``, which is what
-    re-derives this model once the producer lands. Until then a disagreement
-    between the two repositories is a contract question, not a bug in either.
+    ``tests/unit/observations/test_place_observation.py``, which records exactly
+    what it was re-derived from.
 
-    ``known`` is CAPPED simulation-side and ``known_total`` counts the whole set,
-    so ``known_total > len(known)`` means "you know more places than are listed"
-    -- the distinction between knowing three places and being shown three of
-    thirty. ``here`` and ``target`` are force-included in the ranking when they
-    exist, so a place named in either is also findable in ``known``.
+    It was previously written AHEAD of that producer, against an approved
+    specification, and the two disagreed once the producer landed: this model
+    declared ``here`` / ``known`` / ``target`` and narrowed the first to a
+    three-field object, where the producer emits ``current_place`` /
+    ``known_places`` / ``target_place`` and sends a FULL descriptor for the
+    first. Because this model and ``Observations`` are both ``extra="forbid"``,
+    that did not degrade -- it raised, and the nested failure refused the WHOLE
+    observation. Recorded because the shape recurs: a model written against a
+    specification is a hypothesis about a producer, and only running the two
+    together settles it.
+
+    ``known_places`` is CAPPED simulation-side and ``known_total`` counts the
+    whole set, so ``known_total > len(known_places)`` means "you know more places
+    than are listed" -- the distinction between knowing three places and being
+    shown three of thirty. ``current_place`` and ``target_place`` are
+    force-included in the ranking when they exist, so a place named in either is
+    also findable in ``known_places`` -- and both carry the same
+    ``PlaceDescriptor`` shape that list does, never a narrowed one.
 
     ``extra="forbid"``, matching every ``Goal*`` model and
     ``InventoryObservation``: this block is new, there is no legacy payload to
