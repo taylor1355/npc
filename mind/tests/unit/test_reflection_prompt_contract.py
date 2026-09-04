@@ -33,6 +33,7 @@ DYNAMIC_VARIABLES = {
     "goal_options",
     "retrieved_memories",
     "recent_events",
+    "conversation_histories",
     "observation_text",
     "available_actions",
 }

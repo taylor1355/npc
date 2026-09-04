@@ -13,6 +13,7 @@ from mind.cognitive_architecture.actions.exceptions import (
     MovementLockedError,
     MutuallyExclusiveParametersError,
     NoAdvertisedParameterError,
+    UnexpectedActionParameterError,
 )
 
 
@@ -313,8 +314,8 @@ class Action(BaseModel):
         (NPC-688). Missing status defaults to rejected.
 
         The parameter check is schema-derived: whatever the interaction
-        advertises is what an act may carry, and an act must carry at least one
-        of them. This names no interaction and no parameter, so a new
+        advertises is the complete set an act may carry, and an act must carry
+        at least one of them. This names no interaction and no parameter, so a new
         interaction registered in the simulation is validated here with no
         Python change (NPC-1278). The predecessor keyed on a hardcoded
         interaction name read from a wire key that does not exist, so it never
@@ -329,8 +330,13 @@ class Action(BaseModel):
             raise ValueError("ACT_IN_INTERACTION requires an active interaction")
 
         advertised = observation.status.act_parameter_hints()
+        unexpected = sorted(set(self.parameters) - set(advertised))
+        if unexpected:
+            raise UnexpectedActionParameterError(unexpected, sorted(advertised), self.action)
+
         if not advertised:
-            # A parameterless interaction accepts a bare act; nothing to check.
+            # A parameterless interaction accepts only the bare act. Extras were
+            # rejected above against the same empty schema.
             return
 
         if not any(name in self.parameters for name in advertised):

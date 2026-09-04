@@ -18,6 +18,7 @@ from pydantic import ValidationError
 from mind.cognitive_architecture.actions import Action, ActionType
 from mind.cognitive_architecture.nodes.base import LLMNode, entity_tag
 from mind.cognitive_architecture.nodes.formatting import (
+    format_conversation_histories,
     format_goal_options,
     format_personality,
     format_recent_events,
@@ -121,6 +122,9 @@ class ReflectionNode(LLMNode):
             # Ground the "am I interacting?" belief in the fresh observation so
             # a stale working-memory belief gets corrected this cycle (NPC-688).
             interaction_status=_format_interaction_status(state.observation),
+            conversation_histories=format_conversation_histories(
+                state.conversation_histories, state.observation.entity_id
+            ),
             substrate_goal=format_substrate_goal(goal_obs),
             goal_options=format_goal_options(goal_obs),
             retrieved_memories=memories_text,
