@@ -23,7 +23,10 @@ import mind.cognitive_architecture.actions.models as action_models
 import mind.cognitive_architecture.nodes.formatting as formatting_module
 import mind.cognitive_architecture.observations.models as observation_models
 from mind.cognitive_architecture.actions import Action, ActionType
-from mind.cognitive_architecture.actions.exceptions import NoAdvertisedParameterError
+from mind.cognitive_architecture.actions.exceptions import (
+    NoAdvertisedParameterError,
+    UnexpectedActionParameterError,
+)
 from mind.cognitive_architecture.nodes.formatting import format_interaction_status
 from mind.cognitive_architecture.observations import (
     UNNAMED_INTERACTION,
@@ -250,6 +253,33 @@ class TestValidationReachability:
                 {"action": "act_in_interaction", "parameters": {"volume": "loud"}},
                 context={"state": self._state(wire_conversation_interaction())},
             )
+
+    def test_valid_parameter_plus_unadvertised_extra_is_rejected(self):
+        with pytest.raises(ValidationError) as exc_info:
+            Action.model_validate(
+                {
+                    "action": "act_in_interaction",
+                    "parameters": {"message": "Hello", "interaction_name": "conversation"},
+                },
+                context={"state": self._state(wire_conversation_interaction())},
+            )
+
+        original = exc_info.value.errors()[0]["ctx"]["error"]
+        assert isinstance(original, UnexpectedActionParameterError)
+        assert original.unexpected == ["interaction_name"]
+        assert original.allowed == ["message", "is_farewell"]
+
+    def test_parameterless_interaction_rejects_every_parameter(self):
+        with pytest.raises(ValidationError) as exc_info:
+            Action.model_validate(
+                {"action": "act_in_interaction", "parameters": {"message": "Hello"}},
+                context={"state": self._state(wire_current_interaction("sit"))},
+            )
+
+        original = exc_info.value.errors()[0]["ctx"]["error"]
+        assert isinstance(original, UnexpectedActionParameterError)
+        assert original.unexpected == ["message"]
+        assert original.allowed == []
 
     def test_parameterless_interaction_accepts_a_bare_act(self):
         action = Action.model_validate(

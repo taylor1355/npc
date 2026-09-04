@@ -6,8 +6,15 @@ prose rendering that replaced it, and the guard that keeps a repr from creeping
 back in.
 """
 
-from mind.cognitive_architecture.nodes.formatting import format_recent_events
-from mind.cognitive_architecture.observations import MindEvent, MindEventType
+from mind.cognitive_architecture.nodes.formatting import (
+    format_conversation_histories,
+    format_recent_events,
+)
+from mind.cognitive_architecture.observations import (
+    ConversationMessage,
+    MindEvent,
+    MindEventType,
+)
 from tests.fixtures.observations import create_conversation_events, create_social_events
 
 
@@ -117,14 +124,60 @@ class TestCommittedEventFixtures:
         assert "counter-offer: join with npc_bob, npc_dave" in rendered
         assert "item_apple_3" in rendered
 
-    def test_conversation_buffer_carries_what_was_said(self):
-        """The one arm left uncompacted, measured on the buffer that shows why."""
+    def test_conversation_buffer_points_to_the_typed_transcript_without_repeating_it(self):
         rendered = format_recent_events(create_conversation_events())
 
-        assert "Have you seen the smith today?" in rendered
+        assert "full transcript below" in rendered
+        assert "Have you seen the smith today?" not in rendered
 
     def test_fixture_buffers_are_in_arrival_order(self):
         """Timestamps ascend, so the rendered prefix reads as a sequence."""
         for events in (create_social_events(), create_conversation_events()):
             timestamps = [event.timestamp for event in events]
             assert timestamps == sorted(timestamps)
+
+
+class TestFormatConversationHistories:
+    def test_empty_histories_render_a_sentinel(self):
+        assert format_conversation_histories({}, "npc_alice") == "No active conversation."
+
+    def test_complete_transcript_renders_roles_system_messages_and_declarations(self):
+        messages = [
+            ConversationMessage(
+                speaker_id="npc_alice",
+                speaker_name="Alice",
+                message=f"Alice turn {index}",
+                id=f"alice_{index}",
+                timestamp=index,
+            )
+            for index in range(1, 14)
+        ]
+        messages.extend(
+            [
+                ConversationMessage(
+                    speaker_id="npc_bob",
+                    speaker_name="Bob",
+                    message="I should go now.",
+                    id="bob_14",
+                    timestamp=14,
+                    declarations=[{"kind": "farewell"}],
+                ),
+                ConversationMessage(
+                    speaker_id="system",
+                    speaker_name="System",
+                    message="Message limit reached.",
+                    id="system_15",
+                    timestamp=15,
+                    is_system=True,
+                ),
+            ]
+        )
+
+        rendered = format_conversation_histories({"conversation_1": messages}, "npc_alice")
+
+        assert "Conversation conversation_1:" in rendered
+        assert "[YOU] Alice: Alice turn 1" in rendered
+        assert "[YOU] Alice: Alice turn 13" in rendered
+        assert "Bob: I should go now. [farewell]" in rendered
+        assert "System: Message limit reached. [system]" in rendered
+        assert len(rendered.splitlines()) == 16

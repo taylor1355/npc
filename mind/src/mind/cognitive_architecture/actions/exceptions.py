@@ -57,6 +57,20 @@ class NoAdvertisedParameterError(ActionValidationError):
         )
 
 
+class UnexpectedActionParameterError(ActionValidationError):
+    """An interaction act carried keys absent from its advertised schema."""
+
+    def __init__(self, unexpected: list[str], allowed: list[str], action_type: str):
+        self.unexpected = unexpected
+        self.allowed = allowed
+        self.action_type = action_type
+        allowed_text = ", ".join(allowed) if allowed else "none"
+        super().__init__(
+            f"Action '{action_type}' supplied unexpected parameters: "
+            f"{', '.join(unexpected)}. Allowed parameters: {allowed_text}"
+        )
+
+
 class MutuallyExclusiveParametersError(ActionValidationError):
     """An act named BOTH, or NEITHER, of a pair of alternative parameters.
 

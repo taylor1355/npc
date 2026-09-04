@@ -393,21 +393,13 @@ class TestMindEvent:
         assert "INTERACTION_ESCALATED" in formatted
         assert "duel" in formatted
 
-    def test_interaction_observation_still_carries_conversation_content(self):
-        """Pin, not a preference: this arm is the sole speech channel.
-
-        ``Observation.conversations`` is never populated in production and
-        ``PipelineState.conversation_histories`` is rendered by no node, so an
-        INTERACTION_OBSERVATION event's raw payload is the only way anything
-        anyone said reaches the LLM. Compacting this arm would silently blind
-        every NPC to speech. NPC-1298 owns closing that gap; until it does,
-        this test must go red for anyone who tidies the arm up.
-        """
+    def test_conversation_event_carries_metadata_without_duplicating_message_bodies(self):
         event = MindEvent(
             timestamp=100,
             event_type=MindEventType.INTERACTION_OBSERVATION,
             payload={
                 "interaction_name": "conversation",
+                "interaction_id": "conversation_1",
                 "participants": ["npc_alice", "npc_bob"],
                 "conversation_history": [
                     {"speaker_id": "npc_bob", "message": "Have you seen the smith today?"}
@@ -417,8 +409,10 @@ class TestMindEvent:
         )
 
         formatted = str(event)
-        assert "Have you seen the smith today?" in formatted
-        assert "npc_bob" in formatted
+        assert "conversation_1" in formatted
+        assert "1 total messages" in formatted
+        assert "Have you seen the smith today?" not in formatted
+        assert "npc_bob" not in formatted
 
 
 class TestBidActionGeneration:

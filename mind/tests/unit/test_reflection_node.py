@@ -18,6 +18,7 @@ from mind.cognitive_architecture.memory import Memory
 from mind.cognitive_architecture.nodes.formatting import format_goal_options, format_substrate_goal
 from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from mind.cognitive_architecture.observations import (
+    ConversationMessage,
     GoalDetail,
     GoalObservation,
     MindEvent,
@@ -333,7 +334,6 @@ class TestReflectionNode:
                 "chosen_action": {
                     "action": "act_in_interaction",
                     "parameters": {
-                        "interaction_id": "conversation_123",
                         "response": "I agree to help",
                         "intensity": 0.8
                     }
@@ -345,9 +345,73 @@ class TestReflectionNode:
         result = await node.process(basic_state)
 
         assert result.chosen_action.action == ActionType.ACT_IN_INTERACTION
-        assert result.chosen_action.parameters["interaction_id"] == "conversation_123"
         assert result.chosen_action.parameters["response"] == "I agree to help"
         assert result.chosen_action.parameters["intensity"] == 0.8
+
+    async def test_retries_when_interaction_action_contains_an_unadvertised_parameter(
+        self, node, mock_llm, basic_state
+    ):
+        basic_state.observation.status.current_interaction = wire_current_interaction(
+            "conversation",
+            act_parameters={"message": wire_property_spec("string", "", "What you say")},
+        )
+        basic_state.observation.status.activity_state = {"state_name": "interacting"}
+        invalid = AIMessage(
+            content="""{
+                "updated_working_memory": {"situation_assessment": "Talking"},
+                "new_memories": [],
+                "chosen_action": {
+                    "action": "act_in_interaction",
+                    "parameters": {"message": "Hello", "interaction_name": "conversation"}
+                }
+            }"""
+        )
+        valid = AIMessage(
+            content="""{
+                "updated_working_memory": {"situation_assessment": "Talking"},
+                "new_memories": [],
+                "chosen_action": {
+                    "action": "act_in_interaction",
+                    "parameters": {"message": "Hello"}
+                }
+            }"""
+        )
+        mock_llm.ainvoke.side_effect = [invalid, valid]
+
+        result = await node.process(basic_state)
+
+        assert mock_llm.ainvoke.call_count == 2
+        assert result.chosen_action.parameters == {"message": "Hello"}
+
+    async def test_renders_complete_conversation_once(self, node, mock_llm, basic_state):
+        message = ConversationMessage(
+            speaker_id="npc_bob",
+            speaker_name="Bob",
+            message="Have you seen the smith today?",
+            id="message_1",
+            timestamp=99,
+            declarations=[{"kind": "farewell"}],
+        )
+        basic_state.conversation_histories = {"conversation_1": [message]}
+        basic_state.recent_events = [
+            MindEvent(
+                timestamp=100,
+                event_type=MindEventType.INTERACTION_OBSERVATION,
+                payload={
+                    "interaction_name": "conversation",
+                    "interaction_id": "conversation_1",
+                    "conversation_history": [message.model_dump()],
+                    "total_message_count": 1,
+                },
+            )
+        ]
+
+        await node.process(basic_state)
+
+        prompt = rendered_prompt(mock_llm)
+        assert "### Active Conversation Transcript" in prompt
+        assert "Bob: Have you seen the smith today? [farewell]" in prompt
+        assert prompt.count("Have you seen the smith today?") == 1
 
     async def test_preserves_other_state_fields(self, node, mock_llm, basic_state):
         """Should not modify unrelated state fields"""

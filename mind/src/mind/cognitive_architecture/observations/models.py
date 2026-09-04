@@ -142,18 +142,20 @@ class MindEvent(BaseModel):
     def __str__(self) -> str:
         """Format event as natural language for LLM.
 
-        This is the ONLY rendering of the event buffer that reaches a prompt
-        (``nodes.formatting.format_recent_events``, NPC-1335). Two consequences
-        bind every arm below:
+        This is the rendering of the event buffer that reaches a prompt
+        (``nodes.formatting.format_recent_events``, NPC-1335). Conversation
+        messages also travel through the typed aggregate rendered by
+        ``format_conversation_histories`` (NPC-1298). Two consequences bind the
+        remaining arms below:
 
         1. **It must be total.** The render happens in the argument expression
            that builds the reflection prompt — upstream of ``call_llm``, and so
            upstream of its salvage fallback. An exception here does not degrade
            the cycle, it loses the cycle and its telemetry (the NPC-1195 class).
            Read ``payload`` defensively; it is an unvalidated dict.
-        2. **What an arm drops is gone.** Nothing downstream re-derives it and
-           no other channel carries it, so an omission here is an omission from
-           the NPC's view of what just happened — not a compaction of it.
+        2. **What an arm drops needs another authoritative channel.** Conversation
+           bodies are the one such case; the typed aggregate carries the full
+           simulation-bounded transcript exactly once.
 
         The ``payload["interaction_name"]`` reads below are CORRECT — do not
         sweep them into ``WIRE_KEY_INTERACTION_NAME``. Event payloads are a
@@ -213,14 +215,20 @@ class MindEvent(BaseModel):
             return f"Interaction bid canceled: {interaction_name}{_format_bid_details(payload)}"
 
         elif event_type == MindEventType.INTERACTION_OBSERVATION:
-            # The raw payload is KEPT deliberately, and this is the one arm that
-            # compaction would break rather than improve: it is the only channel
-            # by which conversation content reaches the LLM. Observation.
-            # conversations is never populated in production, and
-            # PipelineState.conversation_histories is rendered by no node — so
-            # rendering this as prose without a speaker-aware replacement would
-            # silently blind every NPC to what was said to it. NPC-1298 owns
-            # closing that gap; compact this arm only after it does.
+            # Conversation bodies now render from PipelineState's typed, fully
+            # aggregated transcript. Keep only arrival metadata here so rolling
+            # observation windows do not repeat the same utterances many times.
+            history = payload.get("conversation_history")
+            if payload.get("interaction_name") == "conversation" and isinstance(history, list):
+                interaction_id = payload.get("interaction_id", "unknown")
+                total = payload.get("total_message_count", len(history))
+                return (
+                    f"Conversation update: {interaction_id} "
+                    f"({total} total messages; full transcript below)"
+                )
+
+            # Other interaction observations have no typed replacement. Preserve
+            # their complete payload rather than silently losing domain state.
             return f"Interaction update: {payload}"
 
         elif event_type == MindEventType.MOVEMENT_COMPLETED:

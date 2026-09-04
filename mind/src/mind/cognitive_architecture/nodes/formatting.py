@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from mind.cognitive_architecture.observations import (
+        ConversationMessage,
         GoalObservation,
         MindEvent,
         Observation,
@@ -69,6 +70,33 @@ def format_recent_events(events: list[MindEvent]) -> str:
     if not events:
         return "Nothing has happened recently."
     return "\n".join(f"[t={event.timestamp}] {event}" for event in events)
+
+
+def format_conversation_histories(
+    histories: dict[str, list[ConversationMessage]], entity_id: str
+) -> str:
+    """Render every message in every active, simulation-bounded conversation.
+
+    The simulation owns the transcript cap. This renderer performs no slicing
+    or summarization: it supplies the typed aggregate that overlapping event
+    windows were built to reconstruct, with identity and semantic markers made
+    explicit for the reflecting NPC.
+    """
+    if not histories:
+        return "No active conversation."
+
+    lines: list[str] = []
+    for interaction_id in sorted(histories):
+        lines.append(f"Conversation {interaction_id}:")
+        for message in histories[interaction_id]:
+            speaker = message.speaker_name.strip() or message.speaker_id or "Unknown speaker"
+            if message.speaker_id == entity_id:
+                speaker = f"[YOU] {speaker}"
+            timestamp = f"[t={message.timestamp}] " if message.timestamp is not None else ""
+            markers = message.render_markers()
+            suffix = f" {markers}" if markers else ""
+            lines.append(f"{timestamp}{speaker}: {message.message}{suffix}")
+    return "\n".join(lines)
 
 
 def format_interaction_status(observation: Observation | None) -> str:

@@ -25,6 +25,11 @@ Update the working memory with:
 - **"Interaction finished / canceled: X"** → Clear any goals/plans related to X, acknowledge completion, assess what to do next
 - **"Interaction started: X"** → Update plan to reflect the new activity
 
+**Use the active conversation transcript:**
+- It is the complete transcript retained by the simulation for the active conversation, not a summary or a recent slice.
+- `[YOU]` marks this person's own messages. Respond to the other participant's latest relevant turn rather than addressing yourself.
+- Declaration markers are speaker-authored meaning. A `[farewell]` message means that speaker is closing their participation; keep the words and declaration behaviorally consistent.
+
 **Keeping working memory current:**
 - Recent events show actions you just took - update working memory to reflect their outcomes
 - If previous working memory mentions something you've now acted upon, acknowledge it's done rather than continuing to plan for it
@@ -102,6 +107,9 @@ Produce the fields in the order given: the working-memory update first, then new
 
 ### Authoritative Interaction Status
 {interaction_status}
+
+### Active Conversation Transcript
+{conversation_histories}
 
 ### Subconscious Pull
 {substrate_goal}
