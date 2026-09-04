@@ -267,7 +267,7 @@ class TestValidationReachability:
         original = exc_info.value.errors()[0]["ctx"]["error"]
         assert isinstance(original, UnexpectedActionParameterError)
         assert original.unexpected == ["interaction_name"]
-        assert original.allowed == ["message", "is_farewell"]
+        assert original.allowed == ["is_farewell", "message"]
 
     def test_parameterless_interaction_rejects_every_parameter(self):
         with pytest.raises(ValidationError) as exc_info:

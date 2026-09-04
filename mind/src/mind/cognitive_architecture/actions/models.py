@@ -332,7 +332,7 @@ class Action(BaseModel):
         advertised = observation.status.act_parameter_hints()
         unexpected = sorted(set(self.parameters) - set(advertised))
         if unexpected:
-            raise UnexpectedActionParameterError(unexpected, list(advertised), self.action)
+            raise UnexpectedActionParameterError(unexpected, sorted(advertised), self.action)
 
         if not advertised:
             # A parameterless interaction accepts only the bare act. Extras were

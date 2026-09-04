@@ -45,6 +45,7 @@ class Mind:
 
     # Conversation history aggregation (keyed by interaction_id)
     conversation_histories: dict[str, list[ConversationMessage]] = field(default_factory=dict)
+    _finished_conversation_ids: set[str] = field(default_factory=set, repr=False)
 
     event_buffer: list[MindEvent] = field(default_factory=list)
 
@@ -262,13 +263,12 @@ class Mind:
                 MindEventType.INTERACTION_FINISHED,
                 MindEventType.INTERACTION_CANCELED,
             ):
-                # Clean up conversation history for ended interactions
+                # Defer cleanup until build_pipeline_state snapshots this cycle.
+                # A final conversation update and its finish event may share a
+                # batch; deleting here would hide the closing turn from reflection.
                 interaction_id = event.payload.get("interaction_id")
-                if interaction_id and interaction_id in self.conversation_histories:
-                    del self.conversation_histories[interaction_id]
-                    logger.debug(
-                        f"[{self.entity_id}] Cleaned up conversation history for {interaction_id}"
-                    )
+                if interaction_id:
+                    self._finished_conversation_ids.add(interaction_id)
 
         self.event_buffer.extend(new_events)
 
@@ -294,10 +294,13 @@ class Mind:
         ``MCPServer._register_tools_and_resources``, so it is not importable —
         this method is the only shared surface a caller can reach.
 
-        This method READS the mind; it does not advance it. Callers own the
-        per-cycle mutations that must precede it: ``update_conversations`` and
-        ``update_events`` (which applies the retention policy that fills
-        ``event_buffer``), plus stamping ``last_simulation_time``.
+        Callers own the per-cycle mutations that must precede it:
+        ``update_conversations`` and ``update_events`` (which applies the
+        retention policy that fills ``event_buffer``), plus stamping
+        ``last_simulation_time``. Conversation cleanup is deferred until this
+        method has copied the aggregate into the returned state, ensuring a
+        closing turn remains visible during its finish cycle and disappears
+        from the following cycle.
 
         Args:
             obs: This cycle's observation, already parsed and routed.
@@ -305,7 +308,7 @@ class Mind:
         Returns:
             A PipelineState carrying every input field the pipeline reads.
         """
-        return PipelineState(
+        state = PipelineState(
             observation=obs,
             available_actions=obs.get_available_actions(
                 pending_incoming_bids=self.pending_incoming_bids
@@ -313,7 +316,17 @@ class Mind:
             working_memory=self.working_memory,
             personality_traits=self.traits,
             personality_dimensions=self.personality_dimensions,
-            conversation_histories=self.conversation_histories,
+            conversation_histories={
+                interaction_id: list(messages)
+                for interaction_id, messages in self.conversation_histories.items()
+            },
             recent_events=self.event_buffer,
             pending_incoming_bids=self.pending_incoming_bids,
         )
+        for interaction_id in self._finished_conversation_ids:
+            if self.conversation_histories.pop(interaction_id, None) is not None:
+                logger.debug(
+                    f"[{self.entity_id}] Cleaned up conversation history for {interaction_id}"
+                )
+        self._finished_conversation_ids.clear()
+        return state

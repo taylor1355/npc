@@ -41,6 +41,7 @@ from mind.interfaces.mcp.server import (
     CONVERSATION_MARKER_FIELD,
     _extract_conversation_observations,
 )
+from tests.fixtures import create_blacksmith_observation
 
 INTERACTION_ID = "interaction_conv_1"
 
@@ -145,6 +146,36 @@ class TestDedupStillHolds:
 
         assert len(stored(mind)) == 3
         assert [m.id for m in stored(mind)] == ["message_a", "message_b", "message_c"]
+
+
+class TestFinishedConversationCleanup:
+    def test_same_cycle_final_message_survives_pipeline_snapshot_then_is_cleaned_up(self):
+        mind = make_mind()
+        farewell = make_message("npc_alice", "Goodbye.", 10, msg_id="message_farewell")
+        mind.update_conversations([make_observation([farewell])])
+        mind.update_events(
+            [
+                MindEvent(
+                    timestamp=10,
+                    event_type=MindEventType.INTERACTION_FINISHED,
+                    payload={"interaction_id": INTERACTION_ID},
+                )
+            ],
+            current_time=10,
+        )
+
+        state = mind.build_pipeline_state(create_blacksmith_observation(simulation_time=10))
+
+        assert [message.message for message in state.conversation_histories[INTERACTION_ID]] == [
+            "Goodbye."
+        ]
+        assert INTERACTION_ID not in mind.conversation_histories
+        assert (
+            mind.build_pipeline_state(
+                create_blacksmith_observation(simulation_time=11)
+            ).conversation_histories
+            == {}
+        )
 
 
 class TestIntraBatchDuplicates:
