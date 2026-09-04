@@ -656,9 +656,34 @@ class PlaceDescriptor(BaseModel):
     anchor: tuple[int, int] = (0, 0)
     #: Chebyshev distance from the observer, in cells.
     distance: int = 0
+    #: Whether this NPC has ever LOOKED INSIDE this place (NPC-1473).
+    #:
+    #: The discriminator for the two fields below, and it exists because no
+    #: value of theirs can carry it: zero providers, no affordances and an age
+    #: of zero are all legitimate readings of a place seen to be bare. The wire
+    #: OMITS ``affords``, ``provider_count`` and ``witnessed_age_minutes``
+    #: entirely when this is false, so their defaults below are never a
+    #: witnessed reading -- read this flag, never their emptiness.
+    #:
+    #: A place merely heard of is unwitnessed. That is not a gap to be filled:
+    #: "I have never looked" and "I looked and it was bare" must produce
+    #: different behaviour, and collapsing them is what the flag prevents.
+    witnessed: bool = False
     #: The dominant interaction names this place affords, capped simulation-side.
+    #: AS LAST WITNESSED and possibly wrong -- see ``witnessed``. At contract
+    #: version 1 this was live ground truth; the v2 bump exists for exactly this
+    #: change of meaning, since the shape did not change.
     affords: list[str] = Field(default_factory=list)
+    #: Provider count AS LAST WITNESSED. See ``affords``.
     provider_count: int = 0
+    #: Game minutes since this NPC last looked inside. Omitted when unwitnessed.
+    #:
+    #: Distinct from ``age_minutes``, which is how long ago the place was
+    #: LEARNED. A place told about last week and never visited has a large
+    #: age and no witnessed age at all; one learned long ago and checked this
+    #: morning has a large age and a small witnessed age. Staleness of BELIEF is
+    #: this field, not that one.
+    witnessed_age_minutes: int = 0
     source: PlaceKnowledgeSource = PlaceKnowledgeSource.VISITED
     #: Who told this NPC, for ``TOLD`` only; the wire omits the key otherwise.
     #: ``source`` is the discriminator, never the emptiness of this string -- but
@@ -712,23 +737,6 @@ class PlaceDescriptor(BaseModel):
         return f"{label} ({', '.join(facts)})"
 
 
-class CurrentPlace(BaseModel):
-    """The ``here`` block: the innermost known zone covering the observer's cell.
-
-    Deliberately thinner than ``PlaceDescriptor`` -- distance, visibility and
-    provenance are all trivial or uninteresting for the ground you are standing
-    on. When this place is also ranked into ``known``, the full descriptor is
-    there; this block exists so "where am I" is answerable without searching the
-    list.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    zone_id: str
-    name: str = ""
-    kind: str = ""
-
-
 class MarkBudgetState(BaseModel):
     """How many places this NPC is currently holding, and the wait for the next.
 
@@ -763,26 +771,41 @@ class MarkBudgetState(BaseModel):
 
 # Place-block wire versions this model set knows how to read. Unknown versions
 # degrade exactly as the goal block's do -- see the validator below.
-KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1})
+# v2 (NPC-1473) is a SEMANTIC bump, not a structural one: at v1 provider_count
+# and affords were ground truth read live, at v2 they are what the NPC last
+# WITNESSED and may be wrong. Nothing about their shape changed, which is
+# exactly why it needed a version -- a v1 reader keeps parsing while quietly
+# meaning something else.
+KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2})
 
 
 class PlaceObservation(BaseModel):
     """The substrate's place knowledge: where you are, what you know, what you hold.
 
-    Wire producer: the simulation's ``place_observation.gd``, which NPC-1299
-    ships along with a "Place block wire contract (v1)" documentation section.
-    WRITTEN AHEAD OF THAT PRODUCER, against its approved specification rather
-    than against shipped code -- see the provenance note on
+    Wire producer: the simulation's ``place_observation.gd``. This model is
+    matched against SHIPPED producer code -- see the provenance note on
     ``PLACE_BLOCK_CONTRACT_SAMPLE`` in
-    ``tests/unit/observations/test_place_observation.py``, which is what
-    re-derives this model once the producer lands. Until then a disagreement
-    between the two repositories is a contract question, not a bug in either.
+    ``tests/unit/observations/test_place_observation.py``, which records exactly
+    what it was re-derived from.
 
-    ``known`` is CAPPED simulation-side and ``known_total`` counts the whole set,
-    so ``known_total > len(known)`` means "you know more places than are listed"
-    -- the distinction between knowing three places and being shown three of
-    thirty. ``here`` and ``target`` are force-included in the ranking when they
-    exist, so a place named in either is also findable in ``known``.
+    It was previously written AHEAD of that producer, against an approved
+    specification, and the two disagreed once the producer landed: this model
+    declared ``here`` / ``known`` / ``target`` and narrowed the first to a
+    three-field object, where the producer emits ``current_place`` /
+    ``known_places`` / ``target_place`` and sends a FULL descriptor for the
+    first. Because this model and ``Observations`` are both ``extra="forbid"``,
+    that did not degrade -- it raised, and the nested failure refused the WHOLE
+    observation. Recorded because the shape recurs: a model written against a
+    specification is a hypothesis about a producer, and only running the two
+    together settles it.
+
+    ``known_places`` is CAPPED simulation-side and ``known_total`` counts the
+    whole set, so ``known_total > len(known_places)`` means "you know more places
+    than are listed" -- the distinction between knowing three places and being
+    shown three of thirty. ``current_place`` and ``target_place`` are
+    force-included in the ranking when they exist, so a place named in either is
+    also findable in ``known_places`` -- and both carry the same
+    ``PlaceDescriptor`` shape that list does, never a narrowed one.
 
     ``extra="forbid"``, matching every ``Goal*`` model and
     ``InventoryObservation``: this block is new, there is no legacy payload to
@@ -793,10 +816,23 @@ class PlaceObservation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     contract_version: int = 1
-    here: CurrentPlace | None = None
-    known: list[PlaceDescriptor] = Field(default_factory=list)
+    # Root key names are the SIMULATION's, not this module's preference. They
+    # were `here` / `known` / `target` while this model was written ahead of its
+    # producer; the producer emits `current_place` / `known_places` /
+    # `target_place`, and with extra="forbid" a mismatch does not degrade -- it
+    # raises, and because Observations is also extra="forbid" the nested error
+    # refuses the WHOLE observation. Every MCP NPC would wait, every cycle.
+    #: A FULL descriptor, not a narrowed one. The producer sends
+    #: ``current_place.to_dict()`` off the same PlaceDescriptor it puts in
+    #: ``known_places`` -- and says so: the current and target places take
+    #: guaranteed slots IN that menu rather than in addition to it. A narrower
+    #: model here (this field was once a three-field ``CurrentPlace``) does not
+    #: merely lose the extra keys: extra="forbid" makes each one an error, and
+    #: the nested failure refuses the whole observation.
+    current_place: PlaceDescriptor | None = None
+    known_places: list[PlaceDescriptor] = Field(default_factory=list)
     known_total: int = 0
-    target: PlaceDescriptor | None = None
+    target_place: PlaceDescriptor | None = None
     mark_budget: MarkBudgetState | None = None
 
     @model_validator(mode="before")
@@ -834,24 +870,26 @@ class PlaceObservation(BaseModel):
         Never raises; this runs on the prompt path.
         """
         lines: list[str] = []
-        here_zone_id = self.here.zone_id if self.here else ""
+        here_zone_id = self.current_place.zone_id if self.current_place else ""
 
-        if self.here:
-            lines.append(f"You are at {self.here.name.strip() or self.here.zone_id}.")
+        if self.current_place:
+            lines.append(
+                f"You are at {self.current_place.name.strip() or self.current_place.zone_id}."
+            )
 
-        if self.known:
-            listed = "; ".join(place.render_summary(here_zone_id) for place in self.known)
+        if self.known_places:
+            listed = "; ".join(place.render_summary(here_zone_id) for place in self.known_places)
             # The count is rendered only when it tells the model something it
             # cannot see: that the list it is reading is a truncation.
             scope = (
-                f" ({len(self.known)} of {self.known_total})"
-                if (self.known_total > len(self.known))
+                f" ({len(self.known_places)} of {self.known_total})"
+                if (self.known_total > len(self.known_places))
                 else ""
             )
             lines.append(f"Places you know{scope}: {listed}")
 
-        if self.target and self.target.zone_id != here_zone_id:
-            label = self.target.name.strip() or self.target.zone_id
+        if self.target_place and self.target_place.zone_id != here_zone_id:
+            label = self.target_place.name.strip() or self.target_place.zone_id
             lines.append(f"Your current goal is aimed at {label}.")
 
         if self.mark_budget:
