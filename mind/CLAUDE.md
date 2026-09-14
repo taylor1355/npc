@@ -121,9 +121,14 @@ a populated buffer.
 - **Importance scoring:** 1-10 scale via LLM evaluation, emitted by reflection
   alongside the chosen action — no separate call
 - **Deduplication:** ID-based filtering in retrieval
-- **Daily buffer:** Consolidates to long-term on demand
+- **Daily buffer:** Reflection stamps each `FormedMemory` with its formation
+  cell and known zone from status; consolidation preserves those stamps in
+  long-term metadata. Missing spatial provenance remains absent. `NewMemory`,
+  the LLM output schema, does not ask the model to invent those fields.
 - **Retrieval scoring:** `memory/retrieval.py` — Park's three terms (relevance,
-  importance, recency) at his published equal weights, over a candidate pool
+  importance, recency) at his published equal weights, plus `SpatialTerm` for
+  formation-zone agreement with the current known zone. Its default weight 0.5
+  is a reasoned policy, not a measured calibration. Scoring uses a candidate pool
   wider than `top_k`. Terms return `None` to abstain when the data is absent,
   and the surviving weights renormalize; a term with no data never votes in
   either direction. Configurable globally, per mind, or per query. Timestamps
@@ -134,7 +139,12 @@ a populated buffer.
   coefficients on unequal ranges rather than equal influence. A score is
   therefore relative to its candidate pool, which is sound because nothing
   compares scores across queries. Measurement:
-  `tests/unit/memory/test_term_spread_measurement.py`
+  `tests/unit/memory/test_term_spread_measurement.py`. This retrieval policy
+  deliberately differs from the simulation's proposed ADR-40 (place-belief
+  posterior): memory ranking retains pool normalization, while place selection
+  uses a posterior and absolute travel utility. See `memory/retrieval.py` and
+  [the simulation boundary](docs/interfaces/simulation_boundary.md) for scope
+  and the required delivery sequence; no deployment is asserted here.
 - **Recency reinforcement:** retrieval pulls a memory's decay anchor toward the
   present via an EMA seeded at creation, so repeatedly-recalled memories stay
   "recent" while a single recall leaves most of a memory's age intact. Park's

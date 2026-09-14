@@ -177,6 +177,15 @@ AGES_IN_MINUTES = [
 ]
 
 
+# The place each memory was formed in, parallel to CORPUS [NPC-1476]. Alternating
+# rather than random so the measurement is deterministic, and only two zones
+# because the spatial term is binary - "formed here" versus "formed anywhere
+# else" - so a third zone would add candidates without adding a value.
+HERE_ZONE = "zone_forge"
+AWAY_ZONE = "zone_market"
+FORMATION_ZONES = [HERE_ZONE if i % 2 == 0 else AWAY_ZONE for i in range(len(CORPUS))]
+
+
 @pytest.fixture(scope="module")
 def measured_stats():
     """Embed the corpus, take the cosine pool, measure each term's raw range."""
@@ -185,8 +194,12 @@ def measured_stats():
     SharedSystemClient.clear_system_cache()
     store = VectorDBMemory(collection_name=f"test_spread_{uuid.uuid4().hex[:12]}")
 
-    for content, importance, age in zip(CORPUS, IMPORTANCES, AGES_IN_MINUTES):
-        store.add_memory(content=content, importance=importance, timestamp=NOW - age)
+    for content, importance, age, zone_id in zip(
+        CORPUS, IMPORTANCES, AGES_IN_MINUTES, FORMATION_ZONES
+    ):
+        store.add_memory(
+            content=content, importance=importance, timestamp=NOW - age, zone_id=zone_id
+        )
 
     # Exactly what search() does: over-fetch by cosine, then score that pool.
     pool_size = candidate_pool_size(top_k=2, collection_count=store.collection.count())
@@ -213,7 +226,7 @@ def measured_stats():
 
     from mind.cognitive_architecture.memory.retrieval import RetrievalContext
 
-    context = RetrievalContext(query=QUERY, current_simulation_time=NOW)
+    context = RetrievalContext(query=QUERY, current_simulation_time=NOW, current_zone_id=HERE_ZONE)
     terms = default_terms()
     stats = term_statistics(collect_raw_scores(candidates, context, terms), terms)
 
@@ -232,7 +245,7 @@ def test_report_realized_term_spreads(measured_stats):
     print(f"query: {QUERY!r}\n")
     print(f"{'term':<12}{'min':>10}{'max':>10}{'spread':>10}{'n':>5}")
     print("-" * 47)
-    for name in ("relevance", "importance", "recency"):
+    for name in ("relevance", "importance", "recency", "spatial"):
         s = stats[name]
         print(f"{name:<12}{s.minimum:>10.4f}{s.maximum:>10.4f}{s.spread:>10.4f}{s.count:>5}")
     print()
@@ -271,3 +284,42 @@ def test_no_term_uses_more_than_its_nominal_range(measured_stats):
     for name in ("relevance", "importance", "recency"):
         assert 0.0 <= stats[name].minimum <= 1.0
         assert 0.0 <= stats[name].maximum <= 1.0
+
+
+def test_the_binary_spatial_term_realizes_the_widest_possible_spread(measured_stats):
+    """**The empirical basis for `DEFAULT_RETRIEVAL_WEIGHT_SPATIAL` being 0.5.**
+
+    The whole argument for min-max plus alpha=1 is that Park's three terms
+    occupy unequal realized bands, so normalizing is what makes equal
+    coefficients mean equal influence. A BINARY term breaks that symmetry from
+    the other end: whenever it is live at all it realizes a spread of exactly
+    1.0 - the widest any term can - so Park's coefficient would hand it more
+    than Park's influence.
+
+    This measures that rather than asserting it in prose. Note what is NOT
+    asserted here: that 0.5 is the correct number. 0.5 is a reasoned starting
+    ratio, and the measurement below is the evidence it is reasoned FROM, not a
+    derivation of it.
+    """
+    stats = measured_stats["stats"]
+    spatial = stats["spatial"]
+
+    assert spatial.spread == pytest.approx(1.0), (
+        f"spatial spread {spatial.spread:.4f} is not 1.0 - either the pool "
+        "landed entirely inside one zone, or the term stopped being binary"
+    )
+    for park_term in ("relevance", "importance", "recency"):
+        assert spatial.spread >= stats[park_term].spread, (
+            f"spatial spread {spatial.spread:.4f} is narrower than "
+            f"{park_term} {stats[park_term].spread:.4f}; the weight rationale "
+            "in constants.py assumes it is the widest"
+        )
+
+
+def test_spatial_scored_the_whole_pool(measured_stats):
+    """Control for the test above: a spread of 1.0 measured over two candidates
+    would be a coincidence rather than a property. Every candidate is stamped,
+    so every candidate must have scored."""
+    stats = measured_stats["stats"]
+
+    assert stats["spatial"].count == measured_stats["pool_size"]

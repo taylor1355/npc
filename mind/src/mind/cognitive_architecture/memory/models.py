@@ -44,6 +44,18 @@ class Memory(BaseModel):
 
     embedding: list[float] | None = None
     location: tuple[int, int] | None = None  # Grid coordinates (x, y)
+
+    # The PLACE the NPC was standing in when this memory formed, as the
+    # simulation's zone id (NPC-1476). None means "unplaced", and that covers
+    # three genuinely different situations that all deserve the same answer:
+    # formed outside any zone, formed on ground the NPC knew no place for, and
+    # written before formation stamping existed. SpatialTerm abstains on all
+    # three rather than scoring them 0.0.
+    #
+    # The id, never the name: names are for humans and are not stable referents,
+    # so storing one would denormalize a value that goes stale on rename.
+    zone_id: str | None = None
+
     tags: list[str] = Field(default_factory=list)
 
     def __str__(self) -> str:
@@ -61,6 +73,9 @@ class Memory(BaseModel):
 
         if self.timestamp is not None:
             parts.append(f"T:{self.timestamp}")
+
+        if self.zone_id is not None:
+            parts.append(f"Z:{self.zone_id}")
 
         if self.location is not None:
             parts.append(f"L:{self.location}")
@@ -103,6 +118,16 @@ class VectorDBMetadata(BaseModel):
 
     location_x: int | None = None
     location_y: int | None = None
+
+    # See Memory.zone_id. Written at FORMATION, from the observation the memory
+    # was formed under - not at consolidation, which sees only whichever cell the
+    # NPC happened to occupy when the day's batch was written (NPC-1476).
+    #
+    # No schema_version bump. An optional-by-absence field needs no migration:
+    # a row written before this reads back None, which is the honest answer
+    # ("unstamped") rather than a fabricated default, and abstains.
+    zone_id: str | None = None
+
     tags: list[str] = Field(default_factory=list)
 
     # Entities this memory is ABOUT. Reserved: nothing writes it yet. It exists

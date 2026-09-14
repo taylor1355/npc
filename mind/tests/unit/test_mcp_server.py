@@ -10,6 +10,41 @@ from mind.constants import DEFAULT_MEMORY_STORAGE_PATH
 from mind.interfaces.mcp.server import MCPServer
 
 
+class OfflineServerLLM:
+    """Construction-only double: server tests stub their decision pipelines."""
+
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self.invocations = 0
+
+    def invoke(self, *args, **kwargs):
+        self.invocations += 1
+        raise AssertionError("server unit test unexpectedly invoked an LLM")
+
+    async def ainvoke(self, *args, **kwargs):
+        self.invocations += 1
+        raise AssertionError("server unit test unexpectedly invoked an LLM")
+
+
+@pytest.fixture(autouse=True)
+def offline_llm_boundary():
+    """Keep orchestration tests offline without replacing real mind/storage code."""
+    clients = []
+
+    def create_client(model_name):
+        client = OfflineServerLLM(model_name)
+        clients.append(client)
+        return client
+
+    with patch("mind.interfaces.mcp.mind.get_llm", side_effect=create_client):
+        yield
+    # Pipeline error handling may catch the exception: teardown still catches
+    # the unexpected call instead of letting an error-response assertion hide it.
+    assert all(client.invocations == 0 for client in clients), (
+        "server unit tests must stub pipeline output before executing a decision"
+    )
+
+
 def parse_response(result):
     """Parse MCP response from TextContent list"""
     return json.loads(result[0].text)

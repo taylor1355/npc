@@ -265,12 +265,41 @@ class MindEvent(BaseModel):
 
 
 class StatusObservation(BaseModel):
-    """Physical and activity state"""
+    """Physical and activity state.
+
+    **The place keys are optional-by-absence, and that is a contract, not a
+    convenience** (NPC-1476). The simulation
+    (``status_observation.gd::get_data``) emits ``current_zone_id`` and
+    ``current_zone_name`` TOGETHER or emits NEITHER; it never sends ``""`` and
+    never sends null. Absence means "the NPC stands on ground it knows no place
+    for", which is a different fact from "a place whose id is empty", and
+    ``SpatialTerm`` abstains on it rather than scoring it.
+
+    The value is BELIEF, not ground truth: the sim filters the zones covering
+    the NPC's cell to the ones in that NPC's own belief store before picking the
+    innermost. An NPC spawned or loaded into a zone without prior knowledge of
+    it correctly reports no place; a restored belief can already know the zone.
+
+    ``current_zone_name`` travels rather than being resolved here on purpose.
+    The mind has no zone registry, and a lookup would be exactly the omniscient
+    path the sim-side filtering exists to close - so the name is only ever the
+    one the sim sent, and only ever alongside the id.
+
+    No ``model_config`` here, so pydantic's default ``extra="ignore"`` applies.
+    That is deliberate (NPC-1116) and it is what makes the sim safe to ship
+    first: a sim that adds nested status keys ahead of this model is silently
+    tolerated. Only the root ``Observation`` forbids extras.
+    """
 
     position: tuple[int, int]
     movement_locked: bool = False
     current_interaction: dict = Field(default_factory=dict)
     activity_state: dict = Field(default_factory=dict)
+
+    # Omitted together by the producer; see the class docstring. None means "no
+    # place known here" - never confuse it with an empty-string id.
+    current_zone_id: str | None = None
+    current_zone_name: str | None = None
 
     def is_interacting(self) -> bool:
         """Ground "am I in an interaction?" in BOTH authoritative observation signals.
@@ -1246,7 +1275,13 @@ class Observation(BaseModel):
         parts = []
 
         if self.status:
-            parts.append(f"Position: {self.status.position}")
+            # Place first when the NPC knows one - a mind reasons about "the
+            # berry grounds", not about a pair of coordinates. The cell is not
+            # dropped: travel and distance reasoning still read it.
+            if self.status.current_zone_name:
+                parts.append(f"Position: {self.status.current_zone_name} {self.status.position}")
+            else:
+                parts.append(f"Position: {self.status.position}")
             parts.append(f"Movement locked: {self.status.movement_locked}")
 
             # Show current interaction if active

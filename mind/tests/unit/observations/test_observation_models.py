@@ -1065,3 +1065,36 @@ class TestObservationRootForbid:
         original = create_carrying_observation()
 
         assert Observation.model_validate(original.model_dump()).inventory is not None
+
+
+class TestCurrentPlaceStatusContract:
+    def test_simulation_status_pair_parses_and_renders_the_supplied_name(self):
+        observation = Observation.model_validate(
+            {
+                "entity_id": "npc",
+                "current_simulation_time": 10,
+                "status": {
+                    "position": [3, 7],
+                    "movement_locked": False,
+                    "current_zone_id": "zone_opaque_41",
+                    "current_zone_name": "Old Orchard",
+                },
+            }
+        )
+        assert observation.status.current_zone_id == "zone_opaque_41"
+        assert observation.status.current_zone_name == "Old Orchard"
+        assert "Position: Old Orchard (3, 7)" in str(observation)
+        assert "zone_opaque_41" not in str(observation)
+
+    def test_status_without_a_known_place_renders_only_the_supplied_cell(self):
+        observation = Observation.model_validate(
+            {
+                "entity_id": "npc",
+                "current_simulation_time": 10,
+                "status": {"position": [0, 0], "movement_locked": False},
+            }
+        )
+        assert observation.status.current_zone_id is None
+        assert observation.status.current_zone_name is None
+        assert "Position: (0, 0)" in str(observation)
+        assert "None" not in str(observation)

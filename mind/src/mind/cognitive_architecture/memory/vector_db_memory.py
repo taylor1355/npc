@@ -66,6 +66,13 @@ class VectorDBQuery(BaseModel):
     weights: RetrievalWeights | None = None
 
     current_simulation_time: int | None = None
+
+    # The place the NPC is standing in RIGHT NOW, for SpatialTerm. None means
+    # "the NPC knows no place here", which is an abstention rather than a filter:
+    # nothing is excluded from the pool by it, the spatial dimension simply has
+    # nothing to say. Not a tags-style filter - see SpatialTerm.
+    current_zone_id: str | None = None
+
     # Filter to memories with ANY of these tags. Storage layer only: nothing in the
     # cognitive pipeline sets this yet, and no node passes tags to add_memory, so
     # every stored memory is currently untagged. Producer/consumer wiring is NPC-1013.
@@ -234,6 +241,7 @@ class VectorDBMemory:
         importance: ImportanceScore | None = None,
         timestamp: int | None = None,
         location: tuple[int, int] | None = None,
+        zone_id: str | None = None,
         tags: list[str] | None = None,
         subject_ids: list[str] | None = None,
     ) -> Memory:
@@ -250,6 +258,11 @@ class VectorDBMemory:
                 (SimulationTime.get_elapsed_game_minutes). None means unknown;
                 do not substitute 0, which is a valid reading.
             location: Grid coordinates (x, y)
+            zone_id: The place the memory was FORMED in, as a simulation zone
+                id. None means unplaced - formed outside any zone, or on ground
+                the NPC knew no place for - and SpatialTerm abstains on it. Pass
+                None rather than "" or a sentinel id; the key is dropped from the
+                stored metadata entirely so the absence survives a round trip.
             tags: Categorical tags for filtering
             subject_ids: Entities this memory is about. Reserved for NPC-401 /
                 NPC-411; no production caller sets it yet.
@@ -267,6 +280,7 @@ class VectorDBMemory:
             timestamp=timestamp,
             importance=importance,
             location=location,
+            zone_id=zone_id,
             tags=tag_list,
         )
 
@@ -279,6 +293,7 @@ class VectorDBMemory:
             timestamp=timestamp,
             location_x=location[0] if location else None,
             location_y=location[1] if location else None,
+            zone_id=zone_id,
             tags=tag_list,
             subject_ids=subject_id_list,
             # The EMA is seeded at creation; retrieval pulls it toward the
@@ -364,7 +379,9 @@ class VectorDBMemory:
         # All scoring arithmetic lives in retrieval.py, which imports no storage
         # backend - that is what makes the formula testable as a pure function.
         context = RetrievalContext(
-            query=query.query, current_simulation_time=query.current_simulation_time
+            query=query.query,
+            current_simulation_time=query.current_simulation_time,
+            current_zone_id=query.current_zone_id,
         )
         ranked = rank(
             candidates,
@@ -385,6 +402,7 @@ class VectorDBMemory:
                 timestamp=candidate.metadata.timestamp,
                 importance=candidate.metadata.importance,
                 location=candidate.metadata.get_location(),
+                zone_id=candidate.metadata.zone_id,
                 tags=candidate.metadata.tags,
             )
             for _, candidate in ranked

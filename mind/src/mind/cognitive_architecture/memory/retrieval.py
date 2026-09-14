@@ -1,4 +1,4 @@
-"""Generative-Agents retrieval scoring: relevance + importance + recency.
+"""Memory retrieval: Park relevance/importance/recency plus spatial context.
 
 Implements the retrieval function of Park et al. 2023, "Generative Agents:
 Interactive Simulacra of Human Behavior" (arXiv:2304.03442) section 4:
@@ -48,7 +48,7 @@ Three consequences, none of them defects:
 - **Abstention composes with it** by normalizing each term over the candidates
   that did not abstain on it. See `term_statistics`.
 
-One deliberate departure from the paper remains:
+Recency reinforcement is a deliberate departure from the paper:
 
 1. **Recency decays from a reinforced anchor, not from a single fixed event.**
    Park decays from the moment a memory was last retrieved, which is lossy: one
@@ -65,6 +65,23 @@ because most of what is queued behind this (relationship boosting [NPC-401],
 per-target stance [NPC-411], mind-written trigger boosting [NPC-406]) is an
 additional term or a per-memory modifier. A new term is a new ScoringTerm plus a
 weight field; the combiner never changes.
+
+`SpatialTerm` [NPC-1476] is the first term added under that shape, and it
+exercised it exactly as designed: a class, a `RetrievalWeights` field, a
+`RetrievalContext` slot, an entry in `default_terms()`. `combined_score`,
+`term_statistics`, `collect_raw_scores`, `score_pool`, `rank` and `TermStats` are
+untouched by it. It is also the first term that is not Park's, so unlike the
+other three its weight is argued rather than cited - see
+`DEFAULT_RETRIEVAL_WEIGHT_SPATIAL`.
+
+**Deliberate divergence from simulation place selection.** Proposed ADR-40
+("belief as a posterior", npc-simulation/docs/adrs/2026-09-belief-as-a-posterior.md)
+chooses a Gamma-Poisson posterior and absolute travel utility for place decisions.
+This module retains pool-normalized weighted retrieval: semantic relevance,
+importance and recency have incommensurable realized ranges. Retrieving a memory
+and deciding whether a place is worth visiting answer different questions; the
+simulation's posterior policy does not replace this term registry. This records
+the chosen design boundary, not a claim that either change is deployed.
 """
 
 from typing import Protocol, runtime_checkable
@@ -77,6 +94,7 @@ from mind.constants import (
     DEFAULT_RETRIEVAL_WEIGHT_IMPORTANCE,
     DEFAULT_RETRIEVAL_WEIGHT_RECENCY,
     DEFAULT_RETRIEVAL_WEIGHT_RELEVANCE,
+    DEFAULT_RETRIEVAL_WEIGHT_SPATIAL,
     GAME_MINUTES_PER_HOUR,
     IMPORTANCE_SCALE_MAX,
     MIN_CANDIDATE_POOL,
@@ -113,6 +131,11 @@ class RetrievalContext(BaseModel):
 
     query: str
     current_simulation_time: int | None = None
+
+    # The place the NPC is standing in right now, as a simulation zone id, from
+    # StatusObservation.current_zone_id. None means the NPC knows no place here -
+    # which SpatialTerm treats as an abstention, not as a place called "nowhere".
+    current_zone_id: str | None = None
 
 
 class ScoreBreakdown(BaseModel):
@@ -249,6 +272,39 @@ class RecencyTerm:
         return decay_base ** (elapsed_minutes / GAME_MINUTES_PER_HOUR)
 
 
+class SpatialTerm:
+    """Memories formed in the place the NPC is standing in retrieve hotter.
+
+    **Binary by construction, and that is a claim about places rather than a
+    simplification.** A memory was formed here or it was not; there is no
+    meaningful ordering between "formed at the pond" and "formed in the meadow"
+    when you are standing in the berry grounds. A graded version would need a
+    metric over places that nothing in the design has - and the two ids are
+    equally not-here.
+
+    **Abstains rather than scoring 0.0 whenever EITHER side is unknown**: the NPC
+    stands on ground it knows no place for, or the memory carries no formation
+    zone (every memory written before NPC-1476, and every memory formed outside
+    any zone). A 0.0 there would rank a memory last on a property nobody
+    measured - the same default-impersonating-data failure the whole abstention
+    doctrine in this module exists to prevent, and the reason `ImportanceTerm`
+    does not vote a midpoint for an unrated memory.
+
+    Note the asymmetry with a 0.0 that IS returned: "formed somewhere else" is a
+    measurement. The place is known on both sides and they differ. That is a real
+    zero, and it is what lets the term discriminate at all.
+    """
+
+    name = "spatial"
+
+    def score(self, candidate: ScoredCandidate, context: RetrievalContext) -> float | None:
+        here = context.current_zone_id
+        formed = candidate.metadata.zone_id
+        if not here or not formed:
+            return None
+        return 1.0 if formed == here else 0.0
+
+
 def reinforced_time(previous_anchor: float, now: float, alpha: float) -> float:
     """One retrieval's exponential-moving-average update of a memory's anchor.
 
@@ -317,10 +373,16 @@ class RetrievalWeights(BaseModel):
     relevance: float = Field(default=DEFAULT_RETRIEVAL_WEIGHT_RELEVANCE, ge=0.0)
     importance: float = Field(default=DEFAULT_RETRIEVAL_WEIGHT_IMPORTANCE, ge=0.0)
     recency: float = Field(default=DEFAULT_RETRIEVAL_WEIGHT_RECENCY, ge=0.0)
+    spatial: float = Field(default=DEFAULT_RETRIEVAL_WEIGHT_SPATIAL, ge=0.0)
 
     @model_validator(mode="after")
     def _reject_degenerate(self) -> "RetrievalWeights":
-        if self.relevance + self.importance + self.recency <= 0.0:
+        # Every weight, not just Park's three: a place-only configuration
+        # (relevance=importance=recency=0, spatial=1) is legitimate, and omitting
+        # spatial from this sum would reject it as degenerate [NPC-1476]. Any
+        # term added later must be added here too, or it becomes un-configurable
+        # on its own.
+        if self.relevance + self.importance + self.recency + self.spatial <= 0.0:
             raise ValueError(
                 "at least one retrieval weight must be greater than zero; "
                 "an all-zero set scores every memory identically"
@@ -344,8 +406,14 @@ class RetrievalWeights(BaseModel):
 
 
 def default_terms() -> list[ScoringTerm]:
-    """The three Park terms, in a stable order."""
-    return [RelevanceTerm(), ImportanceTerm(), RecencyTerm()]
+    """The three Park terms plus the spatial term, in a stable order.
+
+    SpatialTerm goes last so the Park three keep the order they have always had.
+    Order is not semantically load-bearing - `combined_score` sums - but it is
+    the order raw/normalized contribution dicts iterate in, which several tests
+    and the spread measurement read.
+    """
+    return [RelevanceTerm(), ImportanceTerm(), RecencyTerm(), SpatialTerm()]
 
 
 class TermStats(BaseModel):

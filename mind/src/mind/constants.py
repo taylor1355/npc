@@ -46,6 +46,21 @@ DEFAULT_RETRIEVAL_WEIGHT_RELEVANCE = 1.0
 DEFAULT_RETRIEVAL_WEIGHT_IMPORTANCE = 1.0
 DEFAULT_RETRIEVAL_WEIGHT_RECENCY = 1.0
 
+# The spatial term is ours, not Park's, so it gets no citable number and must
+# argue for its own [NPC-1476]. It is 0.5 rather than 1.0 because the module's
+# own thesis about min-max normalization decides it: min-max and alpha=1 are a
+# package precisely BECAUSE the three Park terms have unequal realized spreads,
+# and normalizing puts them on equal footing so equal coefficients mean equal
+# influence. A BINARY term breaks that symmetry from the other side - whenever it
+# is live at all it realizes a spread of exactly 1.0, the widest possible - so
+# giving it Park's coefficient would hand it MORE than Park's influence.
+#
+# This is a reasoned starting ratio, not a measured one, and it is deliberately
+# not asserted as correct anywhere. test_term_spread_measurement.py measures
+# spatial's realized spread alongside the other three; the number should be taken
+# from that measurement rather than defended here.
+DEFAULT_RETRIEVAL_WEIGHT_SPATIAL = 0.5
+
 # Park's exponential forgetting curve, per GAME hour. Half-life is
 # log(0.5)/log(0.995) ~= 138 game hours ~= 5.8 game days.
 DEFAULT_RECENCY_DECAY_PER_GAME_HOUR = 0.995

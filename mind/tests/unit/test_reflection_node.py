@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage
 from mind.cognitive_architecture.actions import Action, ActionType, AvailableAction
 from mind.cognitive_architecture.memory import Memory
 from mind.cognitive_architecture.nodes.formatting import format_goal_options, format_substrate_goal
+from mind.cognitive_architecture.nodes.reflection.models import ReflectionOutput
 from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from mind.cognitive_architecture.observations import (
     ConversationMessage,
@@ -27,7 +28,11 @@ from mind.cognitive_architecture.observations import (
     StatusObservation,
 )
 from mind.cognitive_architecture.state import PipelineState
-from mind.cognitive_architecture.working_memory import NewMemory, WorkingMemory
+from mind.cognitive_architecture.working_memory import (
+    FormedMemory,
+    NewMemory,
+    WorkingMemory,
+)
 from tests.fixtures.observations import wire_current_interaction, wire_property_spec
 
 VALID_RESPONSE = """{
@@ -150,16 +155,26 @@ class TestReflectionNode:
 
     async def test_state_effects_match_the_two_node_sequence(self, node, mock_llm, basic_state):
         """One merged response produces the union of both old nodes' state writes"""
-        existing_memory = NewMemory(content="Previous event", importance=5.0)
+        existing_memory = FormedMemory(content="Previous event", importance=5.0)
         basic_state.daily_memories.append(existing_memory)
 
         result = await node.process(basic_state)
 
         # cognitive_update's writes: working memory replaced, daily extended
         assert result.working_memory.situation_assessment == "Working on sword commission"
+        # The appended entry is a FormedMemory carrying the circumstances of the
+        # observation it was formed under [NPC-1476]. `basic_state`'s status has
+        # a position but no place, so the position is stamped and the zone is
+        # None - the two fields are independent. The stamping itself is pinned by
+        # TestFormationStamping below.
         assert result.daily_memories == [
             existing_memory,
-            NewMemory(content="Started sword commission", importance=7.0),
+            FormedMemory(
+                content="Started sword commission",
+                importance=7.0,
+                formed_at_position=(5, 10),
+                formed_in_zone_id=None,
+            ),
         ]
         # action_selection's writes: chosen action + ACTION_CHOSEN event
         assert result.chosen_action.action == ActionType.WAIT
@@ -832,3 +847,117 @@ class TestReflectionGoalOptions:
         assert result.chosen_action.action == ActionType.WAIT
         assert result.chosen_action.selected_option_id is None
         assert result.chosen_action.selection_rationale is None
+
+
+class TestFormationStamping:
+    """Memories carry the circumstances they were FORMED under [NPC-1476]."""
+
+    @pytest.fixture
+    def mock_llm(self):
+        return make_mock_llm()
+
+    @pytest.fixture
+    def node(self, mock_llm):
+        return ReflectionNode(mock_llm)
+
+    def _state(self, position, zone_id, zone_name):
+        return PipelineState(
+            observation=Observation(
+                entity_id="test_npc",
+                current_simulation_time=100,
+                status=StatusObservation(
+                    position=position,
+                    movement_locked=False,
+                    current_zone_id=zone_id,
+                    current_zone_name=zone_name,
+                ),
+            ),
+            working_memory=WorkingMemory(),
+            available_actions=[AvailableAction(name="wait", description="Wait and observe")],
+        )
+
+    async def test_each_memory_is_stamped_with_the_observation_it_was_formed_under(self, node):
+        """THE FORMATION-VS-CONSOLIDATION FALSIFIER, from the formation side.
+
+        Two cycles, two places. If circumstances were recorded anywhere but at
+        formation, both memories would carry the same stamp - which is exactly
+        what the pre-NPC-1476 consolidation path produced for a whole day's
+        batch. Red before the change, because nothing was stamped at all and the
+        two would be equal at None.
+        """
+        morning = await node.process(self._state((1, 2), "zone_market", "the Market"))
+        afternoon = await node.process(self._state((30, 40), "zone_forge", "the Forge"))
+
+        first = morning.daily_memories[-1]
+        second = afternoon.daily_memories[-1]
+
+        assert (first.formed_at_position, first.formed_in_zone_id) == ((1, 2), "zone_market")
+        assert (second.formed_at_position, second.formed_in_zone_id) == ((30, 40), "zone_forge")
+        assert first.formed_in_zone_id != second.formed_in_zone_id
+
+    async def test_a_memory_formed_outside_any_zone_carries_no_zone(self, node):
+        """Absent place keys become None, never "" and never a sentinel zone.
+
+        The position is still stamped - "I was at this cell" remains true even
+        where the NPC knows no place - so this also pins that the two fields are
+        independent once they reach the mind.
+        """
+        result = await node.process(self._state((7, 8), None, None))
+
+        formed = result.daily_memories[-1]
+        assert formed.formed_in_zone_id is None
+        assert formed.formed_at_position == (7, 8)
+
+    async def test_a_memory_formed_without_a_status_block_is_unstamped(self, node):
+        """An entity whose observation carries no status at all."""
+        state = PipelineState(
+            observation=Observation(entity_id="test_npc", current_simulation_time=100),
+            working_memory=WorkingMemory(),
+            available_actions=[AvailableAction(name="wait", description="Wait and observe")],
+        )
+
+        result = await node.process(state)
+
+        formed = result.daily_memories[-1]
+        assert formed.formed_at_position is None
+        assert formed.formed_in_zone_id is None
+
+
+class TestReflectionOutputSchemaExcludesPlace:
+    """The LLM must never be ASKED for a place [NPC-1476].
+
+    `ReflectionOutput.new_memories` feeds `PydanticOutputParser`, whose
+    `get_format_instructions()` derives the JSON schema shown in the prompt. A
+    zone field on `NewMemory` would therefore be a field the model is invited to
+    fill, and a fabricated zone id is strictly worse than none: it arrives with
+    the model's confidence and nothing downstream can tell it from a real
+    reading. The stamps live on `FormedMemory`, which the substrate-facing code
+    attaches - never the model.
+    """
+
+    def test_new_memory_declares_only_content_and_importance(self):
+        assert set(NewMemory.model_fields) == {"content", "importance"}
+
+    def test_reflection_output_schema_declares_no_zone_field(self):
+        """Scoped to the MEMORY sub-schema, deliberately.
+
+        A whole-schema substring search for "zone" cannot pass and never could:
+        `ActionType` legitimately contains `mark_zone`, so the naive assertion is
+        red against correct code for a reason that has nothing to do with what it
+        is guarding. What matters is that no field the model fills for a MEMORY
+        carries place vocabulary.
+        """
+        schema = ReflectionOutput.model_json_schema()
+        new_memory_schema = schema["$defs"]["NewMemory"]
+
+        assert set(new_memory_schema["properties"]) == {"content", "importance"}
+        assert "zone" not in str(new_memory_schema).lower()
+        # No formation stamp may leak into the model's output schema under any
+        # name, whether or not it happens to spell "zone".
+        assert "formed_" not in str(schema).lower()
+
+    def test_formed_memory_is_not_what_the_parser_sees(self):
+        """Control: FormedMemory DOES carry the fields, so the assertion above
+        is about the output model specifically rather than being trivially true
+        of every model in the module."""
+        assert "formed_in_zone_id" in FormedMemory.model_fields
