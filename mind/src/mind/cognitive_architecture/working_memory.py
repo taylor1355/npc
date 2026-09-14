@@ -6,7 +6,7 @@ them (pipeline state, the MCP wire models, the Mind runtime), so they live at
 the architecture level rather than inside any single node package.
 
 FormedMemory is NewMemory plus the circumstances it was formed under. The split
-is deliberate and is explained on the class: NewMemory is the LLM'''s output
+is deliberate and is explained on the class: NewMemory is the LLM's output
 schema, so anything added there is something the model is asked to produce.
 """
 
