@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from .actions import Action, AvailableAction
 from .memory import Memory
 from .observations import ConversationMessage, MindEvent, Observation
-from .working_memory import NewMemory, WorkingMemory
+from .working_memory import FormedMemory, WorkingMemory
 
 
 def merge_dicts(left: dict, right: dict) -> dict:
@@ -100,8 +100,12 @@ class PipelineState(BaseModel):
     # Pending incoming interaction bids (managed by Mind, passed for action generation)
     pending_incoming_bids: dict[str, MindEvent] = Field(default_factory=dict)
 
-    # Daily memory buffer (cleared during sleep/consolidation)
-    daily_memories: list[NewMemory] = Field(default_factory=list)
+    # Daily memory buffer (cleared during sleep/consolidation).
+    #
+    # FormedMemory, not NewMemory: consolidation reads each memory's OWN
+    # formation stamp rather than the observation it happens to run under, so
+    # the stamp has to survive in the buffer (NPC-1476).
+    daily_memories: list[FormedMemory] = Field(default_factory=list)
 
     # Output
     chosen_action: Action | None = None

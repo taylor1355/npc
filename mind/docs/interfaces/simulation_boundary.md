@@ -46,6 +46,67 @@ extends the base `entity_controller.gd::get_current_state_observation`.
 The observation types themselves are the simulation's `src/minds/observations/`
 directory — read them there rather than from a list here.
 
+### The status block's place keys are optional-by-absence
+
+`status.current_zone_id` and `status.current_zone_name` name the place the NPC is
+standing in ([NPC-1476]). Three properties, all of them contract:
+
+- **Both keys travel or NEITHER does.** `status_observation.gd::get_data` omits
+  the pair when there is no place; it never sends `""` and never sends null.
+  Absence means *"the NPC stands on ground it knows no place for"*, which is a
+  different fact from an empty id, and `SpatialTerm` abstains on it rather than
+  scoring it. Read them with a presence check, never by comparing against `""`.
+- **The value is belief, not ground truth.** The simulation filters the zones
+  covering the NPC's cell to those in that NPC's own belief store *before*
+  taking the innermost (`substrate_component.gd::get_current_place`). An NPC
+  spawned or loaded into a zone without prior knowledge of it correctly reports
+  no place; a restored belief can already know the zone.
+- **Never re-resolve the name.** It arrives with the id precisely so this server
+  does not look one up. There is no zone registry here, and inventing a lookup
+  would be the omniscient path the sim-side filtering exists to close.
+
+**Transport compatibility.** These are fields inside an *existing* block, not a
+new root key, so the "declare here first, then deploy" rule below does not bind
+them: `StatusObservation` keeps pydantic's default `ignore`, so a simulation that
+ships them ahead of this server is silently tolerated, and this server reading an
+older simulation gets `None`. Both orderings are safe for *breakage*. What is not
+safe is assuming the mind-side consumers do anything before the simulation ships:
+without a supplied known-zone stamp, the spatial term abstains.
+
+### Formation provenance and memory retrieval
+
+`ReflectionNode` stamps each LLM-produced `NewMemory` into a `FormedMemory`
+using the current status cell and known zone. The LLM output schema has no
+formation fields. `MemoryConsolidationNode` passes each memory's own stamps to
+`VectorDBMemory.add_memory`; it does not substitute the location of the later
+consolidation call. Optional metadata omits an unknown zone, and retrieval
+reconstructs that absence as `None`. The explicit write timestamp remains a
+separate consolidation argument; these fields add spatial provenance.
+
+`MemoryRetrievalNode` passes the current status zone through `VectorDBQuery` to
+`RetrievalContext`. `SpatialTerm` compares that zone with each memory's formation
+zone: same place is 1, another place is 0, and either side unknown abstains. This
+is a scoring term, not a filter on the candidate pool. Its weight of 0.5 is a
+reasoned policy; realized-spread measurements belong with their recorded run
+evidence, not an assertion that this value has been behaviorally calibrated.
+
+The weighted, pool-normalized retrieval scorer remains distinct from the
+simulation's proposed ADR-40 (belief as a posterior). Place selection models
+offering uncertainty and absolute travel utility; memory retrieval combines
+terms whose realized ranges differ. The shared contract here is the supplied
+spatial provenance, not identical scoring arithmetic.
+
+### Required delivery sequence for place-stamped memories
+
+NPC-1476 (place-stamped memories) retains the approved sequence: simulation PR,
+then simulation merge and server deployment, then the mind PR. Nested-key
+compatibility does not waive that sequence. The delivery record must identify
+the merged simulation revision, deployed server revision, and an observed
+status payload carrying the paired place keys before reporting the spatial
+consumer as exercised. Retain formation/storage/retrieval evidence from that
+state; source presence and older test results do not establish deployment.
+This document specifies the contract and does not report those steps complete.
+
 ## Vocabulary this server must not hardcode
 
 - **Drive names** — `needs.gd::Need`, spelled by `needs.gd::get_display_name`.

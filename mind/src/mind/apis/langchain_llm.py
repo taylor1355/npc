@@ -3,7 +3,6 @@
 from langchain_openai import ChatOpenAI
 
 from mind import constants
-from mind.project_config import OPENROUTER_API_KEY
 
 
 class LangChainModel:
@@ -45,6 +44,9 @@ def get_llm(model: str, temperature: float = 0) -> ChatOpenAI:
         >>> llm = get_llm(LangChainModel.CLAUDE_SONNET)
         >>> response = llm.invoke("Hello!")
     """
+    # Pure cache-policy consumers must not load credentials; real construction still does.
+    from mind.project_config import OPENROUTER_API_KEY
+
     return ChatOpenAI(
         model=model,
         openai_api_key=OPENROUTER_API_KEY,

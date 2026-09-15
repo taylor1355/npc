@@ -13,7 +13,7 @@ from mind.cognitive_architecture.observations import (
 )
 from mind.cognitive_architecture.pipeline import CognitivePipeline
 from mind.cognitive_architecture.state import PipelineState
-from mind.cognitive_architecture.working_memory import NewMemory, WorkingMemory
+from mind.cognitive_architecture.working_memory import FormedMemory, WorkingMemory
 from mind.interfaces.mcp.models import MindConfig
 from mind.logging_config import get_logger
 
@@ -41,7 +41,10 @@ class Mind:
     # variant, so this is the requested model, not necessarily the served one.
     llm_model: str
     personality_dimensions: dict[str, float] = field(default_factory=dict)
-    daily_memories: list[NewMemory] = field(default_factory=list)
+    # FormedMemory: each entry carries the place and cell it was formed at, so
+    # consolidation never has to guess them from whatever observation it runs
+    # under (NPC-1476).
+    daily_memories: list[FormedMemory] = field(default_factory=list)
 
     # Conversation history aggregation (keyed by interaction_id)
     conversation_histories: dict[str, list[ConversationMessage]] = field(default_factory=dict)

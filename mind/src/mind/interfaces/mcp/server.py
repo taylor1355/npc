@@ -533,11 +533,14 @@ class MCPServer:
                     "timestamp and will abstain on recency rather than claim a false one."
                 )
 
-            # Carrier state for the consolidation node. Its observation supplies
-            # only the location; the memory timestamp is passed explicitly, since
-            # this call has no observation of its own to read one from.
-            # TODO: track the last observed location too, so consolidated memories
-            # are placed as well as timed.
+            # Carrier state for the consolidation node. PipelineState requires an
+            # observation, and this call has none of its own - so this one is a
+            # STRUCTURAL placeholder and nothing is read from it. The memory
+            # timestamp is passed explicitly to the node, and place and cell now
+            # ride on each memory's own formation stamp (NPC-1476), which is what
+            # retired the "track the last observed location too" TODO that stood
+            # here: there is no last observed location to track, because the
+            # circumstances are recorded when the memory forms.
             dummy_obs = Observation(
                 entity_id=mind.entity_id,
                 current_simulation_time=write_timestamp if write_timestamp is not None else 0,

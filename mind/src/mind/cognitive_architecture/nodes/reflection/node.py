@@ -29,7 +29,11 @@ from mind.cognitive_architecture.nodes.formatting import (
 )
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.state import PipelineState
-from mind.cognitive_architecture.working_memory import NewMemory, WorkingMemory
+from mind.cognitive_architecture.working_memory import (
+    FormedMemory,
+    NewMemory,
+    WorkingMemory,
+)
 from mind.knowledge import KnowledgeBase, KnowledgeFile
 from mind.logging_config import get_logger
 
@@ -136,8 +140,16 @@ class ReflectionNode(LLMNode):
         # Update state with new working memory
         state.working_memory = output.updated_working_memory
 
-        # Add new memories to daily buffer
-        state.daily_memories.extend(output.new_memories)
+        # Add new memories to daily buffer, stamped with the circumstances they
+        # were FORMED under (NPC-1476). This is the single append site - the
+        # _salvage path flows through this same line - and the observation here
+        # is live and fully populated, which is exactly what consolidation
+        # cannot say for itself a whole day later.
+        # PipelineState.observation is a required field; only `status` inside it
+        # is optional, and FormedMemory.stamp is what handles that.
+        state.daily_memories.extend(
+            FormedMemory.stamp(memory, state.observation.status) for memory in output.new_memories
+        )
 
         state.chosen_action = output.chosen_action
 

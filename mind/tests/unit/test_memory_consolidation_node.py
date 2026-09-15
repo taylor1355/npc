@@ -7,7 +7,7 @@ import pytest
 from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.state import PipelineState
-from mind.cognitive_architecture.working_memory import NewMemory
+from mind.cognitive_architecture.working_memory import FormedMemory
 
 
 @pytest.mark.asyncio
@@ -27,17 +27,45 @@ class TestMemoryConsolidationNode:
 
     @pytest.fixture
     def basic_state(self):
-        """Create a basic pipeline state with daily memories"""
+        """A pipeline state whose per-memory stamps CONTRADICT its observation.
+
+        The observation says the NPC is at (10, 15) in zone_forge. Each memory
+        says it was formed somewhere else. That disagreement is deliberate and is
+        what makes the location assertions below falsifiable: a node that read
+        circumstances off the observation - the pre-NPC-1476 behaviour - would
+        write (10, 15) three times and fail, rather than passing by coincidence
+        because both sources happened to agree.
+        """
         return PipelineState(
             observation=Observation(
                 entity_id="test_npc",
                 current_simulation_time=1500,
-                status=StatusObservation(position=(10, 15), movement_locked=False),
+                status=StatusObservation(
+                    position=(10, 15),
+                    movement_locked=False,
+                    current_zone_id="zone_forge",
+                    current_zone_name="the Forge",
+                ),
             ),
             daily_memories=[
-                NewMemory(content="Forged a ceremonial blade", importance=8.0),
-                NewMemory(content="Customer was very pleased", importance=7.5),
-                NewMemory(content="Learned new tempering technique", importance=9.0),
+                FormedMemory(
+                    content="Forged a ceremonial blade",
+                    importance=8.0,
+                    formed_at_position=(1, 1),
+                    formed_in_zone_id="zone_smithy",
+                ),
+                FormedMemory(
+                    content="Customer was very pleased",
+                    importance=7.5,
+                    formed_at_position=(2, 2),
+                    formed_in_zone_id="zone_market",
+                ),
+                FormedMemory(
+                    content="Learned new tempering technique",
+                    importance=9.0,
+                    formed_at_position=(3, 3),
+                    formed_in_zone_id="zone_library",
+                ),
             ],
         )
 
@@ -119,30 +147,73 @@ class TestMemoryConsolidationNode:
         for call in mock_memory_store.add_memory.call_args_list:
             assert call.kwargs["timestamp"] == 9999
 
-    async def test_includes_location_from_observation(self, node, mock_memory_store, basic_state):
-        """Should include location from observation status"""
+    async def test_consolidation_uses_each_memorys_own_stamp_not_the_batchs_observation(
+        self, node, mock_memory_store, basic_state
+    ):
+        """THE FORMATION-VS-CONSOLIDATION FALSIFIER [NPC-1476].
+
+        Consolidation runs once a day over a whole batch. Reading circumstances
+        off `state.observation` here stamped every memory of the day with
+        whichever cell the NPC happened to occupy when the batch was written - so
+        a morning at the market and an afternoon at the forge both recorded the
+        same place, and the record was wrong for all but one of them.
+
+        The fixture's observation deliberately disagrees with all three memories
+        (see `basic_state`), so the pre-change behaviour writes (10, 15) /
+        "zone_forge" three times and this goes red.
+        """
         await node.process(basic_state)
 
-        # All calls should have the location
-        for call in mock_memory_store.add_memory.call_args_list:
-            assert call.kwargs["location"] == (10, 15)
+        calls = mock_memory_store.add_memory.call_args_list
+        assert [c.kwargs["location"] for c in calls] == [(1, 1), (2, 2), (3, 3)]
+        assert [c.kwargs["zone_id"] for c in calls] == [
+            "zone_smithy",
+            "zone_market",
+            "zone_library",
+        ]
 
-    async def test_handles_missing_location(self, node, mock_memory_store):
-        """Should handle observations without status/position"""
+    async def test_the_observations_own_place_never_reaches_the_store(
+        self, node, mock_memory_store, basic_state
+    ):
+        """The negative half of the test above, stated separately.
+
+        Asserting only that the right values arrive leaves open that the wrong
+        ones arrive too, under some other keyword. Nothing from the observation
+        may appear at all.
+        """
+        await node.process(basic_state)
+
+        for call in mock_memory_store.add_memory.call_args_list:
+            assert call.kwargs["location"] != (10, 15)
+            assert call.kwargs["zone_id"] != "zone_forge"
+
+    async def test_an_unstamped_memory_is_written_unplaced(self, node, mock_memory_store):
+        """A memory formed with no status, or outside any known place.
+
+        Both reach the store as None rather than as a fabricated origin or an
+        empty-string zone, so the retrieval terms abstain on them. The
+        observation here still carries a full status, which is the point: even
+        with a place available to borrow, the node must not borrow it.
+        """
         state = PipelineState(
             observation=Observation(
                 entity_id="test_npc",
                 current_simulation_time=1500,
-                status=None,  # No status
+                status=StatusObservation(
+                    position=(10, 15),
+                    movement_locked=False,
+                    current_zone_id="zone_forge",
+                    current_zone_name="the Forge",
+                ),
             ),
-            daily_memories=[NewMemory(content="Test memory", importance=5.0)],
+            daily_memories=[FormedMemory(content="Test memory", importance=5.0)],
         )
 
         await node.process(state)
 
-        # Should call with None location
         call = mock_memory_store.add_memory.call_args
         assert call.kwargs["location"] is None
+        assert call.kwargs["zone_id"] is None
 
     async def test_handles_empty_daily_memories(self, node, mock_memory_store):
         """Should handle state with no daily memories"""
@@ -201,9 +272,9 @@ class TestMemoryConsolidationNode:
                 status=StatusObservation(position=(5, 5), movement_locked=False),
             ),
             daily_memories=[
-                NewMemory(content="Very important", importance=10.0),
-                NewMemory(content="Somewhat important", importance=5.0),
-                NewMemory(content="Least important", importance=1.0),
+                FormedMemory(content="Very important", importance=10.0),
+                FormedMemory(content="Somewhat important", importance=5.0),
+                FormedMemory(content="Least important", importance=1.0),
             ],
         )
 

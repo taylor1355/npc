@@ -15,6 +15,13 @@ class MemoryConsolidationNode(Node):
     - Create higher-level abstractions
 
     Current implementation: Simple placeholder that adds all daily memories to long-term storage
+
+    What it does NOT do, deliberately: read circumstances off the observation it
+    is handed. Where and when a memory happened are properties of its FORMATION,
+    and this node runs a whole day later over a whole batch - so it copies each
+    memory's own stamp through rather than measuring anything itself (NPC-1476).
+    The one exception is `write_timestamp`, which is genuinely a property of the
+    write and is an explicit constructor argument for the reasons below.
     """
 
     step_name = "memory_consolidation"
@@ -44,18 +51,26 @@ class MemoryConsolidationNode(Node):
     async def process(self, state: PipelineState) -> PipelineState:
         """Consolidate daily memories into long-term storage"""
 
-        # Add all daily memories to long-term storage
-        for new_memory in state.daily_memories:
-            # Extract location from status observation if available
-            location = None
-            if state.observation.status:
-                location = state.observation.status.position
-
+        # Add all daily memories to long-term storage.
+        #
+        # Place and position come from each memory's OWN formation stamp, never
+        # from `state.observation` (NPC-1476). This node runs once per day over a
+        # whole batch, so a single read out here stamped every memory of the day
+        # with wherever the NPC happened to be standing when consolidation fired
+        # - the batch inherited one cell. The stamp is taken at formation
+        # instead, in ReflectionNode, where the observation is live and actually
+        # describes the circumstances of that memory.
+        #
+        # None flows through untouched: unstamped is the honest reading of a
+        # memory formed outside any zone, or of one written before this existed,
+        # and the retrieval scorer abstains on it rather than scoring it.
+        for formed_memory in state.daily_memories:
             self.memory_store.add_memory(
-                content=new_memory.content,
-                importance=new_memory.importance,
+                content=formed_memory.content,
+                importance=formed_memory.importance,
                 timestamp=self.write_timestamp,
-                location=location,
+                location=formed_memory.formed_at_position,
+                zone_id=formed_memory.formed_in_zone_id,
             )
 
         # Clear daily buffer

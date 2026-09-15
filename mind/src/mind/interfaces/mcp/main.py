@@ -19,7 +19,6 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
 from mind.logging_config import get_logger
-from mind.project_config import OPENROUTER_API_KEY
 
 from .server import MCPServer
 
@@ -162,6 +161,9 @@ def main():
         "--port", type=int, default=8000, help="Port to run the server on (default: 8000)"
     )
     args = parser.parse_args()
+
+    # HTTP app construction is offline; credentials belong to server startup.
+    from mind.project_config import OPENROUTER_API_KEY
 
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY must be set in project_config.py")

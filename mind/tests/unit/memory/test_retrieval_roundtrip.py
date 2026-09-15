@@ -94,7 +94,7 @@ def retrieval_spy(monkeypatch):
     return captured
 
 
-async def _decide(server, mind_id, simulation_time):
+async def _decide(server, mind_id, simulation_time, status=None):
     return await server.mcp.call_tool(
         "decide_action",
         {
@@ -102,6 +102,7 @@ async def _decide(server, mind_id, simulation_time):
             "observation": {
                 "entity_id": "entity_roundtrip",
                 "current_simulation_time": simulation_time,
+                "status": status,
             },
         },
     )
@@ -184,14 +185,14 @@ class TestMemoryRoundTrip:
         fabricated measurement that scores as the oldest possible memory forever;
         None lets the recency term abstain instead.
         """
-        from mind.cognitive_architecture.working_memory import NewMemory
+        from mind.cognitive_architecture.working_memory import FormedMemory
 
         with patch("mind.interfaces.mcp.mind.get_llm", return_value=FakeLLM()):
             server = await self._server_with_mind()
             mind = server.minds["mind_roundtrip"]
             assert mind.last_simulation_time is None
 
-            mind.daily_memories.append(NewMemory(content="A memory from nowhen", importance=4.0))
+            mind.daily_memories.append(FormedMemory(content="A memory from nowhen", importance=4.0))
             await server.mcp.call_tool("consolidate_memories", {"mind_id": "mind_roundtrip"})
 
             stored = await mind.memory_store.search(
@@ -200,3 +201,98 @@ class TestMemoryRoundTrip:
 
         assert len(stored) == 1
         assert stored[0].timestamp is None
+
+
+@pytest.mark.usefixtures("isolated_chroma")
+class TestSpatialMemoryRoundTrip:
+    async def test_formation_stamps_survive_storage_and_drive_current_zone_ranking(self):
+        """Real Chroma and pipeline; only LLM and semantic embeddings are controlled.
+
+        Equal embeddings isolate spatial ranking from model downloads or semantic
+        noise. Three locations preserve the scorer's non-collapsed spatial spread.
+        """
+        import numpy as np
+
+        from mind.cognitive_architecture.observations import Observation
+        from mind.cognitive_architecture.state import PipelineState
+
+        class EqualEncoder:
+            def encode(self, _text, **_kwargs):
+                return np.array([1.0, 0.0, 0.0], dtype=np.float32)
+
+        with (
+            patch("mind.interfaces.mcp.mind.get_llm", return_value=FakeLLM()),
+            patch(
+                "mind.cognitive_architecture.memory.vector_db_memory.SentenceTransformer",
+                return_value=EqualEncoder(),
+            ),
+        ):
+            server = await TestMemoryRoundTrip()._server_with_mind()
+            for minute, status in [
+                (
+                    5000,
+                    {
+                        "position": [3, 7],
+                        "current_zone_id": "zone_a",
+                        "current_zone_name": "Orchard",
+                    },
+                ),
+                (
+                    5010,
+                    {"position": [8, 2], "current_zone_id": "zone_b", "current_zone_name": "Pond"},
+                ),
+                (5020, None),
+            ]:
+                await _decide(server, "mind_roundtrip", minute, status)
+            mind = server.minds["mind_roundtrip"]
+            assert [(m.formed_at_position, m.formed_in_zone_id) for m in mind.daily_memories] == [
+                ((3, 7), "zone_a"),
+                ((8, 2), "zone_b"),
+                (None, None),
+            ]
+            await server.mcp.call_tool("consolidate_memories", {"mind_id": "mind_roundtrip"})
+            assert not mind.daily_memories
+            raw = mind.memory_store.collection.get(include=["metadatas"])
+            metadata = {row.get("zone_id"): row for row in raw["metadatas"]}
+            assert len(raw["ids"]) == 3
+            assert (metadata["zone_a"]["location_x"], metadata["zone_a"]["location_y"]) == (3, 7)
+            assert (metadata["zone_b"]["location_x"], metadata["zone_b"]["location_y"]) == (8, 2)
+            assert "zone_id" not in metadata[None]
+            assert "location_x" not in metadata[None]
+            assert "location_y" not in metadata[None]
+
+            # Both forwarding seams remain production: node -> query -> ranking.
+            # Freeze reinforcement so query order does not alter another term.
+            mind.memory_store.recency_reinforcement_alpha = 0.0
+            node = MemoryRetrievalNode(mind.memory_store, memories_per_query=3)
+            original_search = mind.memory_store.search
+            for current_zone, expected_order in [
+                ("zone_a", ["zone_a", None, "zone_b"]),
+                ("zone_b", ["zone_b", None, "zone_a"]),
+                (None, None),
+            ]:
+                observation = Observation(
+                    entity_id="entity_roundtrip",
+                    current_simulation_time=5020,
+                    status=(
+                        {
+                            "position": (0, 0),
+                            "current_zone_id": current_zone,
+                            "current_zone_name": "Current place",
+                        }
+                        if current_zone
+                        else None
+                    ),
+                )
+                state = PipelineState(observation=observation, memory_queries=["bandits"])
+                with patch.object(mind.memory_store, "search", wraps=original_search) as search:
+                    result = await node.process(state)
+                assert search.call_args.args[0].current_zone_id == current_zone
+                retrieved = result.retrieved_memories
+                assert {(m.location, m.zone_id) for m in retrieved} == {
+                    ((3, 7), "zone_a"),
+                    ((8, 2), "zone_b"),
+                    (None, None),
+                }
+                if expected_order:
+                    assert [m.zone_id for m in retrieved] == expected_order

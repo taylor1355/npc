@@ -50,6 +50,12 @@ class MemoryRetrievalNode(Node):
                 top_k=self.memories_per_query,
                 weights=self.weights,
                 current_simulation_time=state.observation.current_simulation_time,
+                current_zone_id=(
+                    state.observation.status.current_zone_id if state.observation.status else None
+                ),
+                current_position=(
+                    state.observation.status.position if state.observation.status else None
+                ),
             )
             results = await self.memory_store.search(query)
             all_memories.extend(results)

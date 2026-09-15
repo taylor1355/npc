@@ -46,6 +46,49 @@ DEFAULT_RETRIEVAL_WEIGHT_RELEVANCE = 1.0
 DEFAULT_RETRIEVAL_WEIGHT_IMPORTANCE = 1.0
 DEFAULT_RETRIEVAL_WEIGHT_RECENCY = 1.0
 
+# The spatial term is ours, not Park's, so it gets no citable number and must
+# argue for its own [NPC-1476]. It is 0.5 rather than 1.0 because the module's
+# own thesis about min-max normalization decides it: min-max and alpha=1 are a
+# package precisely BECAUSE the three Park terms have unequal realized spreads,
+# and normalizing puts them on equal footing so equal coefficients mean equal
+# influence. A BINARY term breaks that symmetry from the other side - whenever it
+# is live at all it realizes a spread of exactly 1.0, the widest possible - so
+# giving it Park's coefficient would hand it MORE than Park's influence.
+#
+# **That premise weakened when the term stopped being binary [NPC-1476].** Graded
+# by distance it no longer realizes 1.0: on the measurement corpus it lands at
+# ~0.984 against recency's ~0.985, tied for widest rather than uniquely widest.
+# The halving is therefore argued from something no longer quite true, and 0.5 is
+# now a starting value with a weaker case rather than a reasoned one - if
+# anything it under-weights a graded term, which spreads candidates across the
+# band instead of polarizing them to the ends.
+#
+# Deliberately NOT retuned here. The right number comes from a measurement over
+# real memory distributions, not from adjusting one argument to rescue another,
+# and this corpus is a fixture rather than a world.
+# test_term_spread_measurement.py::test_the_graded_spatial_term_lands_in_the_widest_band
+# carries the reading.
+DEFAULT_RETRIEVAL_WEIGHT_SPATIAL = 0.5
+
+# Characteristic falloff length for SpatialTerm, in grid cells. Relevance decays
+# as 0.5 ** (chebyshev_distance / this), so a memory formed this many cells away
+# scores half what one formed underfoot does, and the curve never reaches zero.
+#
+# 8 is the simulation's sight radius, and that is the argument rather than a
+# coincidence: "near" for an embodied agent is most naturally "about as far as I
+# can see", and it is the one length in this world that already has a meaning
+# both sides agree on. Chebyshev, not Euclidean, for the same reason - the
+# simulation's own vision disc is Chebyshev over an 8-connected grid, so a
+# Euclidean metric here would disagree with the geometry that produced the
+# coordinates.
+#
+# A reasoned starting scale, not a measured one. What would falsify it: retrieval
+# that surfaces same-room memories and across-the-map memories at
+# indistinguishable rank (too large), or that cannot see anything outside the
+# current cell (too small). test_term_spread_measurement.py measures the realized
+# spread this produces; prefer that number to this argument.
+DEFAULT_SPATIAL_DECAY_CELLS = 8.0
+
 # Park's exponential forgetting curve, per GAME hour. Half-life is
 # log(0.5)/log(0.995) ~= 138 game hours ~= 5.8 game days.
 DEFAULT_RECENCY_DECAY_PER_GAME_HOUR = 0.995

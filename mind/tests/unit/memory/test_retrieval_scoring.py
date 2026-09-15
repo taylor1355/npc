@@ -27,6 +27,7 @@ from mind.cognitive_architecture.memory.retrieval import (
     RetrievalContext,
     RetrievalWeights,
     ScoredCandidate,
+    SpatialTerm,
     candidate_pool_size,
     collect_raw_scores,
     default_terms,
@@ -36,6 +37,7 @@ from mind.cognitive_architecture.memory.retrieval import (
     should_reinforce,
     term_statistics,
 )
+from mind.constants import DEFAULT_RETRIEVAL_WEIGHT_SPATIAL
 
 # 0.995 ** 10 and 0.995 ** 1000, to 8dp. Literals rather than expressions so that
 # changing the decay base, or dropping the game-minutes-to-hours conversion,
@@ -54,19 +56,42 @@ def make_candidate(
     timestamp: int | None = NOW,
     decay_base: float | None = None,
     content: str = "a memory",
+    zone_id: str | None = None,
+    position: tuple[int, int] | None = None,
 ) -> ScoredCandidate:
     return ScoredCandidate(
         memory_id=memory_id,
         content=content,
         metadata=VectorDBMetadata(
-            importance=importance, timestamp=timestamp, decay_base=decay_base
+            importance=importance,
+            timestamp=timestamp,
+            decay_base=decay_base,
+            zone_id=zone_id,
+            location_x=position[0] if position else None,
+            location_y=position[1] if position else None,
         ),
         distance=distance,
     )
 
 
-def context(now: int | None = NOW) -> RetrievalContext:
-    return RetrievalContext(query="anything", current_simulation_time=now)
+def context(
+    now: int | None = NOW,
+    zone_id: str | None = None,
+    position: tuple[int, int] | None = None,
+) -> RetrievalContext:
+    """`zone_id` defaults to None, which is load-bearing rather than tidy.
+
+    Every pre-NPC-1476 test in this file goes through this helper, so they all
+    run with SpatialTerm abstaining on every candidate. That they still pass
+    unchanged IS the safe-no-op proof - see TestSpatialTerm's abstention test,
+    which asserts the property directly instead of leaving it implicit.
+    """
+    return RetrievalContext(
+        query="anything",
+        current_simulation_time=now,
+        current_zone_id=zone_id,
+        current_position=position,
+    )
 
 
 def breakdowns_for(
@@ -399,7 +424,9 @@ class TestMinMaxNormalization:
         dated, undated = breakdowns_for(pool)
 
         assert dated.contributions["recency"] == 0.5
-        assert undated.abstained == ["recency"]
+        # "spatial" joins the list because `context()` supplies no zone; see
+        # TestAbstention's docstring.
+        assert undated.abstained == ["recency", "spatial"]
         assert dated.total == pytest.approx(undated.total, abs=1e-9)
 
     def test_raw_contributions_survive_normalization(self):
@@ -417,18 +444,27 @@ class TestMinMaxNormalization:
 
 
 class TestAbstention:
-    """Missing data must not be voted on in either direction."""
+    """Missing data must not be voted on in either direction.
+
+    Every fixture here goes through `context()`, which supplies no
+    `current_zone_id`, so SpatialTerm abstains on every candidate as well
+    [NPC-1476]. The exact-list assertions below therefore name two terms: the one
+    the test is about, and spatial. They are kept EXACT rather than relaxed to
+    `in` because "which terms abstained" is the property this class exists to
+    pin - a membership check would pass while an unrelated term silently started
+    abstaining too.
+    """
 
     def test_missing_timestamp_abstains_on_recency(self):
         breakdown = breakdowns_for([make_candidate("m", timestamp=None)])[0]
 
-        assert breakdown.abstained == ["recency"]
+        assert breakdown.abstained == ["recency", "spatial"]
         assert "recency" not in breakdown.contributions
 
     def test_missing_current_time_abstains_on_recency(self):
         breakdown = breakdowns_for([make_candidate("m")], now=None)[0]
 
-        assert breakdown.abstained == ["recency"]
+        assert breakdown.abstained == ["recency", "spatial"]
 
     def test_missing_distance_abstains_rather_than_scoring_perfect_relevance(self):
         """A backend that reported no distance told us nothing about relevance.
@@ -438,13 +474,13 @@ class TestAbstention:
         """
         breakdown = breakdowns_for([make_candidate("m", distance=None)])[0]
 
-        assert breakdown.abstained == ["relevance"]
+        assert breakdown.abstained == ["relevance", "spatial"]
         assert breakdown.contributions.get("relevance") is None
 
     def test_never_rated_importance_abstains_rather_than_voting_a_midpoint(self):
         breakdown = breakdowns_for([make_candidate("m", importance=None)])[0]
 
-        assert breakdown.abstained == ["importance"]
+        assert breakdown.abstained == ["importance", "spatial"]
 
     def test_an_abstaining_candidate_is_excluded_from_that_terms_min_and_max(self):
         """The consistent extension of abstention into the normalizer.
@@ -496,7 +532,7 @@ class TestAbstention:
         assert order == ["fresh", "seeded", "ancient"]
 
         seeded_breakdown = next(b for b, c in ranked if c.memory_id == "seeded")
-        assert seeded_breakdown.abstained == ["recency"]
+        assert seeded_breakdown.abstained == ["recency", "spatial"]
         assert seeded_breakdown.total == pytest.approx(0.5, abs=1e-9)
 
     def test_abstention_renormalizes_onto_the_same_scale(self):
@@ -563,8 +599,12 @@ class TestWeightValidation:
             RetrievalWeights(**{field: -0.1})
 
     def test_all_zero_weights_are_rejected(self):
+        # `spatial=0.0` is now required to express "all zero" [NPC-1476]. Without
+        # it the set is a legitimate PLACE-ONLY configuration rather than a
+        # degenerate one, and this test would assert that a working weight set is
+        # rejected. TestSpatialTerm covers both halves of that distinction.
         with pytest.raises(ValidationError):
-            RetrievalWeights(relevance=0.0, importance=0.0, recency=0.0)
+            RetrievalWeights(relevance=0.0, importance=0.0, recency=0.0, spatial=0.0)
 
     def test_unknown_weight_field_is_rejected(self):
         with pytest.raises(ValidationError):
@@ -813,3 +853,255 @@ class TestCandidatePoolSize:
 
     def test_empty_collection_yields_an_empty_pool(self):
         assert candidate_pool_size(top_k=5, collection_count=0) == 0
+
+
+class TestSpatialTerm:
+    """Memories formed where the NPC is standing retrieve hotter [NPC-1476].
+
+    **On the three-candidate pool.** NPC-1476's issue text states the falsifier
+    with two candidates - a stamped memory in the NPC's own zone and an unstamped
+    one - and asserts the first must outrank the second. That form is
+    UNSATISFIABLE against correct code, and it is worth saying so here rather
+    than leaving a reader to conclude the extra candidate weakens the test.
+
+    With only those two the spatial term has exactly ONE non-abstaining value, so
+    `term_statistics` reports a spread of 0 and `TermStats.normalize` returns 0.5
+    by its documented degenerate rule. Meanwhile the two otherwise-identical
+    memories tie at 0.5 on relevance, importance and recency for exactly the same
+    reason. `here_mem` totals (0.5*3 + 0.5*w)/(3+w) = 0.5 and `unstamped_mem`
+    totals 1.5/3 = 0.5. **They tie** under the retained min-max normalization and its
+    collapsed-spread rule, together with abstention.
+
+    Adding `elsewhere_mem` gives the term a realized spread of 1.0 and makes the
+    ordering real: with the Park weights at 1.0 and spatial at w,
+    `here_mem` = (1.5 + w)/(3 + w), `unstamped_mem` = 0.5,
+    `elsewhere_mem` = 1.5/(3 + w). At w = 0.5 that is 0.571 > 0.5 > 0.429, and
+    the ORDERING holds for every w > 0. These assert the ordering, never the
+    numbers, so the weight can be retuned without rewriting the test.
+    """
+
+    HERE = "zone_berry"
+    ELSEWHERE = "zone_pond"
+
+    def _pool(self):
+        """Three candidates identical on every Park term, differing only in place."""
+        return [
+            make_candidate("here_mem", zone_id=self.HERE),
+            make_candidate("elsewhere_mem", zone_id=self.ELSEWHERE),
+            make_candidate("unstamped_mem", zone_id=None),
+        ]
+
+    def _totals(self, current_zone_id: str | None) -> dict[str, float]:
+        pool = self._pool()
+        breakdowns = score_pool(
+            pool, context(zone_id=current_zone_id), RetrievalWeights(), default_terms()
+        )
+        return {c.memory_id: b.total for b, c in zip(breakdowns, pool)}
+
+    def test_a_place_stamped_memory_outranks_an_unstamped_one_in_its_own_zone(self):
+        totals = self._totals(self.HERE)
+
+        assert totals["here_mem"] > totals["unstamped_mem"], (
+            "a memory formed in the place the NPC is standing must outrank one "
+            "that carries no place at all"
+        )
+        assert totals["unstamped_mem"] > totals["elsewhere_mem"], (
+            "abstaining must beat measuring 'formed somewhere else' - the "
+            "unstamped memory is not penalised on a property nobody measured"
+        )
+
+    def test_a_place_stamped_memory_ties_an_unstamped_one_elsewhere(self):
+        """Standing somewhere neither memory was formed, place says nothing.
+
+        Both stamped memories score a raw 0.0, the spread collapses, both
+        normalize to 0.5, and the unstamped one abstains - so all three land on
+        exactly the same total. This is what proves the term abstains-or-is-
+        neutral rather than always firing.
+        """
+        totals = self._totals("zone_meadow")
+
+        assert totals["here_mem"] == totals["elsewhere_mem"] == totals["unstamped_mem"]
+
+    def test_an_npc_that_knows_no_place_here_ties_everything(self):
+        """The arm covering "the NPC stands on ground it knows no place for".
+
+        `current_zone_id` is None, so the term abstains on every candidate
+        including the stamped ones - the NPC's own ignorance, not the memory's.
+        """
+        totals = self._totals(None)
+
+        assert totals["here_mem"] == totals["elsewhere_mem"] == totals["unstamped_mem"]
+
+    # ---- distance grading --------------------------------------------------
+    #
+    # The tests above pin the ZONE arm; these pin the DISTANCE arm. Every test
+    # above passes positionless candidates, which is what makes them the
+    # unchanged-behaviour proof for stores written before positions existed.
+
+    def test_a_nearer_memory_outranks_a_farther_one_in_the_same_direction(self):
+        """The grading claim itself: elsewhere is not one bucket.
+
+        Both memories were formed outside any known place, so the zone arm has
+        nothing to say and cannot be what orders them. Under the previous binary
+        term both scored an identical 0.0 and tied; ordering them is the whole
+        point of the change.
+        """
+        near = make_candidate("near_mem", position=(4, 0))
+        far = make_candidate("far_mem", position=(40, 0))
+        pool = [near, far]
+
+        breakdowns = score_pool(pool, context(position=(0, 0)), RetrievalWeights(), default_terms())
+        totals = {c.memory_id: b.total for b, c in zip(breakdowns, pool)}
+
+        assert totals["near_mem"] > totals["far_mem"]
+
+    def test_the_decay_scale_is_a_half_life_in_chebyshev_cells(self):
+        """Pins the curve's shape, not merely its direction.
+
+        A test asserting only "nearer scores higher" is satisfied by any
+        decreasing function, including one that falls off a cliff at cell 1. The
+        half-life is the contract, and the diagonal case is what makes the metric
+        Chebyshev rather than Euclidean: (8, 8) is 8 cells away here, where
+        Euclidean would call it 11.3 and score it lower.
+        """
+        term = SpatialTerm()
+        underfoot = term.score(make_candidate("a", position=(0, 0)), context(position=(0, 0)))
+        one_scale = term.score(make_candidate("b", position=(8, 0)), context(position=(0, 0)))
+        two_scales = term.score(make_candidate("c", position=(16, 0)), context(position=(0, 0)))
+        diagonal = term.score(make_candidate("d", position=(8, 8)), context(position=(0, 0)))
+
+        assert underfoot == 1.0
+        assert one_scale == pytest.approx(0.5)
+        assert two_scales == pytest.approx(0.25)
+        assert diagonal == pytest.approx(one_scale), "Chebyshev, not Euclidean"
+
+    def test_same_place_beats_distance_from_the_far_end_of_that_place(self):
+        """Zone identity wins over the metric, and the case where they disagree.
+
+        A memory formed at the far end of the clearing the NPC is standing in is
+        far by the metric and *here* by every other reading. The short-circuit is
+        what makes "same place" mean something a coordinate cannot say, so it
+        must beat a nearer memory that is merely adjacent.
+        """
+        term = SpatialTerm()
+        far_end_of_here = term.score(
+            make_candidate("far_end", zone_id=self.HERE, position=(90, 90)),
+            context(zone_id=self.HERE, position=(0, 0)),
+        )
+        just_outside = term.score(
+            make_candidate("outside", zone_id=self.ELSEWHERE, position=(1, 0)),
+            context(zone_id=self.HERE, position=(0, 0)),
+        )
+
+        assert far_end_of_here == 1.0
+        assert far_end_of_here > just_outside
+
+    def test_distance_grades_what_the_zone_comparison_would_have_flattened(self):
+        """Two memories in different known places, graded by how far each is.
+
+        Under the binary term both scored 0.0 - "not here" - and were
+        indistinguishable. The paired negative is the assertion that they are NOT
+        equal, which is exactly what would fail against the previous code.
+        """
+        term = SpatialTerm()
+        here = context(zone_id=self.HERE, position=(0, 0))
+        near_other = term.score(
+            make_candidate("near", zone_id=self.ELSEWHERE, position=(3, 0)), here
+        )
+        far_other = term.score(make_candidate("far", zone_id="zone_pond", position=(60, 0)), here)
+
+        assert near_other > far_other
+        assert near_other != far_other, "the binary term scored both of these 0.0"
+
+    def test_a_missing_position_on_either_side_falls_back_to_the_zone_verdict(self):
+        """Old rows keep working, and the fallback is the OLD arithmetic exactly.
+
+        A memory stored before formation positions existed carries no
+        coordinates. The term must not abstain when it still has two zone ids to
+        compare - that would silently drop the dimension for every historical
+        row - and must not invent a distance.
+        """
+        term = SpatialTerm()
+        here = context(zone_id=self.HERE, position=(0, 0))
+
+        assert term.score(make_candidate("old_here", zone_id=self.HERE), here) == 1.0
+        assert term.score(make_candidate("old_else", zone_id=self.ELSEWHERE), here) == 0.0
+
+        positionless_npc = context(zone_id=self.HERE)
+        stamped = make_candidate("stamped", zone_id=self.ELSEWHERE, position=(3, 0))
+        assert term.score(stamped, positionless_npc) == 0.0, (
+            "the NPC's own missing position cannot manufacture a distance either"
+        )
+
+    def test_abstention_survives_the_grading(self):
+        """The doctrine the grading must not quietly erode.
+
+        With neither a zone pair nor a position pair there is nothing measured,
+        and a 0.0 would rank the memory last on a property nobody read. Each arm
+        is checked separately so a regression in one cannot hide behind the other.
+        """
+        term = SpatialTerm()
+
+        assert term.score(make_candidate("bare"), context()) is None
+        assert term.score(make_candidate("bare"), context(position=(0, 0))) is None, (
+            "the NPC has a position but the memory carries none"
+        )
+        assert term.score(make_candidate("stamped", position=(3, 0)), context()) is None, (
+            "the memory carries one but the NPC does not"
+        )
+        assert term.score(make_candidate("zoned", zone_id=self.ELSEWHERE), context()) is None, (
+            "one zone id is not a comparison"
+        )
+
+    def test_spatial_abstention_is_reported_and_changes_no_total(self):
+        """The safe-no-op proof for the cross-repo release ordering.
+
+        If the mind ships before the sim, `current_zone_id` is None on every
+        query and `zone_id` is None on every row. This asserts the consequence
+        directly: spatial abstains everywhere, gets no entry in the pool
+        statistics, never enters `live_weight`, and every total equals what the
+        same pool scored under the three Park terms alone.
+        """
+        pool = [make_candidate("a", distance=0.2), make_candidate("b", distance=0.9)]
+        ctx = context(zone_id=None)
+
+        with_spatial = score_pool(pool, ctx, RetrievalWeights(), default_terms())
+        park_only = score_pool(
+            pool, ctx, RetrievalWeights(), [RelevanceTerm(), ImportanceTerm(), RecencyTerm()]
+        )
+
+        for breakdown in with_spatial:
+            assert "spatial" in breakdown.abstained
+            assert "spatial" not in breakdown.contributions
+
+        raw = collect_raw_scores(pool, ctx, default_terms())
+        assert "spatial" not in term_statistics(raw, default_terms())
+
+        assert [b.total for b in with_spatial] == [b.total for b in park_only]
+        assert [b.live_weight for b in with_spatial] == [b.live_weight for b in park_only]
+
+    def test_a_place_only_weight_set_is_not_degenerate(self):
+        """relevance=importance=recency=0, spatial=1 is a legitimate configuration.
+
+        Red if `_reject_degenerate` still sums only the three Park weights: it
+        would raise on a weight set that scores memories perfectly well.
+        """
+        weights = RetrievalWeights(relevance=0.0, importance=0.0, recency=0.0, spatial=1.0)
+
+        assert weights.spatial == 1.0
+
+    def test_an_all_zero_weight_set_including_spatial_is_still_rejected(self):
+        """Control for the test above - the guard must still be able to fire."""
+        with pytest.raises(ValidationError):
+            RetrievalWeights(relevance=0.0, importance=0.0, recency=0.0, spatial=0.0)
+
+    def test_weight_for_resolves_the_spatial_term(self):
+        """`weight_for` raises for an undeclared term, so a term added to
+        `default_terms()` without a matching field breaks every query. Pins that
+        spatial is not that term."""
+        assert RetrievalWeights().weight_for("spatial") == pytest.approx(
+            DEFAULT_RETRIEVAL_WEIGHT_SPATIAL
+        )
+
+    def test_spatial_is_in_the_default_term_registry(self):
+        assert "spatial" in {term.name for term in default_terms()}

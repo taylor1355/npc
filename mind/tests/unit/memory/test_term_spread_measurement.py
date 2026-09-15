@@ -177,6 +177,33 @@ AGES_IN_MINUTES = [
 ]
 
 
+# The place each memory was formed in, parallel to CORPUS [NPC-1476]. Alternating
+# rather than random so the measurement is deterministic.
+HERE_ZONE = "zone_forge"
+AWAY_ZONE = "zone_market"
+FORMATION_ZONES = [HERE_ZONE if i % 2 == 0 else AWAY_ZONE for i in range(len(CORPUS))]
+
+# Where in the world each memory formed, parallel to CORPUS.
+#
+# **These exist so the measurement exercises the code that will actually run.**
+# With zones alone every candidate reaches SpatialTerm's positionless fallback -
+# the old binary comparison - and the measured spread is then 1.0 by
+# construction, from zone-match-versus-mismatch, rather than from anything the
+# decay curve produced. The measurement would be reporting a branch the
+# simulation stops taking the moment it starts sending positions.
+#
+# HERE_ORIGIN is where the querying NPC stands. Same-zone memories short-circuit
+# to 1.0 regardless of their cell, so only the AWAY_ZONE ones are graded, and
+# they are spread across several multiples of DEFAULT_SPATIAL_DECAY_CELLS (8) so
+# the realized minimum is a decay value rather than a single distance repeated.
+HERE_ORIGIN = (0, 0)
+AWAY_SEPARATIONS = [4, 8, 12, 20, 32, 48]
+FORMATION_POSITIONS = [
+    HERE_ORIGIN if zone == HERE_ZONE else (AWAY_SEPARATIONS[(i // 2) % len(AWAY_SEPARATIONS)], 0)
+    for i, zone in enumerate(FORMATION_ZONES)
+]
+
+
 @pytest.fixture(scope="module")
 def measured_stats():
     """Embed the corpus, take the cosine pool, measure each term's raw range."""
@@ -185,8 +212,16 @@ def measured_stats():
     SharedSystemClient.clear_system_cache()
     store = VectorDBMemory(collection_name=f"test_spread_{uuid.uuid4().hex[:12]}")
 
-    for content, importance, age in zip(CORPUS, IMPORTANCES, AGES_IN_MINUTES):
-        store.add_memory(content=content, importance=importance, timestamp=NOW - age)
+    for content, importance, age, zone_id, position in zip(
+        CORPUS, IMPORTANCES, AGES_IN_MINUTES, FORMATION_ZONES, FORMATION_POSITIONS
+    ):
+        store.add_memory(
+            content=content,
+            importance=importance,
+            timestamp=NOW - age,
+            zone_id=zone_id,
+            location=position,
+        )
 
     # Exactly what search() does: over-fetch by cosine, then score that pool.
     pool_size = candidate_pool_size(top_k=2, collection_count=store.collection.count())
@@ -213,7 +248,12 @@ def measured_stats():
 
     from mind.cognitive_architecture.memory.retrieval import RetrievalContext
 
-    context = RetrievalContext(query=QUERY, current_simulation_time=NOW)
+    context = RetrievalContext(
+        query=QUERY,
+        current_simulation_time=NOW,
+        current_zone_id=HERE_ZONE,
+        current_position=HERE_ORIGIN,
+    )
     terms = default_terms()
     stats = term_statistics(collect_raw_scores(candidates, context, terms), terms)
 
@@ -232,7 +272,7 @@ def test_report_realized_term_spreads(measured_stats):
     print(f"query: {QUERY!r}\n")
     print(f"{'term':<12}{'min':>10}{'max':>10}{'spread':>10}{'n':>5}")
     print("-" * 47)
-    for name in ("relevance", "importance", "recency"):
+    for name in ("relevance", "importance", "recency", "spatial"):
         s = stats[name]
         print(f"{name:<12}{s.minimum:>10.4f}{s.maximum:>10.4f}{s.spread:>10.4f}{s.count:>5}")
     print()
@@ -271,3 +311,60 @@ def test_no_term_uses_more_than_its_nominal_range(measured_stats):
     for name in ("relevance", "importance", "recency"):
         assert 0.0 <= stats[name].minimum <= 1.0
         assert 0.0 <= stats[name].maximum <= 1.0
+
+
+def test_the_graded_spatial_term_lands_in_the_widest_band(measured_stats):
+    """**The empirical basis for `DEFAULT_RETRIEVAL_WEIGHT_SPATIAL` being 0.5 —
+    and a measurement that partly undercuts it.**
+
+    The argument for min-max plus alpha=1 is that Park's three terms occupy
+    unequal realized bands, so normalizing is what makes equal coefficients mean
+    equal influence. `DEFAULT_RETRIEVAL_WEIGHT_SPATIAL`'s halving was argued from
+    the spatial term being BINARY, and so realizing a spread of exactly 1.0 — the
+    widest any term can.
+
+    **On this corpus it no longer does.** Graded, it measures ~0.984 against
+    recency's ~0.985: no longer the widest, merely tied for it. The original
+    premise is therefore weakened, which is recorded in `constants.py` rather
+    than quietly repaired here. Do not read this test as ratifying 0.5.
+
+    Two assertions, each catching a different regression:
+
+    - `< 1.0` catches the pool reaching `SpatialTerm`'s positionless FALLBACK,
+      the old binary comparison. A 1.0 here means the decay curve was never
+      exercised and this measurement describes a branch the simulation stops
+      taking the moment it sends positions. The corpus carries
+      `FORMATION_POSITIONS` so that cannot happen silently; the assertion is what
+      makes it structural rather than a comment nobody re-reads.
+    - Comparable-to-widest catches the opposite failure, a decay scale so short
+      that every away-memory collapses to nearly zero and the term becomes a
+      near-constant that normalization would amplify into noise.
+
+    Deliberately NOT asserted: that 0.5 is correct, that 8 cells is correct, or
+    that spatial beats every Park term. The first two are reasoned starting
+    values; the third is now false by a margin too small to be worth defending.
+    """
+    stats = measured_stats["stats"]
+    spatial = stats["spatial"]
+    widest_park = max(stats[name].spread for name in ("relevance", "importance", "recency"))
+
+    assert spatial.spread < 1.0, (
+        f"spatial spread is exactly {spatial.spread:.4f}, which means every "
+        "candidate took the positionless fallback and the graded curve was "
+        "never measured — check that the corpus still carries FORMATION_POSITIONS"
+    )
+    assert spatial.spread >= widest_park * 0.95, (
+        f"spatial spread {spatial.spread:.4f} has fallen well below the widest "
+        f"Park term {widest_park:.4f}; the decay scale may be short enough that "
+        "distant memories collapse into a near-constant"
+    )
+
+
+def test_spatial_scored_the_whole_pool(measured_stats):
+    """Control for the test above: a spread measured over two candidates would be
+    a coincidence rather than a property. Every candidate is stamped with both a
+    zone and a position, so every candidate must have scored — an abstention here
+    means the corpus lost its stamps."""
+    stats = measured_stats["stats"]
+
+    assert stats["spatial"].count == measured_stats["pool_size"]
