@@ -55,10 +55,19 @@ DEFAULT_RETRIEVAL_WEIGHT_RECENCY = 1.0
 # is live at all it realizes a spread of exactly 1.0, the widest possible - so
 # giving it Park's coefficient would hand it MORE than Park's influence.
 #
-# This is a reasoned starting ratio, not a measured one, and it is deliberately
-# not asserted as correct anywhere. test_term_spread_measurement.py measures
-# spatial's realized spread alongside the other three; the number should be taken
-# from that measurement rather than defended here.
+# **That premise weakened when the term stopped being binary [NPC-1476].** Graded
+# by distance it no longer realizes 1.0: on the measurement corpus it lands at
+# ~0.984 against recency's ~0.985, tied for widest rather than uniquely widest.
+# The halving is therefore argued from something no longer quite true, and 0.5 is
+# now a starting value with a weaker case rather than a reasoned one - if
+# anything it under-weights a graded term, which spreads candidates across the
+# band instead of polarizing them to the ends.
+#
+# Deliberately NOT retuned here. The right number comes from a measurement over
+# real memory distributions, not from adjusting one argument to rescue another,
+# and this corpus is a fixture rather than a world.
+# test_term_spread_measurement.py::test_the_graded_spatial_term_lands_in_the_widest_band
+# carries the reading.
 DEFAULT_RETRIEVAL_WEIGHT_SPATIAL = 0.5
 
 # Characteristic falloff length for SpatialTerm, in grid cells. Relevance decays
