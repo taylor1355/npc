@@ -53,6 +53,9 @@ class MemoryRetrievalNode(Node):
                 current_zone_id=(
                     state.observation.status.current_zone_id if state.observation.status else None
                 ),
+                current_position=(
+                    state.observation.status.position if state.observation.status else None
+                ),
             )
             results = await self.memory_store.search(query)
             all_memories.extend(results)

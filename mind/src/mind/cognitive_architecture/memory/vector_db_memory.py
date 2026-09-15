@@ -73,6 +73,11 @@ class VectorDBQuery(BaseModel):
     # nothing to say. Not a tags-style filter - see SpatialTerm.
     current_zone_id: str | None = None
 
+    # Where the NPC is standing, in grid cells, for SpatialTerm's distance
+    # grading. Like current_zone_id this filters nothing - it only lets the
+    # spatial dimension say "nearer" rather than only "same place or not".
+    current_position: tuple[int, int] | None = None
+
     # Filter to memories with ANY of these tags. Storage layer only: nothing in the
     # cognitive pipeline sets this yet, and no node passes tags to add_memory, so
     # every stored memory is currently untagged. Producer/consumer wiring is NPC-1013.
@@ -382,6 +387,7 @@ class VectorDBMemory:
             query=query.query,
             current_simulation_time=query.current_simulation_time,
             current_zone_id=query.current_zone_id,
+            current_position=query.current_position,
         )
         ranked = rank(
             candidates,

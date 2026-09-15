@@ -27,6 +27,7 @@ from mind.cognitive_architecture.memory.retrieval import (
     RetrievalContext,
     RetrievalWeights,
     ScoredCandidate,
+    SpatialTerm,
     candidate_pool_size,
     collect_raw_scores,
     default_terms,
@@ -56,18 +57,28 @@ def make_candidate(
     decay_base: float | None = None,
     content: str = "a memory",
     zone_id: str | None = None,
+    position: tuple[int, int] | None = None,
 ) -> ScoredCandidate:
     return ScoredCandidate(
         memory_id=memory_id,
         content=content,
         metadata=VectorDBMetadata(
-            importance=importance, timestamp=timestamp, decay_base=decay_base, zone_id=zone_id
+            importance=importance,
+            timestamp=timestamp,
+            decay_base=decay_base,
+            zone_id=zone_id,
+            location_x=position[0] if position else None,
+            location_y=position[1] if position else None,
         ),
         distance=distance,
     )
 
 
-def context(now: int | None = NOW, zone_id: str | None = None) -> RetrievalContext:
+def context(
+    now: int | None = NOW,
+    zone_id: str | None = None,
+    position: tuple[int, int] | None = None,
+) -> RetrievalContext:
     """`zone_id` defaults to None, which is load-bearing rather than tidy.
 
     Every pre-NPC-1476 test in this file goes through this helper, so they all
@@ -75,7 +86,12 @@ def context(now: int | None = NOW, zone_id: str | None = None) -> RetrievalConte
     unchanged IS the safe-no-op proof - see TestSpatialTerm's abstention test,
     which asserts the property directly instead of leaving it implicit.
     """
-    return RetrievalContext(query="anything", current_simulation_time=now, current_zone_id=zone_id)
+    return RetrievalContext(
+        query="anything",
+        current_simulation_time=now,
+        current_zone_id=zone_id,
+        current_position=position,
+    )
 
 
 def breakdowns_for(
@@ -915,6 +931,127 @@ class TestSpatialTerm:
         totals = self._totals(None)
 
         assert totals["here_mem"] == totals["elsewhere_mem"] == totals["unstamped_mem"]
+
+    # ---- distance grading --------------------------------------------------
+    #
+    # The tests above pin the ZONE arm; these pin the DISTANCE arm. Every test
+    # above passes positionless candidates, which is what makes them the
+    # unchanged-behaviour proof for stores written before positions existed.
+
+    def test_a_nearer_memory_outranks_a_farther_one_in_the_same_direction(self):
+        """The grading claim itself: elsewhere is not one bucket.
+
+        Both memories were formed outside any known place, so the zone arm has
+        nothing to say and cannot be what orders them. Under the previous binary
+        term both scored an identical 0.0 and tied; ordering them is the whole
+        point of the change.
+        """
+        near = make_candidate("near_mem", position=(4, 0))
+        far = make_candidate("far_mem", position=(40, 0))
+        pool = [near, far]
+
+        breakdowns = score_pool(pool, context(position=(0, 0)), RetrievalWeights(), default_terms())
+        totals = {c.memory_id: b.total for b, c in zip(breakdowns, pool)}
+
+        assert totals["near_mem"] > totals["far_mem"]
+
+    def test_the_decay_scale_is_a_half_life_in_chebyshev_cells(self):
+        """Pins the curve's shape, not merely its direction.
+
+        A test asserting only "nearer scores higher" is satisfied by any
+        decreasing function, including one that falls off a cliff at cell 1. The
+        half-life is the contract, and the diagonal case is what makes the metric
+        Chebyshev rather than Euclidean: (8, 8) is 8 cells away here, where
+        Euclidean would call it 11.3 and score it lower.
+        """
+        term = SpatialTerm()
+        underfoot = term.score(make_candidate("a", position=(0, 0)), context(position=(0, 0)))
+        one_scale = term.score(make_candidate("b", position=(8, 0)), context(position=(0, 0)))
+        two_scales = term.score(make_candidate("c", position=(16, 0)), context(position=(0, 0)))
+        diagonal = term.score(make_candidate("d", position=(8, 8)), context(position=(0, 0)))
+
+        assert underfoot == 1.0
+        assert one_scale == pytest.approx(0.5)
+        assert two_scales == pytest.approx(0.25)
+        assert diagonal == pytest.approx(one_scale), "Chebyshev, not Euclidean"
+
+    def test_same_place_beats_distance_from_the_far_end_of_that_place(self):
+        """Zone identity wins over the metric, and the case where they disagree.
+
+        A memory formed at the far end of the clearing the NPC is standing in is
+        far by the metric and *here* by every other reading. The short-circuit is
+        what makes "same place" mean something a coordinate cannot say, so it
+        must beat a nearer memory that is merely adjacent.
+        """
+        term = SpatialTerm()
+        far_end_of_here = term.score(
+            make_candidate("far_end", zone_id=self.HERE, position=(90, 90)),
+            context(zone_id=self.HERE, position=(0, 0)),
+        )
+        just_outside = term.score(
+            make_candidate("outside", zone_id=self.ELSEWHERE, position=(1, 0)),
+            context(zone_id=self.HERE, position=(0, 0)),
+        )
+
+        assert far_end_of_here == 1.0
+        assert far_end_of_here > just_outside
+
+    def test_distance_grades_what_the_zone_comparison_would_have_flattened(self):
+        """Two memories in different known places, graded by how far each is.
+
+        Under the binary term both scored 0.0 - "not here" - and were
+        indistinguishable. The paired negative is the assertion that they are NOT
+        equal, which is exactly what would fail against the previous code.
+        """
+        term = SpatialTerm()
+        here = context(zone_id=self.HERE, position=(0, 0))
+        near_other = term.score(
+            make_candidate("near", zone_id=self.ELSEWHERE, position=(3, 0)), here
+        )
+        far_other = term.score(make_candidate("far", zone_id="zone_pond", position=(60, 0)), here)
+
+        assert near_other > far_other
+        assert near_other != far_other, "the binary term scored both of these 0.0"
+
+    def test_a_missing_position_on_either_side_falls_back_to_the_zone_verdict(self):
+        """Old rows keep working, and the fallback is the OLD arithmetic exactly.
+
+        A memory stored before formation positions existed carries no
+        coordinates. The term must not abstain when it still has two zone ids to
+        compare - that would silently drop the dimension for every historical
+        row - and must not invent a distance.
+        """
+        term = SpatialTerm()
+        here = context(zone_id=self.HERE, position=(0, 0))
+
+        assert term.score(make_candidate("old_here", zone_id=self.HERE), here) == 1.0
+        assert term.score(make_candidate("old_else", zone_id=self.ELSEWHERE), here) == 0.0
+
+        positionless_npc = context(zone_id=self.HERE)
+        stamped = make_candidate("stamped", zone_id=self.ELSEWHERE, position=(3, 0))
+        assert term.score(stamped, positionless_npc) == 0.0, (
+            "the NPC's own missing position cannot manufacture a distance either"
+        )
+
+    def test_abstention_survives_the_grading(self):
+        """The doctrine the grading must not quietly erode.
+
+        With neither a zone pair nor a position pair there is nothing measured,
+        and a 0.0 would rank the memory last on a property nobody read. Each arm
+        is checked separately so a regression in one cannot hide behind the other.
+        """
+        term = SpatialTerm()
+
+        assert term.score(make_candidate("bare"), context()) is None
+        assert term.score(make_candidate("bare"), context(position=(0, 0))) is None, (
+            "the NPC has a position but the memory carries none"
+        )
+        assert term.score(make_candidate("stamped", position=(3, 0)), context()) is None, (
+            "the memory carries one but the NPC does not"
+        )
+        assert term.score(make_candidate("zoned", zone_id=self.ELSEWHERE), context()) is None, (
+            "one zone id is not a comparison"
+        )
 
     def test_spatial_abstention_is_reported_and_changes_no_total(self):
         """The safe-no-op proof for the cross-repo release ordering.

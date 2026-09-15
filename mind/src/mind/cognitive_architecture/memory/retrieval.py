@@ -72,7 +72,11 @@ exercised it exactly as designed: a class, a `RetrievalWeights` field, a
 `term_statistics`, `collect_raw_scores`, `score_pool`, `rank` and `TermStats` are
 untouched by it. It is also the first term that is not Park's, so unlike the
 other three its weight is argued rather than cited - see
-`DEFAULT_RETRIEVAL_WEIGHT_SPATIAL`.
+`DEFAULT_RETRIEVAL_WEIGHT_SPATIAL`, and its decay scale likewise, see
+`DEFAULT_SPATIAL_DECAY_CELLS`. It is the only CONTINUOUS term of the four whose
+input is not already a similarity: relevance arrives as a vector distance,
+importance and recency as rates, while this one converts a grid separation into
+one.
 
 **Deliberate divergence from simulation place selection.** Proposed ADR-40
 ("belief as a posterior", npc-simulation/docs/adrs/2026-09-belief-as-a-posterior.md)
@@ -95,6 +99,7 @@ from mind.constants import (
     DEFAULT_RETRIEVAL_WEIGHT_RECENCY,
     DEFAULT_RETRIEVAL_WEIGHT_RELEVANCE,
     DEFAULT_RETRIEVAL_WEIGHT_SPATIAL,
+    DEFAULT_SPATIAL_DECAY_CELLS,
     GAME_MINUTES_PER_HOUR,
     IMPORTANCE_SCALE_MAX,
     MIN_CANDIDATE_POOL,
@@ -136,6 +141,13 @@ class RetrievalContext(BaseModel):
     # StatusObservation.current_zone_id. None means the NPC knows no place here -
     # which SpatialTerm treats as an abstention, not as a place called "nowhere".
     current_zone_id: str | None = None
+
+    # Where the NPC is standing, in grid cells, from StatusObservation.position.
+    # This is what makes SpatialTerm GRADED rather than binary: with it, a memory
+    # formed one room away outranks one formed across the map, which a
+    # same-place-or-not test cannot express. Absent for a status-less query, and
+    # SpatialTerm then falls back to the zone comparison.
+    current_position: tuple[int, int] | None = None
 
 
 class ScoreBreakdown(BaseModel):
@@ -273,36 +285,61 @@ class RecencyTerm:
 
 
 class SpatialTerm:
-    """Memories formed in the place the NPC is standing in retrieve hotter.
+    """Memories formed near where the NPC is standing retrieve hotter.
 
-    **Binary by construction, and that is a claim about places rather than a
-    simplification.** A memory was formed here or it was not; there is no
-    meaningful ordering between "formed at the pond" and "formed in the meadow"
-    when you are standing in the berry grounds. A graded version would need a
-    metric over places that nothing in the design has - and the two ids are
-    equally not-here.
+    **Graded by distance, with same-place as its ceiling.** A memory formed one
+    room away is more relevant than one formed across the map, and a binary
+    same-place test cannot say so - it collapses every elsewhere into one bucket.
+    So the score is ``0.5 ** (chebyshev_distance / DEFAULT_SPATIAL_DECAY_CELLS)``
+    over the two formation cells: 1.0 underfoot, 0.5 a sight-radius away, never
+    reaching zero. Chebyshev because the simulation's own vision disc is
+    Chebyshev over an 8-connected grid; a Euclidean metric here would disagree
+    with the geometry that produced the coordinates.
 
-    **Abstains rather than scoring 0.0 whenever EITHER side is unknown**: the NPC
-    stands on ground it knows no place for, or the memory carries no formation
-    zone (every memory written before NPC-1476, and every memory formed outside
-    any zone). A 0.0 there would rank a memory last on a property nobody
-    measured - the same default-impersonating-data failure the whole abstention
-    doctrine in this module exists to prevent, and the reason `ImportanceTerm`
-    does not vote a midpoint for an unrated memory.
+    **Same place short-circuits to 1.0, and that is not the same as distance 0.**
+    A place has extent. Standing at one end of a clearing, a memory formed at its
+    far end is thirty cells away by the metric and *here* by every other reading
+    an NPC has - it happened in the place the NPC is in. Zone identity is the
+    better answer when it is available, so it wins; distance grades everything
+    the zone comparison would have flattened into a single 0.0.
 
-    Note the asymmetry with a 0.0 that IS returned: "formed somewhere else" is a
-    measurement. The place is known on both sides and they differ. That is a real
-    zero, and it is what lets the term discriminate at all.
+    **Abstains rather than scoring 0.0 whenever neither reading is available**:
+    the NPC knows no place here and carries no position, or the memory carries
+    neither. A 0.0 there would rank a memory last on a property nobody measured -
+    the same default-impersonating-data failure the abstention doctrine in this
+    module exists to prevent, and the reason ``ImportanceTerm`` does not vote a
+    midpoint for an unrated memory.
+
+    Note what is NOT an abstention: a real distance is a measurement, however
+    large, and "known to be different places" with no positions on either side is
+    also a measurement. Those return numbers.
     """
 
     name = "spatial"
 
     def score(self, candidate: ScoredCandidate, context: RetrievalContext) -> float | None:
-        here = context.current_zone_id
-        formed = candidate.metadata.zone_id
-        if not here or not formed:
-            return None
-        return 1.0 if formed == here else 0.0
+        here_zone = context.current_zone_id
+        formed_zone = candidate.metadata.zone_id
+
+        # Same place wins outright, before distance is consulted - see the
+        # far-end-of-the-clearing case in the class docstring.
+        if here_zone and formed_zone and here_zone == formed_zone:
+            return 1.0
+
+        here_position = context.current_position
+        formed_position = candidate.metadata.get_location()
+        if here_position is not None and formed_position is not None:
+            separation = max(
+                abs(here_position[0] - formed_position[0]),
+                abs(here_position[1] - formed_position[1]),
+            )
+            return 0.5 ** (separation / DEFAULT_SPATIAL_DECAY_CELLS)
+
+        # No usable coordinates. Two known and different places is still a
+        # measurement, so it scores; anything less is not, so it abstains.
+        if here_zone and formed_zone:
+            return 0.0
+        return None
 
 
 def reinforced_time(previous_anchor: float, now: float, alpha: float) -> float:

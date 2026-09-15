@@ -61,6 +61,25 @@ DEFAULT_RETRIEVAL_WEIGHT_RECENCY = 1.0
 # from that measurement rather than defended here.
 DEFAULT_RETRIEVAL_WEIGHT_SPATIAL = 0.5
 
+# Characteristic falloff length for SpatialTerm, in grid cells. Relevance decays
+# as 0.5 ** (chebyshev_distance / this), so a memory formed this many cells away
+# scores half what one formed underfoot does, and the curve never reaches zero.
+#
+# 8 is the simulation's sight radius, and that is the argument rather than a
+# coincidence: "near" for an embodied agent is most naturally "about as far as I
+# can see", and it is the one length in this world that already has a meaning
+# both sides agree on. Chebyshev, not Euclidean, for the same reason - the
+# simulation's own vision disc is Chebyshev over an 8-connected grid, so a
+# Euclidean metric here would disagree with the geometry that produced the
+# coordinates.
+#
+# A reasoned starting scale, not a measured one. What would falsify it: retrieval
+# that surfaces same-room memories and across-the-map memories at
+# indistinguishable rank (too large), or that cannot see anything outside the
+# current cell (too small). test_term_spread_measurement.py measures the realized
+# spread this produces; prefer that number to this argument.
+DEFAULT_SPATIAL_DECAY_CELLS = 8.0
+
 # Park's exponential forgetting curve, per GAME hour. Half-life is
 # log(0.5)/log(0.995) ~= 138 game hours ~= 5.8 game days.
 DEFAULT_RECENCY_DECAY_PER_GAME_HOUR = 0.995

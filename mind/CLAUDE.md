@@ -126,9 +126,13 @@ a populated buffer.
   long-term metadata. Missing spatial provenance remains absent. `NewMemory`,
   the LLM output schema, does not ask the model to invent those fields.
 - **Retrieval scoring:** `memory/retrieval.py` — Park's three terms (relevance,
-  importance, recency) at his published equal weights, plus `SpatialTerm` for
-  formation-zone agreement with the current known zone. Its default weight 0.5
-  is a reasoned policy, not a measured calibration. Scoring uses a candidate pool
+  importance, recency) at his published equal weights, plus `SpatialTerm`, which
+  scores how near a memory's formation cell is to where the NPC stands —
+  `0.5 ** (chebyshev / 8)`, halving each sight-radius, with same-zone
+  short-circuiting to 1.0 because a place has extent and its far end is still
+  *here*. Positionless rows fall back to the zone comparison, so stores written
+  before formation positions keep their previous behaviour exactly. Its default
+  weight 0.5 and decay scale 8 are reasoned policy, not measured calibration. Scoring uses a candidate pool
   wider than `top_k`. Terms return `None` to abstain when the data is absent,
   and the surviving weights renormalize; a term with no data never votes in
   either direction. Configurable globally, per mind, or per query. Timestamps
