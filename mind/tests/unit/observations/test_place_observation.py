@@ -25,7 +25,16 @@ from mind.cognitive_architecture.observations import (
 #
 # PROVENANCE: pinned against SHIPPED simulation code, re-derived from
 # ``src/minds/observations/place_observation.gd::get_data`` and
-# ``place_descriptor.gd::to_dict`` on the NPC-1299 branch carrying NPC-1473.
+# ``place_descriptor.gd::to_dict`` on npc-simulation main at contract version 3
+# (NPC-1479, which added ``expected_providers`` / ``belief_deviation`` to every
+# descriptor -- emitted unconditionally, witnessed or not).
+#
+# This sample sat at version 2 for the whole life of the v3 producer, and that
+# is the shape of the defect it now pins: the v3 keys are nested inside each
+# descriptor, the unknown-version fallback sheds only ROOT keys, and the
+# descriptor is extra="forbid" -- so every MCP NPC that knew a place had its
+# whole observation refused. A sample pinned to an older producer is a sample
+# that cannot see the current one.
 #
 # It was previously pinned against an APPROVED SPEC whose producer had not
 # merged (``docs/plans/NPC-1299.md`` section 2.1), and the note here said to
@@ -43,7 +52,7 @@ from mind.cognitive_architecture.observations import (
 # ``witnessed`` gates ``affords`` / ``provider_count`` / ``witnessed_age_minutes``
 # the same way -- the producer omits all three when it is false.
 PLACE_BLOCK_CONTRACT_SAMPLE = {
-    "contract_version": 2,
+    "contract_version": 3,
     # A FULL descriptor: the producer sends current_place.to_dict() off the same
     # PlaceDescriptor it puts in known_places, where this place also appears.
     "current_place": {
@@ -60,6 +69,8 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
         "age_minutes": 120,
         "beyond_vision": False,
         "confidence": 0.95,
+        "expected_providers": 3.5,
+        "belief_deviation": 1.2,
     },
     "known_places": [
         {
@@ -76,6 +87,8 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
             "age_minutes": 120,
             "beyond_vision": False,
             "confidence": 0.95,
+            "expected_providers": 3.5,
+            "belief_deviation": 1.2,
         },
         {
             "zone_id": "zone_pond",
@@ -92,6 +105,8 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
             "age_minutes": 40,
             "beyond_vision": True,
             "confidence": 0.4,
+            "expected_providers": 3.5,
+            "belief_deviation": 1.2,
         },
         {
             "zone_id": "zone_green",
@@ -107,6 +122,8 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
             "age_minutes": 900,
             "beyond_vision": True,
             "confidence": 0.7,
+            "expected_providers": 3.5,
+            "belief_deviation": 1.2,
         },
     ],
     "known_total": 7,
@@ -125,6 +142,8 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
         "age_minutes": 40,
         "beyond_vision": True,
         "confidence": 0.4,
+        "expected_providers": 3.5,
+        "belief_deviation": 1.2,
     },
     # Verbatim from section 2.1's illustration, including the ``active < cap``
     # with a positive wait. NOTE FOR THE SIMULATION SIDE: ``MarkBudget.
@@ -149,7 +168,7 @@ class TestPlaceBlockParsing:
 
         place = observation.place
         assert place is not None
-        assert place.contract_version == 2
+        assert place.contract_version == 3
         assert place.known_total == 7
         assert place.current_place.name == "the berry grounds"
         assert [p.zone_id for p in place.known_places] == ["zone_berry", "zone_pond", "zone_green"]
@@ -226,6 +245,45 @@ class TestPlaceBlockParsing:
         with pytest.raises(ValidationError):
             PlaceDescriptor.model_validate({"zone_id": "z", "source": "overheard"})
 
+    def test_a_v3_descriptor_carrying_the_belief_keys_parses(self, caplog):
+        """The live defect this version registration fixes, stated as a payload.
+
+        ``expected_providers`` and ``belief_deviation`` ride INSIDE each
+        descriptor, so the unknown-version fallback -- which sheds only root keys
+        -- cannot rescue them: undeclared, they are nested extra="forbid" errors
+        and the whole observation is refused. Asserting no version warning pins
+        that v3 is KNOWN rather than parsed best-effort.
+        """
+        place = PlaceObservation.model_validate(
+            {
+                "contract_version": 3,
+                "known_places": [
+                    {
+                        "zone_id": "zone_berry",
+                        "witnessed": False,
+                        "expected_providers": 1.0,
+                        "belief_deviation": 1.0,
+                    }
+                ],
+                "known_total": 1,
+            }
+        )
+        descriptor = place.known_places[0]
+        assert descriptor.expected_providers == 1.0
+        assert descriptor.belief_deviation == 1.0
+        assert "unknown contract_version" not in caplog.text
+
+    def test_a_pre_v3_descriptor_has_no_belief_reading(self):
+        """Absent is not zero: a v1/v2 producer never computed a posterior.
+
+        ``0.0`` expected providers is a real belief ("nothing there"), so a
+        default of zero would put a claim in the model's mouth that no producer
+        made.
+        """
+        descriptor = PlaceDescriptor.model_validate({"zone_id": "z"})
+        assert descriptor.expected_providers is None
+        assert descriptor.belief_deviation is None
+
     def test_the_anchor_reads_the_wire_pair(self):
         """Godot has no JSON vector type; every observation converts to ``[x, y]``."""
         descriptor = PlaceDescriptor.model_validate({"zone_id": "z", "anchor": [12, 34]})
@@ -293,6 +351,40 @@ class TestPlaceRendering:
         assert "told by npc_bo" in rendered
         assert "harvest x4" in rendered
         assert "you named it" in rendered
+
+    def test_a_witnessed_place_renders_its_belief_beside_its_memory(self):
+        """Mirrors ``place_descriptor.gd::format_for_npc``: what the NPC expects
+        to find NOW, and how sure it is, rendered only where contents were seen."""
+        assert "harvest x4, expect about 3.5, +/- 1.2" in self._rendered()
+
+    def test_an_unwitnessed_place_renders_no_belief(self):
+        """The simulation skips the clause for a place never looked inside --
+        "about 1.0, give or take 1.0" says nothing the missing affordances have
+        not already said."""
+        rendered = PlaceDescriptor.model_validate(
+            {
+                "zone_id": "zone_x",
+                "name": "the thicket",
+                "witnessed": False,
+                "expected_providers": 1.0,
+                "belief_deviation": 1.0,
+            }
+        ).render_summary()
+        assert "expect about" not in rendered
+
+    def test_a_witnessed_bare_place_renders_no_belief(self):
+        """Mirrors the producer's other skip: seen, but nothing afforded."""
+        rendered = PlaceDescriptor.model_validate(
+            {
+                "zone_id": "zone_x",
+                "name": "the thicket",
+                "witnessed": True,
+                "affords": [],
+                "expected_providers": 0.4,
+                "belief_deviation": 0.4,
+            }
+        ).render_summary()
+        assert "expect about" not in rendered
 
     def test_the_place_you_stand_on_is_marked_here_not_by_distance(self):
         assert "the berry grounds (here" in self._rendered()

@@ -737,7 +737,25 @@ class PlaceDescriptor(BaseModel):
     #: ``GoalOption.confidence`` on this same wire family: bounding it here would
     #: convert a cosmetic numeric excursion into a ValidationError, and in this
     #: pipeline a ValidationError collapses the cycle into the WAIT fallback.
+    #:
+    #: At contract version 3 (NPC-1479) it is a PRECISION reading -- the share of
+    #: the belief that came from observation rather than from the prior -- where
+    #: before it was a discount factor. Same name, same shape, different meaning:
+    #: never multiply a score by it.
     confidence: float = 0.0
+    #: The posterior mean number of item providers the NPC expects to find in
+    #: this place NOW (NPC-1479, contract version 3). Emitted for every
+    #: descriptor, witnessed or not: for a place never looked inside it is the
+    #: prior mean, which is still a belief.
+    #:
+    #: ``None`` means the producer predates version 3 and computed no posterior
+    #: at all. Not ``0.0``: zero expected providers is a real belief ("nothing
+    #: there"), and a default must not put a claim in the model's mouth.
+    expected_providers: float | None = None
+    #: Standard deviation of ``expected_providers`` -- how unsure the NPC is.
+    #: ``None`` for the same reason. Not an information-gain reading: a rich
+    #: observation can raise the mean and the deviation together.
+    belief_deviation: float | None = None
 
     def render_summary(self, here_zone_id: str = "") -> str:
         """One prompt clause naming this place and why it matters.
@@ -764,6 +782,19 @@ class PlaceDescriptor(BaseModel):
             if self.provider_count:
                 clause += f" x{self.provider_count}"
             facts.append(clause)
+            # The belief beside the memory, mirroring the simulation's
+            # ``place_descriptor.gd::format_for_npc``: rendered only for a place
+            # whose contents were seen, because "about 1.0, give or take 1.0" for
+            # a place never looked inside says nothing the absent affordances
+            # have not already said.
+            if (
+                self.witnessed
+                and self.expected_providers is not None
+                and self.belief_deviation is not None
+            ):
+                facts.append(
+                    f"expect about {self.expected_providers:.1f}, +/- {self.belief_deviation:.1f}"
+                )
 
         if self.source == PlaceKnowledgeSource.TOLD and self.told_by:
             facts.append(f"told by {self.told_by}")
@@ -813,7 +844,13 @@ class MarkBudgetState(BaseModel):
 # WITNESSED and may be wrong. Nothing about their shape changed, which is
 # exactly why it needed a version -- a v1 reader keeps parsing while quietly
 # meaning something else.
-KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2})
+# v3 (NPC-1479) is the same case again, plus two additive descriptor keys
+# (``expected_providers``, ``belief_deviation``): ``confidence`` kept its name and
+# shape while becoming a precision reading instead of a discount factor. The
+# additive keys are what made its absence here FATAL rather than degraded -- they
+# are nested inside each descriptor, the fallback below sheds only root keys, and
+# the descriptor forbids extras.
+KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3})
 
 
 class PlaceObservation(BaseModel):
