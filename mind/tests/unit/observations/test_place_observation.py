@@ -25,9 +25,10 @@ from mind.cognitive_architecture.observations import (
 #
 # PROVENANCE: pinned against SHIPPED simulation code, re-derived from
 # ``src/minds/observations/place_observation.gd::get_data`` and
-# ``place_descriptor.gd::to_dict`` on npc-simulation main at contract version 3
-# (NPC-1479, which added ``expected_providers`` / ``belief_deviation`` to every
-# descriptor -- emitted unconditionally, witnessed or not).
+# ``place_descriptor.gd::to_dict`` at contract version 4 (NPC-1666, which
+# renamed the per-place ``anchor`` key to ``focal_cell``). Version 3 (NPC-1479)
+# added ``expected_providers`` / ``belief_deviation`` to every descriptor --
+# emitted unconditionally, witnessed or not.
 #
 # This sample sat at version 2 for the whole life of the v3 producer, and that
 # is the shape of the defect it now pins: the v3 keys are nested inside each
@@ -52,14 +53,14 @@ from mind.cognitive_architecture.observations import (
 # ``witnessed`` gates ``affords`` / ``provider_count`` / ``witnessed_age_minutes``
 # the same way -- the producer omits all three when it is false.
 PLACE_BLOCK_CONTRACT_SAMPLE = {
-    "contract_version": 3,
+    "contract_version": 4,
     # A FULL descriptor: the producer sends current_place.to_dict() off the same
     # PlaceDescriptor it puts in known_places, where this place also appears.
     "current_place": {
         "zone_id": "zone_berry",
         "name": "the berry grounds",
         "kind": "gathering_ground",
-        "anchor": [12, 34],
+        "focal_cell": [12, 34],
         "distance": 0,
         "witnessed": True,
         "affords": ["harvest"],
@@ -77,7 +78,7 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
             "zone_id": "zone_berry",
             "name": "the berry grounds",
             "kind": "gathering_ground",
-            "anchor": [12, 34],
+            "focal_cell": [12, 34],
             "distance": 0,
             "witnessed": True,
             "affords": ["harvest"],
@@ -94,7 +95,7 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
             "zone_id": "zone_pond",
             "name": "the pond bend",
             "kind": "gathering_ground",
-            "anchor": [30, 34],
+            "focal_cell": [30, 34],
             "distance": 18,
             "witnessed": True,
             "affords": ["drink"],
@@ -112,7 +113,7 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
             "zone_id": "zone_green",
             "name": "the green",
             "kind": "gathering_ground",
-            "anchor": [43, 34],
+            "focal_cell": [43, 34],
             "distance": 31,
             "witnessed": True,
             "affords": [],
@@ -131,7 +132,7 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
         "zone_id": "zone_pond",
         "name": "the pond bend",
         "kind": "gathering_ground",
-        "anchor": [30, 34],
+        "focal_cell": [30, 34],
         "distance": 18,
         "witnessed": True,
         "affords": ["drink"],
@@ -168,7 +169,7 @@ class TestPlaceBlockParsing:
 
         place = observation.place
         assert place is not None
-        assert place.contract_version == 3
+        assert place.contract_version == 4
         assert place.known_total == 7
         assert place.current_place.name == "the berry grounds"
         assert [p.zone_id for p in place.known_places] == ["zone_berry", "zone_pond", "zone_green"]
@@ -284,10 +285,47 @@ class TestPlaceBlockParsing:
         assert descriptor.expected_providers is None
         assert descriptor.belief_deviation is None
 
-    def test_the_anchor_reads_the_wire_pair(self):
+    def test_the_focal_cell_reads_the_wire_pair(self):
         """Godot has no JSON vector type; every observation converts to ``[x, y]``."""
-        descriptor = PlaceDescriptor.model_validate({"zone_id": "z", "anchor": [12, 34]})
-        assert descriptor.anchor == (12, 34)
+        descriptor = PlaceDescriptor.model_validate({"zone_id": "z", "focal_cell": [12, 34]})
+        assert descriptor.focal_cell == (12, 34)
+
+    def test_an_absent_focal_cell_is_none_not_the_origin(self):
+        """``(0, 0)`` is a real cell on every board the simulation builds, so a
+        default of it would be indistinguishable from a place standing there."""
+        descriptor = PlaceDescriptor.model_validate({"zone_id": "z"})
+        assert descriptor.focal_cell is None
+
+    def test_a_v4_block_refuses_the_retired_anchor_key(self):
+        """The rename is a lockstep signal, not an alias: at v4 ``anchor`` is an
+        undeclared key and ``extra="forbid"`` keeps it loud."""
+        with pytest.raises(ValidationError):
+            PlaceObservation.model_validate(
+                {"contract_version": 4, "known_places": [{"zone_id": "z", "anchor": [1, 2]}]}
+            )
+
+    @pytest.mark.parametrize("version", [1, 2, 3])
+    def test_a_pre_v4_block_reads_its_anchor_as_the_focal_cell(self, version):
+        """The independent-deployment window, and only that.
+
+        This model can merge before the simulation's v4 producer, so for a while
+        it receives v3 blocks that still spell the key ``anchor``. Refusing them
+        would take every MCP NPC that knows a place to the wait fallback until
+        the simulation redeploys. The translation is keyed on the BLOCK's
+        version, so it reaches every descriptor slot and cannot leak into v4.
+        """
+        legacy = {"zone_id": "z", "anchor": [5, 6]}
+        place = PlaceObservation.model_validate(
+            {
+                "contract_version": version,
+                "current_place": dict(legacy),
+                "known_places": [dict(legacy)],
+                "target_place": dict(legacy),
+            }
+        )
+        assert place.current_place.focal_cell == (5, 6)
+        assert place.known_places[0].focal_cell == (5, 6)
+        assert place.target_place.focal_cell == (5, 6)
 
 
 class TestMarkBudgetRendering:

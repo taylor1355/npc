@@ -687,10 +687,15 @@ class PlaceDescriptor(BaseModel):
     #: unrecognised name to ``KIND_INVALID`` there, and a new kind must not need
     #: a second edit in this repository.
     kind: str = ""
-    #: The zone's anchor cell. ``[x, y]`` on the wire -- Godot has no JSON vector
+    #: The zone's focal cell: the one cell that stands for the place, and where a
+    #: journey to it walks. ``[x, y]`` on the wire -- Godot has no JSON vector
     #: type, so every observation converts (``status_observation.gd``,
     #: ``entity_data.gd``), and this matches ``StatusObservation.position``.
-    anchor: tuple[int, int] = (0, 0)
+    #:
+    #: ``None`` when the wire carries no cell. Not ``(0, 0)``: the origin is a
+    #: real cell on every board the simulation builds, so it cannot also mean
+    #: "none supplied".
+    focal_cell: tuple[int, int] | None = None
     #: Chebyshev distance from the observer, in cells.
     distance: int = 0
     #: Whether this NPC has ever LOOKED INSIDE this place (NPC-1473).
@@ -850,7 +855,35 @@ class MarkBudgetState(BaseModel):
 # additive keys are what made its absence here FATAL rather than degraded -- they
 # are nested inside each descriptor, the fallback below sheds only root keys, and
 # the descriptor forbids extras.
-KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3})
+# v4 (NPC-1666) is a pure structural rename: each descriptor's ``anchor`` key is
+# now ``focal_cell``, because "anchor" had come to name three different things
+# in the simulation. See ``_FOCAL_CELL_CONTRACT_VERSION`` for how older blocks
+# still spelling it ``anchor`` are read.
+KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4})
+
+# The first place-block version whose descriptors spell the representative cell
+# ``focal_cell``. Every KNOWN version below it spells it ``anchor``.
+_FOCAL_CELL_CONTRACT_VERSION = 4
+
+# The descriptor slots of one place block, for the pre-v4 key translation.
+_SINGLE_DESCRIPTOR_KEYS = ("current_place", "target_place")
+_DESCRIPTOR_LIST_KEY = "known_places"
+
+
+def _descriptor_with_focal_cell_key(descriptor: Any) -> Any:
+    """One pre-v4 descriptor with ``anchor`` respelled ``focal_cell``.
+
+    Untouched when it is not a dict, carries no ``anchor``, or ALREADY carries
+    ``focal_cell`` -- a descriptor spelling both is malformed, and leaving the
+    stray ``anchor`` in place is what lets ``extra="forbid"`` say so.
+    """
+    if not isinstance(descriptor, dict) or "anchor" not in descriptor:
+        return descriptor
+    if "focal_cell" in descriptor:
+        return descriptor
+    translated = {key: value for key, value in descriptor.items() if key != "anchor"}
+    translated["focal_cell"] = descriptor["anchor"]
+    return translated
 
 
 class PlaceObservation(BaseModel):
@@ -925,6 +958,8 @@ class PlaceObservation(BaseModel):
             return data
         version = data.get("contract_version", 1)
         if version in KNOWN_PLACE_CONTRACT_VERSIONS:
+            if version < _FOCAL_CELL_CONTRACT_VERSION:
+                return cls._with_focal_cell_keys(data)
             return data
         logger.warning(
             "Place block carries unknown contract_version %s (known: %s); "
@@ -933,6 +968,29 @@ class PlaceObservation(BaseModel):
             sorted(KNOWN_PLACE_CONTRACT_VERSIONS),
         )
         return {key: value for key, value in data.items() if key in cls.model_fields}
+
+    @staticmethod
+    def _with_focal_cell_keys(data: dict) -> dict:
+        """A pre-v4 block with every descriptor's ``anchor`` read as ``focal_cell``.
+
+        A cross-repository deployment window, not an in-repo alias: this model can
+        merge before the simulation's v4 producer, and until that deploys it
+        receives v3 blocks spelling the key the old way. Refusing them would send
+        every MCP NPC that knows a place to the wait fallback. Keyed on the
+        BLOCK's version -- a v4 descriptor carrying ``anchor`` still fails loud.
+        Once no pre-v4 producer remains, this and ``_FOCAL_CELL_CONTRACT_VERSION``
+        can go together.
+        """
+        translated = dict(data)
+        for key in _SINGLE_DESCRIPTOR_KEYS:
+            if key in translated:
+                translated[key] = _descriptor_with_focal_cell_key(translated[key])
+        places = translated.get(_DESCRIPTOR_LIST_KEY)
+        if isinstance(places, list):
+            translated[_DESCRIPTOR_LIST_KEY] = [
+                _descriptor_with_focal_cell_key(place) for place in places
+            ]
+        return translated
 
     def render_summary(self) -> str:
         """The place block as prompt prose, or "" when there is nothing to say.
