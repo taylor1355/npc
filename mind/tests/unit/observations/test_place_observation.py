@@ -327,6 +327,19 @@ class TestPlaceBlockParsing:
         assert place.known_places[0].focal_cell == (5, 6)
         assert place.target_place.focal_cell == (5, 6)
 
+    def test_a_pre_v4_descriptor_spelling_both_keys_is_refused(self):
+        """A descriptor carrying ``anchor`` AND ``focal_cell`` is malformed at any
+        version. The translation leaves the stray ``anchor`` in place rather than
+        choosing a winner, so ``extra="forbid"`` refuses it instead of silently
+        discarding one of two disagreeing cells."""
+        with pytest.raises(ValidationError):
+            PlaceObservation.model_validate(
+                {
+                    "contract_version": 3,
+                    "known_places": [{"zone_id": "z", "anchor": [1, 2], "focal_cell": [3, 4]}],
+                }
+            )
+
 
 class TestMarkBudgetRendering:
     def test_a_free_slot_renders_no_wait(self):
