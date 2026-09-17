@@ -183,6 +183,22 @@ ignore = [
     "B905",  # zip() without strict parameter (Python 3.10+ feature)
 ]
 
+# Pins what rule "I" currently INFERS rather than changing it. Ruff decides
+# first-party by looking for the package under `linter.src`, which defaults to
+# the config file's own directory plus its `src/` - so `mind` is already
+# classified first-party, and adding this reorders nothing:
+#
+#     uv run ruff check --select I src tests     # clean before and after
+#     uv run ruff check --show-settings src/mind/constants.py | grep -i src
+#
+# It is written down because that classification is the whole basis on which "I"
+# can tell a local import from a third-party one, and today it rests on a
+# directory-layout heuristic. Naming the package makes a layout change fail
+# visibly here instead of silently demoting every `mind.` import to third-party,
+# where misplaced ones stop being flagged at all. [NPC-1061]
+[tool.ruff.lint.isort]
+known-first-party = ["mind"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
