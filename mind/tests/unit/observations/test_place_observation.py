@@ -240,9 +240,11 @@ class TestPlaceBlockParsing:
         "unknown contract_version 5" and every place block on the deployed mind
         reads as a version it does not know.
         """
-        observation = Observation.model_validate(
-            _observation(dict(PLACE_BLOCK_CONTRACT_SAMPLE, contract_version=5))
+        assert PLACE_BLOCK_CONTRACT_SAMPLE["contract_version"] == 5, (
+            "read the sample as the v5 producer emits it; when the contract moves, "
+            "re-pin the sample rather than overriding the version here"
         )
+        observation = Observation.model_validate(_observation(PLACE_BLOCK_CONTRACT_SAMPLE))
 
         assert observation.place.contract_version == 5
         assert observation.place.target_place.zone_id == "zone_pond"
