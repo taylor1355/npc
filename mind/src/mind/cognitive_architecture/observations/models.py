@@ -687,10 +687,15 @@ class PlaceDescriptor(BaseModel):
     #: unrecognised name to ``KIND_INVALID`` there, and a new kind must not need
     #: a second edit in this repository.
     kind: str = ""
-    #: The zone's anchor cell. ``[x, y]`` on the wire -- Godot has no JSON vector
+    #: The zone's focal cell: the one cell that stands for the place, and where a
+    #: journey to it walks. ``[x, y]`` on the wire -- Godot has no JSON vector
     #: type, so every observation converts (``status_observation.gd``,
     #: ``entity_data.gd``), and this matches ``StatusObservation.position``.
-    anchor: tuple[int, int] = (0, 0)
+    #:
+    #: ``None`` when the wire carries no cell. Not ``(0, 0)``: the origin is a
+    #: real cell on every board the simulation builds, so it cannot also mean
+    #: "none supplied".
+    focal_cell: tuple[int, int] | None = None
     #: Chebyshev distance from the observer, in cells.
     distance: int = 0
     #: Whether this NPC has ever LOOKED INSIDE this place (NPC-1473).
@@ -737,7 +742,25 @@ class PlaceDescriptor(BaseModel):
     #: ``GoalOption.confidence`` on this same wire family: bounding it here would
     #: convert a cosmetic numeric excursion into a ValidationError, and in this
     #: pipeline a ValidationError collapses the cycle into the WAIT fallback.
+    #:
+    #: At contract version 3 (NPC-1479) it is a PRECISION reading -- the share of
+    #: the belief that came from observation rather than from the prior -- where
+    #: before it was a discount factor. Same name, same shape, different meaning:
+    #: never multiply a score by it.
     confidence: float = 0.0
+    #: The posterior mean number of item providers the NPC expects to find in
+    #: this place NOW (NPC-1479, contract version 3). Emitted for every
+    #: descriptor, witnessed or not: for a place never looked inside it is the
+    #: prior mean, which is still a belief.
+    #:
+    #: ``None`` means the producer predates version 3 and computed no posterior
+    #: at all. Not ``0.0``: zero expected providers is a real belief ("nothing
+    #: there"), and a default must not put a claim in the model's mouth.
+    expected_providers: float | None = None
+    #: Standard deviation of ``expected_providers`` -- how unsure the NPC is.
+    #: ``None`` for the same reason. Not an information-gain reading: a rich
+    #: observation can raise the mean and the deviation together.
+    belief_deviation: float | None = None
 
     def render_summary(self, here_zone_id: str = "") -> str:
         """One prompt clause naming this place and why it matters.
@@ -764,6 +787,19 @@ class PlaceDescriptor(BaseModel):
             if self.provider_count:
                 clause += f" x{self.provider_count}"
             facts.append(clause)
+            # The belief beside the memory, mirroring the simulation's
+            # ``place_descriptor.gd::format_for_npc``: rendered only for a place
+            # whose contents were seen, because "about 1.0, give or take 1.0" for
+            # a place never looked inside says nothing the absent affordances
+            # have not already said.
+            if (
+                self.witnessed
+                and self.expected_providers is not None
+                and self.belief_deviation is not None
+            ):
+                facts.append(
+                    f"expect about {self.expected_providers:.1f}, +/- {self.belief_deviation:.1f}"
+                )
 
         if self.source == PlaceKnowledgeSource.TOLD and self.told_by:
             facts.append(f"told by {self.told_by}")
@@ -813,7 +849,41 @@ class MarkBudgetState(BaseModel):
 # WITNESSED and may be wrong. Nothing about their shape changed, which is
 # exactly why it needed a version -- a v1 reader keeps parsing while quietly
 # meaning something else.
-KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2})
+# v3 (NPC-1479) is the same case again, plus two additive descriptor keys
+# (``expected_providers``, ``belief_deviation``): ``confidence`` kept its name and
+# shape while becoming a precision reading instead of a discount factor. The
+# additive keys are what made its absence here FATAL rather than degraded -- they
+# are nested inside each descriptor, the fallback below sheds only root keys, and
+# the descriptor forbids extras.
+# v4 (NPC-1666) is a pure structural rename: each descriptor's ``anchor`` key is
+# now ``focal_cell``, because "anchor" had come to name three different things
+# in the simulation. See ``_FOCAL_CELL_CONTRACT_VERSION`` for how older blocks
+# still spelling it ``anchor`` are read.
+KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4})
+
+# The first place-block version whose descriptors spell the representative cell
+# ``focal_cell``. Every KNOWN version below it spells it ``anchor``.
+_FOCAL_CELL_CONTRACT_VERSION = 4
+
+# The descriptor slots of one place block, for the pre-v4 key translation.
+_SINGLE_DESCRIPTOR_KEYS = ("current_place", "target_place")
+_DESCRIPTOR_LIST_KEY = "known_places"
+
+
+def _descriptor_with_focal_cell_key(descriptor: Any) -> Any:
+    """One pre-v4 descriptor with ``anchor`` respelled ``focal_cell``.
+
+    Untouched when it is not a dict, carries no ``anchor``, or ALREADY carries
+    ``focal_cell`` -- a descriptor spelling both is malformed, and leaving the
+    stray ``anchor`` in place is what lets ``extra="forbid"`` say so.
+    """
+    if not isinstance(descriptor, dict) or "anchor" not in descriptor:
+        return descriptor
+    if "focal_cell" in descriptor:
+        return descriptor
+    translated = {key: value for key, value in descriptor.items() if key != "anchor"}
+    translated["focal_cell"] = descriptor["anchor"]
+    return translated
 
 
 class PlaceObservation(BaseModel):
@@ -888,6 +958,8 @@ class PlaceObservation(BaseModel):
             return data
         version = data.get("contract_version", 1)
         if version in KNOWN_PLACE_CONTRACT_VERSIONS:
+            if version < _FOCAL_CELL_CONTRACT_VERSION:
+                return cls._with_focal_cell_keys(data)
             return data
         logger.warning(
             "Place block carries unknown contract_version %s (known: %s); "
@@ -896,6 +968,29 @@ class PlaceObservation(BaseModel):
             sorted(KNOWN_PLACE_CONTRACT_VERSIONS),
         )
         return {key: value for key, value in data.items() if key in cls.model_fields}
+
+    @staticmethod
+    def _with_focal_cell_keys(data: dict) -> dict:
+        """A pre-v4 block with every descriptor's ``anchor`` read as ``focal_cell``.
+
+        A cross-repository deployment window, not an in-repo alias: this model can
+        merge before the simulation's v4 producer, and until that deploys it
+        receives v3 blocks spelling the key the old way. Refusing them would send
+        every MCP NPC that knows a place to the wait fallback. Keyed on the
+        BLOCK's version -- a v4 descriptor carrying ``anchor`` still fails loud.
+        Once no pre-v4 producer remains, this and ``_FOCAL_CELL_CONTRACT_VERSION``
+        can go together.
+        """
+        translated = dict(data)
+        for key in _SINGLE_DESCRIPTOR_KEYS:
+            if key in translated:
+                translated[key] = _descriptor_with_focal_cell_key(translated[key])
+        places = translated.get(_DESCRIPTOR_LIST_KEY)
+        if isinstance(places, list):
+            translated[_DESCRIPTOR_LIST_KEY] = [
+                _descriptor_with_focal_cell_key(place) for place in places
+            ]
+        return translated
 
     def render_summary(self) -> str:
         """The place block as prompt prose, or "" when there is nothing to say.
