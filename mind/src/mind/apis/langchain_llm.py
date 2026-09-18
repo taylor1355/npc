@@ -18,6 +18,17 @@ class LangChainModel:
     GEMINI_FLASH_LITE = constants.GEMINI_FLASH_LITE
 
 
+# Per-call HTTP bound. Without it there is none: langchain-openai passes
+# request_timeout=None through, which httpx treats as unbounded (the SDK's
+# 600s default never applies). Kept below the game's 60s decide_action deadline
+# (npc-simulation DEADLINE_SECONDS_DECIDE_ACTION) so this side fails first.
+# tests/unit/test_server_bounds.py pins both properties.
+LLM_REQUEST_TIMEOUT_SECONDS = 45.0
+
+# Node-level retry (LLMNode max_retries) already exists; client retry would multiply it.
+LLM_CLIENT_MAX_RETRIES = 0
+
+
 def supports_cache_control(model: str) -> bool:
     """Whether this model slug may receive explicit cache_control breakpoints.
 
@@ -37,7 +48,9 @@ def get_llm(model: str, temperature: float = 0) -> ChatOpenAI:
         temperature: Sampling temperature (0.0 to 1.0), default 0 for deterministic output
 
     Returns:
-        Configured ChatOpenAI instance pointing to OpenRouter
+        Configured ChatOpenAI instance pointing to OpenRouter, bounded by
+        LLM_REQUEST_TIMEOUT_SECONDS with client-level retry disabled — see the
+        constants above for why both are explicit rather than left to defaults.
 
     Example:
         >>> from mind.apis.langchain_llm import get_llm, LangChainModel
@@ -52,4 +65,6 @@ def get_llm(model: str, temperature: float = 0) -> ChatOpenAI:
         openai_api_key=OPENROUTER_API_KEY,
         openai_api_base="https://openrouter.ai/api/v1",
         temperature=temperature,
+        timeout=LLM_REQUEST_TIMEOUT_SECONDS,
+        max_retries=LLM_CLIENT_MAX_RETRIES,
     )

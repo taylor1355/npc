@@ -160,6 +160,17 @@ def main():
     parser.add_argument(
         "--port", type=int, default=8000, help="Port to run the server on (default: 8000)"
     )
+    # OFF by default. Starlette's debug mode replaces the generic 500 with a
+    # rendered traceback in the HTTP RESPONSE, so an unhandled exception ships
+    # source lines, local paths and frame context to whoever made the request.
+    # The /sse, /health, /shutdown and /logs routes are all reachable by anything
+    # that can open a socket to this port, so that is not a developer-only
+    # audience. Opt in per launch when debugging; nothing launches with it set.
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable Starlette debug mode, which returns tracebacks to clients (default: off)",
+    )
     args = parser.parse_args()
 
     # HTTP app construction is offline; credentials belong to server startup.
@@ -187,7 +198,7 @@ def main():
     mcp_server = server.mcp._mcp_server
 
     # Create the Starlette app
-    starlette_app = create_starlette_app(mcp_server, debug=True)
+    starlette_app = create_starlette_app(mcp_server, debug=args.debug)
 
     print(f"Starting NPC Mind MCP server on http://{args.host}:{args.port}/sse")
 
