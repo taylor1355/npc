@@ -58,6 +58,13 @@ class ActionType(str, Enum):
 # the caller asked for.
 MARK_ZONE_EXTENT_PARAMS = ["cells", "radius"]
 
+# The two ways one move may name where it is going: a grid cell, or a place this
+# NPC knows, by id (NPC-1643). Exactly one, never both, never neither -- the
+# MARK_ZONE rule, for the MARK_ZONE reason. The ORDER is the simulation's
+# refusal wording ("name exactly one of destination, zone_id"), which
+# MutuallyExclusiveParametersError reproduces verbatim.
+MOVE_TO_TARGET_PARAMS = ["destination", "zone_id"]
+
 
 class Action(BaseModel):
     """Action to be executed"""
@@ -250,9 +257,47 @@ class Action(BaseModel):
         return normalize(actual) == normalize(expected)
 
     def _validate_move_to(self):
-        """Validate MOVE_TO action parameters"""
-        if "destination" not in self.parameters:
-            raise MissingRequiredParameterError("destination", self.action)
+        """Validate MOVE_TO names exactly one of a cell and a known place.
+
+        The two "was this supplied?" predicates are the simulation's own,
+        mirrored EXACTLY from ``plan_execution.gd::apply_place_travel`` after
+        ``McpMindClient._known_mcp_action`` has normalized the wire::
+
+            has_zone := not requested.zone_id.is_empty()
+                        (zone_id = "" when absent or JSON null, else str(value))
+            has_dest := requested.destination_named
+                        (KEY PRESENCE, with a JSON-null destination erased first)
+
+        They are NOT the same shape as MARK_ZONE's, and must not be made so.
+
+        - ``has_dest`` is key presence, never a value test. ``Vector2i.ZERO`` is
+          a legal cell, so the simulation cannot use a value as a sentinel
+          (NPC-1327), and a mind-side ``destination != [0, 0]`` check would
+          reject a legitimate move to the origin that the simulation accepts.
+        - ``has_zone`` is NOT stripped. The simulation reads ``"  "`` as a
+          supplied zone id (and then refuses it as a place the NPC does not
+          know); stripping here would let ``{"destination": [1, 2],
+          "zone_id": "  "}`` through as a plain move that the simulation
+          refuses as naming both.
+
+        Deliberately absent: whether the named place is one this NPC knows. The
+        simulation owns that gate and refuses an unknown place and a nonexistent
+        one with the identical sentence, so no enumeration of the world leaks;
+        checking it here against the observation's ``place`` block would only
+        duplicate the gate over a CAPPED list and wrongly reject a place this
+        mind learned of earlier than this cycle's block shows.
+        """
+        zone_id = self.parameters.get("zone_id")
+        has_zone = zone_id is not None and str(zone_id) != ""
+        has_dest = self.parameters.get("destination") is not None
+
+        if has_zone == has_dest:
+            supplied = [
+                name
+                for name, present in zip(MOVE_TO_TARGET_PARAMS, (has_dest, has_zone), strict=True)
+                if present
+            ]
+            raise MutuallyExclusiveParametersError(MOVE_TO_TARGET_PARAMS, self.action, supplied)
 
     def _validate_respond_to_bid(self, state):
         """Validate RESPOND_TO_INTERACTION_BID action against pending bids"""

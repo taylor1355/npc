@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action
+from mind.cognitive_architecture.actions.exceptions import MutuallyExclusiveParametersError
 from mind.cognitive_architecture.observations import (
     EntityData,
     GoalObservation,
@@ -152,16 +153,22 @@ class TestActionValidation:
         assert action.action == "move_to"
         assert action.parameters["destination"] == [10, 20]
 
-    def test_move_to_missing_destination(self):
-        """Should fail if move_to lacks destination parameter"""
+    def test_move_to_naming_no_target_is_refused(self):
+        """A move_to with neither destination nor zone_id names nowhere.
+
+        Exclusive rather than missing since NPC-1643: a move may name a cell or a
+        known place, so "no destination" alone is no longer the whole rule. The
+        full contract is test_move_to_contract.py.
+        """
         observation = Observation(entity_id="npc_001", current_simulation_time=100)
         state = self._create_mock_state(observation)
 
         with pytest.raises(ValidationError) as exc_info:
             Action.model_validate({"action": "move_to", "parameters": {}}, context={"state": state})
 
-        # Check that it's wrapped MissingRequiredParameterError
-        assert "destination" in str(exc_info.value)
+        error = exc_info.value.errors()[0]["ctx"]["error"]
+        assert isinstance(error, MutuallyExclusiveParametersError)
+        assert "neither destination nor zone_id" in str(error)
 
     def test_movement_locked_blocks_move_to(self):
         """Should fail if trying to move while movement is locked"""
