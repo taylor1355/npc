@@ -247,6 +247,15 @@ jobs:
             - **State what you verified and what you did not.** If a claim rests on
               reading rather than running, say so explicitly.
             - Prefix minor issues with `nit: `.
+            - **Hold your ground on a finding you raise.** State it at its severity
+              and stop. Do not follow it with a recommendation to keep the thing you
+              just flagged ("I'd lean toward keeping it") -- that hands the author a
+              reason to decline that you do not hold. If you doubt the finding, say so.
+            - **A long comment is a finding, not a style preference.** Ask what a
+              reader of that line needs; derivations, history and review argument
+              belong in the commit, the PR or a test's docstring. A comment
+              describing another PR, branch or repo's state ("in flight", "not yet
+              merged", "until X lands") is a defect: it goes false with no code change.
             - For revisions, verify previous comments were actually addressed -- by
               re-reading the cited lines with `git show HEAD:<path>`, not by
               trusting a "fixed" reply -- AND review the new code on its own merits.
