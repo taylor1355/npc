@@ -859,7 +859,14 @@ class MarkBudgetState(BaseModel):
 # now ``focal_cell``, because "anchor" had come to name three different things
 # in the simulation. See ``_FOCAL_CELL_CONTRACT_VERSION`` for how older blocks
 # still spelling it ``anchor`` are read.
-KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4})
+# v5 (NPC-1643) is the v2/v3 case a third time: ``target_place`` keeps its key,
+# its shape and its omission rule while ceasing to mean "the place my active goal
+# names" and starting to mean "the place I am travelling to". Goals stopped
+# carrying places simulation-side -- the destination is chosen at action time --
+# so the old meaning has no referent left, and a v4 reader keeps parsing while
+# quietly believing something about the NPC's GOAL. Nothing structural moved,
+# which is exactly why it needed a version.
+KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4, 5})
 
 # The first place-block version whose descriptors spell the representative cell
 # ``focal_cell``. Every KNOWN version below it spells it ``anchor``.
@@ -939,6 +946,12 @@ class PlaceObservation(BaseModel):
     current_place: PlaceDescriptor | None = None
     known_places: list[PlaceDescriptor] = Field(default_factory=list)
     known_total: int = 0
+    #: The place this NPC is TRAVELLING to, absent when it is not travelling
+    #: (NPC-1643, block version 5). Below v5 the same key meant "the place my
+    #: active goal names" -- a value frozen at goal activation, which could name a
+    #: different place than the travel option offered on the same menu. Read it as
+    #: a journey, never as a property of the goal; ``render_summary`` says so in
+    #: the prose the model actually sees.
     target_place: PlaceDescriptor | None = None
     mark_budget: MarkBudgetState | None = None
 
@@ -1022,7 +1035,11 @@ class PlaceObservation(BaseModel):
 
         if self.target_place and self.target_place.zone_id != here_zone_id:
             label = self.target_place.name.strip() or self.target_place.zone_id
-            lines.append(f"Your current goal is aimed at {label}.")
+            # "Headed for", not "my goal is aimed at": since block version 5 this
+            # is the NPC's journey and says nothing about its goal (NPC-1643). The
+            # wording matches the simulation's own ``place_observation.gd::
+            # format_for_npc``, so the two tiers cannot describe one fact two ways.
+            lines.append(f"You are headed for {label}.")
 
         if self.mark_budget:
             lines.append(self.mark_budget.render_summary())

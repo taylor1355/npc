@@ -25,10 +25,12 @@ from mind.cognitive_architecture.observations import (
 #
 # PROVENANCE: pinned against SHIPPED simulation code, re-derived from
 # ``src/minds/observations/place_observation.gd::get_data`` and
-# ``place_descriptor.gd::to_dict`` at contract version 4 (NPC-1666, which
-# renamed the per-place ``anchor`` key to ``focal_cell``). Version 3 (NPC-1479)
-# added ``expected_providers`` / ``belief_deviation`` to every descriptor --
-# emitted unconditionally, witnessed or not.
+# ``place_descriptor.gd::to_dict`` at contract version 5 (NPC-1643, which left
+# every key exactly where it was and changed what ``target_place`` MEANS: the
+# place this NPC is travelling to, rather than the place its active goal names).
+# Version 4 (NPC-1666) renamed the per-place ``anchor`` key to ``focal_cell``;
+# version 3 (NPC-1479) added ``expected_providers`` / ``belief_deviation`` to
+# every descriptor -- emitted unconditionally, witnessed or not.
 #
 # This sample sat at version 2 for the whole life of the v3 producer, and that
 # is the shape of the defect it now pins: the v3 keys are nested inside each
@@ -53,7 +55,7 @@ from mind.cognitive_architecture.observations import (
 # ``witnessed`` gates ``affords`` / ``provider_count`` / ``witnessed_age_minutes``
 # the same way -- the producer omits all three when it is false.
 PLACE_BLOCK_CONTRACT_SAMPLE = {
-    "contract_version": 4,
+    "contract_version": 5,
     # A FULL descriptor: the producer sends current_place.to_dict() off the same
     # PlaceDescriptor it puts in known_places, where this place also appears.
     "current_place": {
@@ -169,7 +171,7 @@ class TestPlaceBlockParsing:
 
         place = observation.place
         assert place is not None
-        assert place.contract_version == 4
+        assert place.contract_version == 5
         assert place.known_total == 7
         assert place.current_place.name == "the berry grounds"
         assert [p.zone_id for p in place.known_places] == ["zone_berry", "zone_pond", "zone_green"]
@@ -227,6 +229,26 @@ class TestPlaceBlockParsing:
         )
         assert observation.place.known_total == 2
         assert "unknown contract_version 99" in caplog.text
+
+    def test_a_v5_block_parses_without_the_unknown_version_warning(self, caplog):
+        """The registration itself (NPC-1643).
+
+        v5 is a MEANING change with no structural one, so an unregistered v5
+        block would still parse -- through the unknown-version fallback, with a
+        warning, having shed nothing. The distinguishable fact is the warning, so
+        that is what this asserts: without the registration the log carries
+        "unknown contract_version 5" and every place block on the deployed mind
+        reads as a version it does not know.
+        """
+        assert PLACE_BLOCK_CONTRACT_SAMPLE["contract_version"] == 5, (
+            "read the sample as the v5 producer emits it; when the contract moves, "
+            "re-pin the sample rather than overriding the version here"
+        )
+        observation = Observation.model_validate(_observation(PLACE_BLOCK_CONTRACT_SAMPLE))
+
+        assert observation.place.contract_version == 5
+        assert observation.place.target_place.zone_id == "zone_pond"
+        assert "unknown contract_version" not in caplog.text
 
     def test_told_by_is_omitted_except_for_told(self):
         """Provenance is read from ``source``, never from the emptiness of told_by."""
@@ -396,6 +418,16 @@ class TestPlaceRendering:
         rendered = str(Observation.model_validate(_observation(sample)))
         assert "Places you know:" in rendered
         assert " of 3)" not in rendered
+
+    def test_the_target_place_renders_as_a_journey_not_as_a_goal(self):
+        """Since block version 5 this sentence is about where the NPC is WALKING
+        (NPC-1643). It said "Your current goal is aimed at ...", which is a claim
+        about the goal -- and goals stopped carrying places, so nothing on the
+        wire supports it any more. The wording matches the simulation's own
+        ``place_observation.gd::format_for_npc``."""
+        rendered = self._rendered()
+        assert "You are headed for the pond bend." in rendered
+        assert "aimed at" not in rendered
 
     def test_provenance_and_affordances_are_carried(self):
         rendered = self._rendered()
