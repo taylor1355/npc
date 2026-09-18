@@ -22,6 +22,7 @@ from mind.cognitive_architecture.actions import Action
 from mind.cognitive_architecture.actions.exceptions import MutuallyExclusiveParametersError
 from mind.cognitive_architecture.actions.models import MOVE_TO_TARGET_PARAMS
 from mind.cognitive_architecture.observations import Observation, StatusObservation
+from mind.cognitive_architecture.observations.models import PlaceObservation
 
 # The parameter names ``MoveToAction._get_property_specs`` declares, read from the
 # simulation at branch feature/NPC-1643-pr2-named-place-move @ 2a1c2c67
@@ -39,11 +40,20 @@ SIMULATION_NEITHER = "neither destination nor zone_id"
 
 
 def _state() -> Mock:
+    """An NPC that knows one place, so ``p1`` is a live handle this cycle.
+
+    The predicates under test run BEFORE handle resolution, so which place the
+    handle names does not matter here; that it resolves at all does. Handle
+    resolution itself is ``test_place_handles.py``.
+    """
     state = Mock()
     state.observation = Observation(
         entity_id="npc_alice",
         current_simulation_time=100,
         status=StatusObservation(position=(5, 5), movement_locked=False),
+        place=PlaceObservation.model_validate(
+            {"known_places": [{"zone_id": "zone_berry", "name": "the berry grounds"}]}
+        ),
     )
     return state
 
@@ -83,13 +93,13 @@ class TestMoveToTarget:
         assert action.parameters["destination"] == [10, 20]
 
     def test_a_zone_id_alone_is_accepted(self):
-        """The new capability: a place this mind knows, by id."""
-        action = _validate({"zone_id": "zone_berry"})
-        assert action.parameters["zone_id"] == "zone_berry"
+        """The new capability: a place this mind knows, by its handle."""
+        action = _validate({"zone_id": "p1"})
+        assert action.parameters["zone_id"] == "p1"
 
     def test_naming_both_is_refused(self):
         with pytest.raises(ValidationError) as exc_info:
-            _validate({"destination": [10, 20], "zone_id": "zone_berry"})
+            _validate({"destination": [10, 20], "zone_id": "p1"})
         error = _domain_error(exc_info)
         assert isinstance(error, MutuallyExclusiveParametersError)
         assert error.supplied == ["destination", "zone_id"]
@@ -120,8 +130,8 @@ class TestMirrorsTheSimulationPredicates:
 
     def test_a_null_destination_reads_as_omitted(self):
         """``McpMindClient`` erases a JSON-null destination before constructing."""
-        action = _validate({"destination": None, "zone_id": "zone_berry"})
-        assert action.parameters["zone_id"] == "zone_berry"
+        action = _validate({"destination": None, "zone_id": "p1"})
+        assert action.parameters["zone_id"] == "p1"
 
     def test_a_null_zone_id_reads_as_omitted(self):
         """``_optional_string_parameter`` maps JSON null to ``""``."""

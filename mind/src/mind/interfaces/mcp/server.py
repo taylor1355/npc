@@ -492,7 +492,10 @@ class MCPServer:
                     f"[{request_id}] Successfully processed decision for {mind_id}: {result.chosen_action.action}"
                 )
                 telemetry = DecisionTelemetry.from_pipeline_state(result, mind.llm_model)
-                action_payload = result.chosen_action.model_dump()
+                # wire_payload, not model_dump: a MOVE_TO names a place by this
+                # cycle's handle (p1, p2...) and this is the one point where the
+                # handle becomes the real zone id the simulation expects (NPC-1643).
+                action_payload = result.chosen_action.wire_payload(result.observation)
                 # The goal-options selection contract is absent-not-null: an
                 # off-menu answer omits these keys entirely, so the simulation's
                 # apply lane can key on presence rather than null-checking.

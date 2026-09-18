@@ -649,6 +649,43 @@ class GoalObservation(BaseModel):
         return {key: value for key, value in data.items() if key in cls.model_fields}
 
 
+# ---------------------------------------------------------------------------
+# Place handles (NPC-1643)
+# ---------------------------------------------------------------------------
+#
+# The prompt names places, never zone ids: a zone id is a UUID the model cannot
+# say to another NPC, costs ~20 uncached tokens per mention, and invites the
+# model to copy opaque strings around. But MOVE_TO must be able to name a place,
+# so each place in a cycle's place block is labelled with a short HANDLE --
+# ``p1``, ``p2``, ... -- the way a menu option carries its option_id. The mind
+# translates a handle back to the real zone id only at the wire
+# (``Action.wire_payload``), so the simulation still receives real ids and the
+# UUID never enters a prompt.
+#
+# A handle is valid for ONE cycle, like an option_id: it is a pure function of
+# that cycle's PlaceObservation (``PlaceObservation.place_handles``), so the
+# prompt that showed it, the validator that checks it and the translation that
+# resolves it all derive the same map from the same object, and nothing has to
+# be stored to keep them in agreement.
+#
+# Format: ``p`` + a 1-based ordinal. Short (one or two tokens), not a word the
+# model will use for anything else, and it cannot collide with an option_id
+# (``template:ordinal`` always carries a colon) or with a zone id (``zone_...``).
+# Rendered in square brackets in the prompt, accepted with or without them.
+PLACE_HANDLE_PREFIX = "p"
+
+#: The label for a place with no name. Never the zone id, which is exactly the
+#: string the handle scheme exists to keep out of the prompt.
+UNNAMED_PLACE_LABEL = "an unnamed place"
+
+
+def normalize_place_handle(reference: str) -> str:
+    """``" [P2] "`` -> ``"p2"``. Leniency on the token only: the simulation never
+    sees a handle, so accepting its bracketed or upper-case spelling cannot make
+    the two tiers disagree about what was supplied."""
+    return reference.strip().strip("[]").strip().lower()
+
+
 class PlaceKnowledgeSource(StrEnum):
     """How this NPC came to know a place, matching Godot ``PlaceKnowledge.Source``.
 
@@ -762,11 +799,17 @@ class PlaceDescriptor(BaseModel):
     #: observation can raise the mean and the deviation together.
     belief_deviation: float | None = None
 
-    def render_summary(self, here_zone_id: str = "") -> str:
+    def label(self) -> str:
+        """The name the prompt uses for this place -- never its zone id."""
+        return self.name.strip() or UNNAMED_PLACE_LABEL
+
+    def render_summary(self, here_zone_id: str = "", handle: str = "") -> str:
         """One prompt clause naming this place and why it matters.
 
         Name-first, because a name is what an NPC can say to another NPC and a
-        zone id is not. ``confidence`` and ``age_minutes`` are deliberately NOT
+        zone id is not. ``handle`` prefixes the clause as ``[p1]`` when given: it
+        is how a MOVE_TO names this place, and it stands in for the zone id so a
+        nameless place is still addressable without the id reaching the prompt. ``confidence`` and ``age_minutes`` are deliberately NOT
         rendered: both are ranking inputs the simulation already applied when it
         ordered and capped this list, so spending per-cycle tokens restating
         them buys the model nothing it cannot read from the ordering.
@@ -806,8 +849,8 @@ class PlaceDescriptor(BaseModel):
         elif self.source == PlaceKnowledgeSource.CREATED:
             facts.append("you named it")
 
-        label = self.name.strip() or self.zone_id
-        return f"{label} ({', '.join(facts)})"
+        prefix = f"[{handle}] " if handle else ""
+        return f"{prefix}{self.label()} ({', '.join(facts)})"
 
 
 class MarkBudgetState(BaseModel):
@@ -1005,6 +1048,53 @@ class PlaceObservation(BaseModel):
             ]
         return translated
 
+    def place_handles(self) -> dict[str, PlaceDescriptor]:
+        """This cycle's place handles, ``{"p1": descriptor, ...}`` (NPC-1643).
+
+        A PURE FUNCTION of this block, so the prompt that shows a handle, the
+        validator that checks it and the wire translation that resolves it all
+        derive one map from one observation -- the map is local to the cycle by
+        construction, with nothing stored that could outlive it.
+
+        Numbered in the order the prompt reads: ``known_places`` in the
+        simulation's rank order first, then ``current_place`` and
+        ``target_place`` only if the ranking did not already carry them (the
+        simulation force-includes both, so normally it does). One handle per zone
+        id, so a place that appears in two sentences is one place to the model.
+
+        Extension point: any later block that lists places this cycle (PR-3's
+        ``query_result``) must be numbered by THIS function, continuing after the
+        ones above -- never by a second scheme, or ``p1`` would mean two places
+        in one prompt.
+        """
+        handles: dict[str, PlaceDescriptor] = {}
+        seen: set[str] = set()
+        ordered = [*self.known_places, self.current_place, self.target_place]
+        for descriptor in ordered:
+            if descriptor is None or descriptor.zone_id in seen:
+                continue
+            seen.add(descriptor.zone_id)
+            handles[f"{PLACE_HANDLE_PREFIX}{len(handles) + 1}"] = descriptor
+        return handles
+
+    def handle_for(self, zone_id: str) -> str:
+        """The handle this cycle gave ``zone_id``, or "" when it has none."""
+        for handle, descriptor in self.place_handles().items():
+            if descriptor.zone_id == zone_id:
+                return handle
+        return ""
+
+    def resolve_place_handle(self, reference: str) -> PlaceDescriptor | None:
+        """The place a MOVE_TO's ``zone_id`` names, or None when it names none.
+
+        Accepts a handle only -- ``p2``, ``[p2]``, ``P2``. A raw zone id is
+        REFUSED even when it belongs to a place in this block: the prompt never
+        shows one, so a mind holding one got it through some channel that should
+        not exist, and refusing surfaces that leak where accepting would hide it.
+        The cost is one retry in a case that should never arise.
+        """
+        return self.place_handles().get(normalize_place_handle(reference))
+
     def render_summary(self) -> str:
         """The place block as prompt prose, or "" when there is nothing to say.
 
@@ -1012,18 +1102,26 @@ class PlaceObservation(BaseModel):
         rendering byte-identically: an NPC that knows no places and holds no
         marks reads exactly as it did before this block existed.
 
+        Every place is labelled with its ``[pN]`` handle and named by its name
+        (``PlaceDescriptor.label``); no zone id is ever rendered.
+
         Never raises; this runs on the prompt path.
         """
         lines: list[str] = []
         here_zone_id = self.current_place.zone_id if self.current_place else ""
+        handles = {
+            descriptor.zone_id: handle for handle, descriptor in self.place_handles().items()
+        }
 
         if self.current_place:
-            lines.append(
-                f"You are at {self.current_place.name.strip() or self.current_place.zone_id}."
-            )
+            handle = handles.get(self.current_place.zone_id, "")
+            lines.append(f"You are at [{handle}] {self.current_place.label()}.")
 
         if self.known_places:
-            listed = "; ".join(place.render_summary(here_zone_id) for place in self.known_places)
+            listed = "; ".join(
+                place.render_summary(here_zone_id, handles.get(place.zone_id, ""))
+                for place in self.known_places
+            )
             # The count is rendered only when it tells the model something it
             # cannot see: that the list it is reading is a truncation.
             scope = (
@@ -1034,7 +1132,7 @@ class PlaceObservation(BaseModel):
             lines.append(f"Places you know{scope}: {listed}")
 
         if self.target_place and self.target_place.zone_id != here_zone_id:
-            label = self.target_place.name.strip() or self.target_place.zone_id
+            label = f"[{handles.get(self.target_place.zone_id, '')}] {self.target_place.label()}"
             # "Headed for", not "my goal is aimed at": since block version 5 this
             # is the NPC's journey and says nothing about its goal (NPC-1643). The
             # wording matches the simulation's own ``place_observation.gd::
@@ -1608,13 +1706,31 @@ class Observation(BaseModel):
             self.status and self.status.movement_locked
         )
         if can_start_activity:
-            actions.append(
-                AvailableAction(
-                    name=ActionType.MOVE_TO,
-                    description="Move to a specific grid position",
-                    parameters={"destination": "Grid coordinates as tuple (x, y)"},
+            # zone_id is advertised only when this cycle HAS a place handle to put
+            # in it (NPC-1643). With no places known it could only be refused, and
+            # these tokens sit below the cache breakpoint on every cycle.
+            if self.place and self.place.place_handles():
+                actions.append(
+                    AvailableAction(
+                        name=ActionType.MOVE_TO,
+                        description="Go to a grid position, or to a place you know",
+                        parameters={
+                            "destination": "Grid coordinates as tuple (x, y). Give this OR zone_id",
+                            "zone_id": (
+                                "A place's handle from the brackets beside it, e.g. p1. "
+                                "Give this OR destination"
+                            ),
+                        },
+                    )
                 )
-            )
+            else:
+                actions.append(
+                    AvailableAction(
+                        name=ActionType.MOVE_TO,
+                        description="Move to a specific grid position",
+                        parameters={"destination": "Grid coordinates as tuple (x, y)"},
+                    )
+                )
             actions.append(
                 AvailableAction(
                     name=ActionType.WANDER,
