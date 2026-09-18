@@ -107,6 +107,23 @@ consumer as exercised. Retain formation/storage/retrieval evidence from that
 state; source presence and older test results do not establish deployment.
 This document specifies the contract and does not report those steps complete.
 
+### Places cross as ids; the model sees handles
+
+`MOVE_TO` may name a place instead of a cell: exactly one of `destination` or
+`zone_id` (NPC-1643). The simulation receives and resolves a **real zone id**;
+the model never sees one. The prompt labels each place in the `place` block with
+a per-cycle handle — `[p1]`, `[p2]`, … — from `PlaceObservation.place_handles`, a
+pure function of that cycle's observation, so rendering, validation and
+translation agree without storing a map. The action validator refuses any
+`zone_id` that is not one of this cycle's handles (a stale handle, a name, a raw
+id); `Action.wire_payload` swaps the handle for the id as the action leaves
+`decide_action`; and the `ACTION_CHOSEN` event records the place's *name*, so a
+later prompt carries neither a UUID nor a handle from another cycle.
+
+**Delivery order:** this server must deploy strictly after the simulation that
+understands `zone_id`. An older simulation refuses `{zone_id}` as a malformed
+`MOVE_TO`, at ERROR, every cycle a mind names a place.
+
 ## Vocabulary this server must not hardcode
 
 - **Drive names** — `needs.gd::Need`, spelled by `needs.gd::get_display_name`.

@@ -157,9 +157,12 @@ class ReflectionNode(LLMNode):
         action_event = MindEvent(
             timestamp=state.observation.current_simulation_time,
             event_type=MindEventType.ACTION_CHOSEN,
+            # memory_parameters, not parameters: this event renders into LATER
+            # prompts, where a place handle would name a different place and a
+            # real zone id would put a UUID in the prompt (NPC-1643).
             payload={
                 "action": output.chosen_action.action,
-                "parameters": output.chosen_action.parameters,
+                "parameters": output.chosen_action.memory_parameters(state.observation),
             },
         )
         state.recent_events.append(action_event)

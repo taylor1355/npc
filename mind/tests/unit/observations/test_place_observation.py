@@ -397,7 +397,7 @@ class TestPlaceRendering:
         reaches the LLM, so a parsed-but-unrendered block is perceived by
         nothing."""
         rendered = self._rendered()
-        assert "You are at the berry grounds." in rendered
+        assert "You are at [p1] the berry grounds." in rendered
         assert "Places you know" in rendered
 
     def test_the_listing_is_name_first(self):
@@ -426,7 +426,7 @@ class TestPlaceRendering:
         wire supports it any more. The wording matches the simulation's own
         ``place_observation.gd::format_for_npc``."""
         rendered = self._rendered()
-        assert "You are headed for the pond bend." in rendered
+        assert "You are headed for [p2] the pond bend." in rendered
         assert "aimed at" not in rendered
 
     def test_provenance_and_affordances_are_carried(self):
@@ -479,9 +479,17 @@ class TestPlaceRendering:
         without = str(Observation.model_validate(_observation(None)))
         assert with_empty == without
 
-    def test_rendering_survives_a_nameless_place(self):
-        """Runs on the prompt path, where an exception collapses the cycle."""
+    def test_a_nameless_place_renders_by_handle_never_by_zone_id(self):
+        """Runs on the prompt path, where an exception collapses the cycle.
+
+        This used to fall back to the zone id, and asserted that it did. Since
+        NPC-1643 a place is addressable by its ``[pN]`` handle, so a nameless one
+        no longer needs its id in the prompt to be named -- and the id is exactly
+        the string the handle scheme exists to keep out.
+        """
         rendered = PlaceObservation.model_validate(
             {"current_place": {"zone_id": "zone_x"}, "known_places": [{"zone_id": "zone_x"}]}
         ).render_summary()
-        assert "zone_x" in rendered
+        assert "zone_x" not in rendered
+        assert "You are at [p1] an unnamed place." in rendered
+        assert "[p1] an unnamed place (here" in rendered

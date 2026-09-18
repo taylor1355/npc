@@ -124,3 +124,29 @@ class InvalidSelectedOptionError(ActionValidationError):
         self.option_id = option_id
         self.detail = detail
         super().__init__(f"Invalid selected_option_id '{option_id}': {detail}")
+
+
+class UnknownPlaceHandleError(ActionValidationError):
+    """A ``zone_id`` that is not one of THIS cycle's place handles (NPC-1643).
+
+    The prompt labels each place with a per-cycle handle (``p1``, ``p2``, ...)
+    and never shows a real zone id, so the handle is the only thing a mind can
+    legitimately send. Anything else -- a handle from an earlier cycle, a place
+    name, a guessed id -- is refused here, loudly and retryably, rather than
+    being passed to the simulation as though it were a zone id. The message
+    lists the handles that ARE valid, because the refusal is the model's one
+    chance to correct itself before the retry budget runs out.
+    """
+
+    def __init__(self, reference: str, action_type: str, available: list[str]):
+        self.reference = reference
+        self.action_type = action_type
+        self.available = available
+        if available:
+            choices = f"use one of: {', '.join(available)}"
+        else:
+            choices = "you know no places this cycle, so give a destination instead"
+        super().__init__(
+            f"Action '{action_type}' names place '{reference}', which is not a place "
+            f"handle this cycle - {choices}."
+        )

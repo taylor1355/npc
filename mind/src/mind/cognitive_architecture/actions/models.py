@@ -14,6 +14,7 @@ from mind.cognitive_architecture.actions.exceptions import (
     MutuallyExclusiveParametersError,
     NoAdvertisedParameterError,
     UnexpectedActionParameterError,
+    UnknownPlaceHandleError,
 )
 
 
@@ -57,6 +58,13 @@ class ActionType(str, Enum):
 # neither -- a precedence rule between them would silently discard half of what
 # the caller asked for.
 MARK_ZONE_EXTENT_PARAMS = ["cells", "radius"]
+
+# The two ways one move may name where it is going: a grid cell, or a place this
+# NPC knows, by id (NPC-1643). Exactly one, never both, never neither -- the
+# MARK_ZONE rule, for the MARK_ZONE reason. The ORDER is the simulation's
+# refusal wording ("name exactly one of destination, zone_id"), which
+# MutuallyExclusiveParametersError reproduces verbatim.
+MOVE_TO_TARGET_PARAMS = ["destination", "zone_id"]
 
 
 class Action(BaseModel):
@@ -123,7 +131,7 @@ class Action(BaseModel):
         if self.action == ActionType.INTERACT_WITH:
             self._validate_interact_with(observation)
         elif self.action == ActionType.MOVE_TO:
-            self._validate_move_to()
+            self._validate_move_to(observation)
         elif self.action == ActionType.RESPOND_TO_INTERACTION_BID:
             self._validate_respond_to_bid(state)
         elif self.action == ActionType.BATCH_REJECT_INTERACTION_BIDS:
@@ -249,10 +257,106 @@ class Action(BaseModel):
 
         return normalize(actual) == normalize(expected)
 
-    def _validate_move_to(self):
-        """Validate MOVE_TO action parameters"""
-        if "destination" not in self.parameters:
-            raise MissingRequiredParameterError("destination", self.action)
+    def _validate_move_to(self, observation):
+        """Validate MOVE_TO names exactly one of a cell and a known place.
+
+        The two "was this supplied?" predicates mirror the simulation's, as
+        ``McpActionParser``'s MOVE_TO arm reads the wire::
+
+            has_zone := zone_id present, not JSON null, and str(value) != ""
+            has_dest := destination present and not JSON null
+
+        with one owner per refusal simulation-side: the parser refuses NEITHER as
+        a malformed payload (at ERROR, before any action exists), and
+        ``plan_execution.gd::apply_place_travel`` refuses BOTH with the sentence
+        this error's wording mirrors.
+
+        They are NOT the same shape as MARK_ZONE's, and must not be made so.
+
+        - ``has_dest`` is presence, never a value test: ``[0, 0]`` is a legal cell
+          and the simulation accepts a move to it, so a mind-side
+          ``destination != [0, 0]`` check would refuse a move the simulation
+          honours. (The simulation's own "no cell" is ``Gameboard.INVALID_CELL``,
+          its spec default since NPC-1327 -- never a value a mind sends.)
+        - ``has_zone`` is NOT stripped. The simulation reads ``"  "`` as a
+          supplied zone id (and then refuses it as a place the NPC does not
+          know); stripping here would let ``{"destination": [1, 2],
+          "zone_id": "  "}`` through as a plain move that the simulation
+          refuses as naming both.
+
+        Then, for a named place, the ``zone_id`` must be one of THIS cycle's place
+        handles (``PlaceObservation.resolve_place_handle``). The prompt never
+        shows a real zone id -- places carry ``[p1]``-style handles -- so a stale
+        handle, a place name or a guessed id is refused here, loudly and
+        retryably, and never reaches the simulation as though it were an id. The
+        handle is NOT rewritten here: the action stays in handle-space so the
+        ``ACTION_CHOSEN`` memory of it never carries a UUID, and
+        ``wire_payload`` translates it at the one point it leaves the server.
+
+        Whether the place is KNOWN remains the simulation's gate, which refuses an
+        unknown and a nonexistent place with one sentence. A handle can only name
+        a place this cycle's block lists, so a place the observation cap dropped
+        is unreachable by name until a later cycle (or PR-3's place query) shows
+        it.
+        """
+        zone_id = self.parameters.get("zone_id")
+        has_zone = zone_id is not None and str(zone_id) != ""
+        has_dest = self.parameters.get("destination") is not None
+
+        if has_zone == has_dest:
+            supplied = [
+                name
+                for name, present in zip(MOVE_TO_TARGET_PARAMS, (has_dest, has_zone), strict=True)
+                if present
+            ]
+            raise MutuallyExclusiveParametersError(MOVE_TO_TARGET_PARAMS, self.action, supplied)
+
+        if has_zone:
+            place = observation.place if observation is not None else None
+            handles = list(place.place_handles()) if place is not None else []
+            if place is None or place.resolve_place_handle(str(zone_id)) is None:
+                raise UnknownPlaceHandleError(str(zone_id), self.action, handles)
+
+    def wire_payload(self, observation) -> dict:
+        """This action as the simulation receives it: ``model_dump()`` with a
+        place handle translated to its real zone id (NPC-1643).
+
+        THE ONE PLACE a handle becomes an id, and it runs as the action leaves
+        the server, against the observation of the cycle that showed the handle.
+        A handle that no longer resolves raises rather than being sent through as
+        a zone id -- the validator should have made that impossible, so reaching
+        it means the action and the observation came from different cycles.
+        """
+        payload = self.model_dump()
+        if self.action != ActionType.MOVE_TO:
+            return payload
+        reference = self.parameters.get("zone_id")
+        if reference is None or str(reference) == "":
+            return payload
+        place = observation.place if observation is not None else None
+        descriptor = place.resolve_place_handle(str(reference)) if place is not None else None
+        if descriptor is None:
+            handles = list(place.place_handles()) if place is not None else []
+            raise UnknownPlaceHandleError(str(reference), self.action, handles)
+        payload["parameters"] = {**payload["parameters"], "zone_id": descriptor.zone_id}
+        return payload
+
+    def memory_parameters(self, observation) -> dict:
+        """The parameters as the NPC should REMEMBER them: a place by its name.
+
+        Feeds the ``ACTION_CHOSEN`` event, which renders into later prompts.
+        Neither alternative is safe there: the real zone id would put a UUID in
+        the prompt, and the handle would outlive its cycle -- next cycle ``p2``
+        may be a different place, and "I chose p2" would then be a false memory.
+        """
+        params = dict(self.parameters)
+        if self.action != ActionType.MOVE_TO or not params.get("zone_id"):
+            return params
+        place = observation.place if observation is not None else None
+        descriptor = place.resolve_place_handle(str(params["zone_id"])) if place else None
+        del params["zone_id"]
+        params["place"] = descriptor.label() if descriptor is not None else "an unknown place"
+        return params
 
     def _validate_respond_to_bid(self, state):
         """Validate RESPOND_TO_INTERACTION_BID action against pending bids"""
