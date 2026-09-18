@@ -121,8 +121,8 @@ id); `Action.wire_payload` swaps the handle for the id as the action leaves
 later prompt carries neither a UUID nor a handle from another cycle.
 
 **Delivery order:** this server must deploy strictly after the simulation that
-understands `zone_id`. An older simulation reads `{zone_id}` as a move to the
-origin, silently.
+understands `zone_id`. An older simulation refuses `{zone_id}` as a malformed
+`MOVE_TO`, at ERROR, every cycle a mind names a place.
 
 ## Vocabulary this server must not hardcode
 

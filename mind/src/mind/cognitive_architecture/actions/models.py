@@ -260,21 +260,24 @@ class Action(BaseModel):
     def _validate_move_to(self, observation):
         """Validate MOVE_TO names exactly one of a cell and a known place.
 
-        The two "was this supplied?" predicates are the simulation's own,
-        mirrored EXACTLY from ``plan_execution.gd::apply_place_travel`` after
-        ``McpMindClient._known_mcp_action`` has normalized the wire::
+        The two "was this supplied?" predicates mirror the simulation's, as
+        ``McpActionParser``'s MOVE_TO arm reads the wire::
 
-            has_zone := not requested.zone_id.is_empty()
-                        (zone_id = "" when absent or JSON null, else str(value))
-            has_dest := requested.destination_named
-                        (KEY PRESENCE, with a JSON-null destination erased first)
+            has_zone := zone_id present, not JSON null, and str(value) != ""
+            has_dest := destination present and not JSON null
+
+        with one owner per refusal simulation-side: the parser refuses NEITHER as
+        a malformed payload (at ERROR, before any action exists), and
+        ``plan_execution.gd::apply_place_travel`` refuses BOTH with the sentence
+        this error's wording mirrors.
 
         They are NOT the same shape as MARK_ZONE's, and must not be made so.
 
-        - ``has_dest`` is key presence, never a value test. ``Vector2i.ZERO`` is
-          a legal cell, so the simulation cannot use a value as a sentinel
-          (NPC-1327), and a mind-side ``destination != [0, 0]`` check would
-          reject a legitimate move to the origin that the simulation accepts.
+        - ``has_dest`` is presence, never a value test: ``[0, 0]`` is a legal cell
+          and the simulation accepts a move to it, so a mind-side
+          ``destination != [0, 0]`` check would refuse a move the simulation
+          honours. (The simulation's own "no cell" is ``Gameboard.INVALID_CELL``,
+          its spec default since NPC-1327 -- never a value a mind sends.)
         - ``has_zone`` is NOT stripped. The simulation reads ``"  "`` as a
           supplied zone id (and then refuses it as a place the NPC does not
           know); stripping here would let ``{"destination": [1, 2],

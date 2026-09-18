@@ -2,15 +2,15 @@
 
 A mind may name where it is going two ways -- ``destination``, a grid cell, or
 ``zone_id``, a place it knows -- and must name exactly one. The simulation
-resolves a named place in ``plan_execution.gd::apply_place_travel``; this module
-pins that the mind's validator agrees with the simulation's two "was this
-supplied?" predicates EXACTLY, because any disagreement ships an action one side
-accepts and the other refuses.
+refuses NEITHER in ``McpActionParser`` and BOTH in
+``plan_execution.gd::apply_place_travel``; this module pins that the mind's
+validator agrees with the simulation's two "was this supplied?" predicates,
+because any disagreement ships an action one side accepts and the other refuses.
 
-ORDERING: this change must merge AFTER the simulation's (finding F4). A
-simulation that does not understand ``zone_id`` reads ``{"zone_id": ...}`` as a
-``MoveToAction`` whose destination defaults to ``Vector2i.ZERO`` -- a legal cell
--- and walks the NPC to the origin, silently.
+ORDERING: this change must merge AFTER the simulation's. A simulation that does
+not understand ``zone_id`` refuses ``{"zone_id": ...}`` as a malformed MOVE_TO,
+at ERROR, on every cycle a mind names a place. (Before NPC-1327 was fixed it
+silently walked the NPC to the origin -- finding F4.)
 """
 
 from unittest.mock import Mock
@@ -25,18 +25,22 @@ from mind.cognitive_architecture.observations import Observation, StatusObservat
 from mind.cognitive_architecture.observations.models import PlaceObservation
 
 # The parameter names ``MoveToAction._get_property_specs`` declares, read from the
-# simulation at branch feature/NPC-1643-pr2-named-place-move @ 2a1c2c67
+# simulation at branch feature/NPC-1643-pr2-named-place-move @ 81f50a68
 # (``src/contracts/actions/move_to_action.gd``). Re-derive, and update the commit,
 # whenever that spec changes.
 SIMULATION_MOVE_TO_PARAMS = frozenset({"destination", "zone_id"})
 
 # ``PlanExecution.PLACE_TRAVEL_AMBIGUOUS`` at the same commit, with its ``%s``
-# filled by each of the two cases the simulation formats into it. The mind's
-# error must carry the same sentence, so an operator reading both logs reads one
-# rule rather than two dialects of it.
+# filled by BOTH -- the one case the simulation refuses with that sentence. The
+# mind's error must carry the same sentence, so an operator reading both logs
+# reads one rule rather than two dialects of it.
+#
+# NEITHER is refused simulation-side by ``McpActionParser`` with its own
+# malformed-payload message, so the mind's NEITHER wording below mirrors nothing
+# there: it is this validator's own sentence, in the same template for symmetry.
 SIMULATION_AMBIGUOUS_TEMPLATE = "names {} — name exactly one of destination, zone_id"
 SIMULATION_BOTH = "both destination and zone_id"
-SIMULATION_NEITHER = "neither destination nor zone_id"
+MIND_NEITHER = "neither destination nor zone_id"
 
 
 def _state() -> Mock:
@@ -112,18 +116,17 @@ class TestMoveToTarget:
         error = _domain_error(exc_info)
         assert isinstance(error, MutuallyExclusiveParametersError)
         assert error.supplied == []
-        assert SIMULATION_AMBIGUOUS_TEMPLATE.format(SIMULATION_NEITHER) in _mind_sentence(error)
+        assert SIMULATION_AMBIGUOUS_TEMPLATE.format(MIND_NEITHER) in _mind_sentence(error)
 
 
 class TestMirrorsTheSimulationPredicates:
     """Where the two predicates are easy to get subtly wrong."""
 
     def test_the_origin_is_a_legal_destination(self):
-        """``has_dest`` is key presence, never a value test.
+        """``has_dest`` is presence, never a value test.
 
-        ``Vector2i.ZERO`` is a legal cell (NPC-1327), so the simulation cannot use
-        a value as a sentinel, and a mind that did would refuse a move the
-        simulation accepts.
+        ``[0, 0]`` is a legal cell the simulation honours, so a mind that treated
+        it as "no destination" would refuse a move the simulation accepts.
         """
         action = _validate({"destination": [0, 0]})
         assert action.parameters["destination"] == [0, 0]
