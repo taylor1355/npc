@@ -809,8 +809,9 @@ class PlaceDescriptor(BaseModel):
         Name-first, because a name is what an NPC can say to another NPC and a
         zone id is not. ``handle`` prefixes the clause as ``[p1]`` when given: it
         is how a MOVE_TO names this place, and it stands in for the zone id so a
-        nameless place is still addressable without the id reaching the prompt. ``confidence`` and ``age_minutes`` are deliberately NOT
-        rendered: both are ranking inputs the simulation already applied when it
+        nameless place is still addressable without the id reaching the prompt.
+
+        ``confidence`` and ``age_minutes`` are deliberately NOT rendered: both are ranking inputs the simulation already applied when it
         ordered and capped this list, so spending per-cycle tokens restating
         them buys the model nothing it cannot read from the ordering.
 

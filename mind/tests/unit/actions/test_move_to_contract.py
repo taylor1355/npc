@@ -25,7 +25,7 @@ from mind.cognitive_architecture.observations import Observation, StatusObservat
 from mind.cognitive_architecture.observations.models import PlaceObservation
 
 # The parameter names ``MoveToAction._get_property_specs`` declares, read from the
-# simulation at branch feature/NPC-1643-pr2-named-place-move @ 81f50a68
+# simulation's main at 9f0abc66 (emergent-npcs/npc-simulation#759, merged)
 # (``src/contracts/actions/move_to_action.gd``). Re-derive, and update the commit,
 # whenever that spec changes.
 SIMULATION_MOVE_TO_PARAMS = frozenset({"destination", "zone_id"})

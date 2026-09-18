@@ -166,6 +166,23 @@ class TestUnknownReferencesAreRefused:
         with pytest.raises(UnknownPlaceHandleError):
             action.wire_payload(next_cycle)
 
+    def test_a_memory_from_another_cycle_names_no_place_rather_than_a_guess(self):
+        """``memory_parameters``' sibling of the case above. A handle the
+        observation no longer reaches is remembered as an unknown place --
+        never as the handle, which would name a different place later, and
+        never as a zone id."""
+        action = _validate({"zone_id": "p3"}, _observation())
+        next_cycle = Observation(
+            entity_id="npc_alice",
+            current_simulation_time=160,
+            place=PlaceObservation.model_validate(
+                {"known_places": [{"zone_id": ZONE_POND, "name": "the pond bend"}]}
+            ),
+        )
+        remembered = action.memory_parameters(next_cycle)
+        assert remembered["place"] == "an unknown place"
+        assert "zone_id" not in remembered
+
 
 # ---------------------------------------------------------------------------
 # 3. Stable within a cycle: prompt, validator and wire agree
