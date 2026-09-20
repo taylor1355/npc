@@ -158,6 +158,25 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
 }
 
 
+QUERY_RESULT_DESCRIPTOR = {
+    "zone_id": "zone_orchard",
+    "name": "the old orchard",
+    "kind": "gathering_ground",
+    "focal_cell": [70, 12],
+    "distance": 58,
+    "witnessed": True,
+    "affords": ["harvest"],
+    "provider_count": 3,
+    "witnessed_age_minutes": 80,
+    "source": "witnessed",
+    "age_minutes": 80,
+    "beyond_vision": True,
+    "confidence": 0.75,
+    "expected_providers": 2.5,
+    "belief_deviation": 0.8,
+}
+
+
 def _observation(place: dict | None) -> dict:
     payload = {"entity_id": "npc_alice", "current_simulation_time": 100}
     if place is not None:
@@ -250,6 +269,40 @@ class TestPlaceBlockParsing:
         assert observation.place.target_place.zone_id == "zone_pond"
         assert "unknown contract_version" not in caplog.text
 
+    def test_a_v6_block_models_the_deferred_query_result(self, caplog):
+        """NPC-1481's settled next-cycle response contract.
+
+        The query request's response placement is still a separate cross-repo
+        decision; the result side is not: the simulation emits ``query_result``
+        on place contract v6, and this strict model must accept the descriptors
+        rather than shedding the root key through unknown-version degradation.
+        """
+        sample = dict(
+            PLACE_BLOCK_CONTRACT_SAMPLE,
+            contract_version=6,
+            query_result=[QUERY_RESULT_DESCRIPTOR],
+        )
+
+        place = PlaceObservation.model_validate(sample)
+
+        assert place.contract_version == 6
+        assert [descriptor.zone_id for descriptor in place.query_result] == ["zone_orchard"]
+        assert place.query_result[0].source == PlaceKnowledgeSource.WITNESSED
+        assert "unknown contract_version" not in caplog.text
+
+    def test_query_result_absence_and_answered_empty_remain_distinct(self):
+        absent = PlaceObservation.model_validate(
+            dict(PLACE_BLOCK_CONTRACT_SAMPLE, contract_version=6)
+        )
+        answered_empty = PlaceObservation.model_validate(
+            dict(PLACE_BLOCK_CONTRACT_SAMPLE, contract_version=6, query_result=[])
+        )
+
+        assert absent.query_result is None
+        assert answered_empty.query_result == []
+        assert "Place query result" not in absent.render_summary()
+        assert "Place query result: no matching places." in answered_empty.render_summary()
+
     def test_told_by_is_omitted_except_for_told(self):
         """Provenance is read from ``source``, never from the emptiness of told_by."""
         place = PlaceObservation.model_validate(PLACE_BLOCK_CONTRACT_SAMPLE)
@@ -261,8 +314,8 @@ class TestPlaceBlockParsing:
         assert by_id["zone_berry"].told_by == ""
 
     def test_an_unknown_source_is_refused(self):
-        """``PlaceKnowledge.Source`` is a closed three-member enum with a shipped
-        save vocabulary, so a fourth value is a breaking change and deserves to
+        """``PlaceKnowledge.Source`` is a closed four-member enum with a shipped
+        save vocabulary, so a fifth value is a breaking change and deserves to
         fail loudly -- the ``ValenceBand`` posture, not the free-string one used
         for simulation-owned open registries like interaction names."""
         with pytest.raises(ValidationError):
@@ -428,6 +481,27 @@ class TestPlaceRendering:
         rendered = self._rendered()
         assert "You are headed for [p2] the pond bend." in rendered
         assert "aimed at" not in rendered
+
+    def test_query_results_continue_the_cycle_handle_map(self):
+        """A just-queried place is immediately addressable by MOVE_TO.
+
+        The three known places already own p1-p3. The result continues that one
+        map at p4; a second numbering scheme would make p1 mean two places in the
+        same prompt and the wire translation could walk to the wrong one.
+        """
+        place = PlaceObservation.model_validate(
+            dict(
+                PLACE_BLOCK_CONTRACT_SAMPLE,
+                contract_version=6,
+                query_result=[QUERY_RESULT_DESCRIPTOR],
+            )
+        )
+
+        assert place.handle_for("zone_orchard") == "p4"
+        assert place.resolve_place_handle("[p4]").zone_id == "zone_orchard"
+        rendered = place.render_summary()
+        assert "[p4] the old orchard" in rendered
+        assert "zone_orchard" not in rendered
 
     def test_provenance_and_affordances_are_carried(self):
         rendered = self._rendered()

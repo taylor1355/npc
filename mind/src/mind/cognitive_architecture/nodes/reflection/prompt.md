@@ -72,6 +72,17 @@ Include any required parameters for the chosen action.
 
 **Using the Goal Options menu.** When a "Goal Options" section appears below, it lists the concrete moves this person's subconscious has already sized up, each with an `option_id` and a score. If the action you choose is one of those entries, copy its `option_id` verbatim into `selected_option_id`, make the action and parameters describe that option's first step exactly, and give a one-sentence `selection_rationale`; the simulation uses that id to recover details the action alone cannot carry. You are equally free to act off-menu (responding to a bid, acting within an interaction, or doing something the menu never offered) — in that case omit `selected_option_id` entirely. Option ids are only valid for this one decision; never reuse one from memory.
 
+### 4. Optionally query known places
+
+You may also issue one `place_query` as attention work, independently of the
+action you choose. It searches only this person's own remembered places, never
+hidden world state. Use a canonical supported value for `afford`: `hunger`,
+`consume`, `cook`, `harvest`, or `harvest_plant`. Omit the query when the places
+already shown are enough. Results arrive one decision cycle later under
+`place.query_result`; an explicit empty result means the search ran and found no
+matches. The query does not choose movement or author an action: the simulation
+scores any hits as ordinary goal options on the following cycle.
+
 ### Ground truth, and how to read what follows
 
 The "Authoritative Interaction Status" section below is the ground truth from the simulation. If it says you are NOT in an interaction, then any prior belief or plan about being mid-interaction (e.g. "in a conversation") is stale — update the situation assessment, goals, and plan to reflect that the interaction has ended, and only choose interaction-participation actions (e.g. act_in_interaction) when it confirms you are currently in an interaction, even if working memory still mentions one.
@@ -88,7 +99,7 @@ The "Goal Options" section below is that same subconscious made concrete: the me
 
 ## Output Format
 
-Produce the fields in the order given: the working-memory update first, then new memories, then the chosen action — so the choice follows from the assessment you just wrote.
+Produce the fields in the order given: the working-memory update first, then new memories, then the chosen action, then the optional place query — so the choice follows from the assessment you just wrote and the query remains independent attention work.
 
 {format_instructions}
 

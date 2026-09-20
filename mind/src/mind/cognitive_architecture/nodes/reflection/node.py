@@ -9,6 +9,7 @@ provider's cache (NPC-1319).
 """
 
 from pathlib import Path
+from typing import cast
 
 from json_repair import loads as json_repair_loads
 from langchain_core.language_models import BaseChatModel
@@ -28,6 +29,7 @@ from mind.cognitive_architecture.nodes.formatting import (
     format_interaction_status as _format_interaction_status,
 )
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
+from mind.cognitive_architecture.place_query import PlaceQuery
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.working_memory import (
     FormedMemory,
@@ -114,27 +116,30 @@ class ReflectionNode(LLMNode):
 
         goal_obs = state.observation.goal if state.observation else None
 
-        output = await self.call_llm(
-            state,
-            # Salvage instead of raise: a parse failure must not cost the whole
-            # cycle (the old cognitive_update path lost action, memory write,
-            # and telemetry together -- NPC-1195).
-            on_exhausted=lambda raw, error: self._salvage(state, raw, error),
-            working_memory=str(state.working_memory),
-            personality_traits=personality_text,
-            personality_dimensions=dims_text,
-            # Ground the "am I interacting?" belief in the fresh observation so
-            # a stale working-memory belief gets corrected this cycle (NPC-688).
-            interaction_status=_format_interaction_status(state.observation),
-            conversation_histories=format_conversation_histories(
-                state.conversation_histories, state.observation.entity_id
+        output = cast(
+            ReflectionOutput,
+            await self.call_llm(
+                state,
+                # Salvage instead of raise: a parse failure must not cost the whole
+                # cycle (the old cognitive_update path lost action, memory write,
+                # and telemetry together -- NPC-1195).
+                on_exhausted=lambda raw, error: self._salvage(state, raw, error),
+                working_memory=str(state.working_memory),
+                personality_traits=personality_text,
+                personality_dimensions=dims_text,
+                # Ground the "am I interacting?" belief in the fresh observation so
+                # a stale working-memory belief gets corrected this cycle (NPC-688).
+                interaction_status=_format_interaction_status(state.observation),
+                conversation_histories=format_conversation_histories(
+                    state.conversation_histories, state.observation.entity_id
+                ),
+                substrate_goal=format_substrate_goal(goal_obs),
+                goal_options=format_goal_options(goal_obs),
+                retrieved_memories=memories_text,
+                recent_events=format_recent_events(state.recent_events),
+                observation_text=str(state.observation),
+                available_actions=actions_text,
             ),
-            substrate_goal=format_substrate_goal(goal_obs),
-            goal_options=format_goal_options(goal_obs),
-            retrieved_memories=memories_text,
-            recent_events=format_recent_events(state.recent_events),
-            observation_text=str(state.observation),
-            available_actions=actions_text,
         )
 
         # Update state with new working memory
@@ -152,6 +157,10 @@ class ReflectionNode(LLMNode):
         )
 
         state.chosen_action = output.chosen_action
+        # A sibling output, not an action parameter. The simulation queues it as
+        # one-cycle attention work even when the chosen action is WAIT or is
+        # later refused by its own apply boundary.
+        state.place_query = output.place_query
 
         # Create ACTION_CHOSEN event
         action_event = MindEvent(
@@ -230,6 +239,13 @@ class ReflectionNode(LLMNode):
         except ValidationError:
             pass
 
+        salvaged_query: PlaceQuery | None = None
+        if data.get("place_query") is not None:
+            try:
+                salvaged_query = PlaceQuery.model_validate(data.get("place_query"))
+            except ValidationError:
+                pass
+
         logger.warning(
             f"{entity_tag(state)} Reflection failed after retries; salvaged "
             f"working_memory={'yes' if salvaged_wm is not None else 'no (kept current)'}, "
@@ -248,4 +264,5 @@ class ReflectionNode(LLMNode):
             updated_working_memory=salvaged_wm,
             new_memories=salvaged_memories,
             chosen_action=salvaged_action,
+            place_query=salvaged_query,
         )

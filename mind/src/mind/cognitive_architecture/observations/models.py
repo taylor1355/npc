@@ -693,7 +693,7 @@ class PlaceKnowledgeSource(StrEnum):
     made for interaction names and declaration kinds. The discriminator is
     open-registry versus closed enum: an interaction is registered in the
     simulation and must reach the LLM with no Python change, whereas ``Source``
-    is a three-member GDScript ``enum`` whose serialized names are a save-format
+    is a four-member GDScript ``enum`` whose serialized names are a save-format
     contract "from birth" with an out-of-enum ``SOURCE_INVALID`` sentinel for
     anything that fails to parse. Nothing can widen it quietly. Same reasoning as
     ``ValenceBand``: structure fails loud.
@@ -704,6 +704,7 @@ class PlaceKnowledgeSource(StrEnum):
     CREATED = "created"
     VISITED = "visited"
     TOLD = "told"
+    WITNESSED = "witnessed"
 
 
 class PlaceDescriptor(BaseModel):
@@ -910,7 +911,11 @@ class MarkBudgetState(BaseModel):
 # so the old meaning has no referent left, and a v4 reader keeps parsing while
 # quietly believing something about the NPC's GOAL. Nothing structural moved,
 # which is exactly why it needed a version.
-KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4, 5})
+# v6 (NPC-1481) adds ``query_result``: descriptors selected from this NPC's own
+# uncapped place-knowledge pool in response to the previous cycle's query. It is
+# a versioned addition because this model is extra="forbid" and because dropping
+# the result would make the deferred request silently inert.
+KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6})
 
 # The first place-block version whose descriptors spell the representative cell
 # ``focal_cell``. Every KNOWN version below it spells it ``anchor``.
@@ -997,6 +1002,12 @@ class PlaceObservation(BaseModel):
     #: a journey, never as a property of the goal; ``render_summary`` says so in
     #: the prose the model actually sees.
     target_place: PlaceDescriptor | None = None
+    #: The answer to the place query issued with the PREVIOUS decision, delivered
+    #: one cycle later (NPC-1481, block version 6). These are full descriptors
+    #: from this NPC's own knowledge, never registry discoveries. They sit beside
+    #: ``known_places`` rather than replacing it: the ordinary cap remains the
+    #: cycle's passive context and this is the explicit attention pull.
+    query_result: list[PlaceDescriptor] | None = None
     mark_budget: MarkBudgetState | None = None
 
     @model_validator(mode="before")
@@ -1070,7 +1081,12 @@ class PlaceObservation(BaseModel):
         """
         handles: dict[str, PlaceDescriptor] = {}
         seen: set[str] = set()
-        ordered = [*self.known_places, self.current_place, self.target_place]
+        ordered = [
+            *self.known_places,
+            self.current_place,
+            self.target_place,
+            *(self.query_result or []),
+        ]
         for descriptor in ordered:
             if descriptor is None or descriptor.zone_id in seen:
                 continue
@@ -1139,6 +1155,16 @@ class PlaceObservation(BaseModel):
             # wording matches the simulation's own ``place_observation.gd::
             # format_for_npc``, so the two tiers cannot describe one fact two ways.
             lines.append(f"You are headed for {label}.")
+
+        if self.query_result is not None:
+            if self.query_result:
+                listed = "; ".join(
+                    place.render_summary(here_zone_id, handles.get(place.zone_id, ""))
+                    for place in self.query_result
+                )
+                lines.append(f"Place query result: {listed}")
+            else:
+                lines.append("Place query result: no matching places.")
 
         if self.mark_budget:
             lines.append(self.mark_budget.render_summary())

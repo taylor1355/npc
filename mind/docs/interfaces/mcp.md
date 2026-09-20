@@ -76,9 +76,18 @@ Processes a structured observation and recent events through the cognitive pipel
 5. Returns action dict or error
 
 **Response fields:** every response carries `status`, `request_id` and
-`protocol_version` (an int; bumped when the response shape changes in a way a
-client must know about). A **success** response also carries `action` and a
-`telemetry` object: `provenance` (`metered` | `unreported`), the
+`protocol_version` (an int; currently `2`, bumped when the response shape changes
+in a way a client must know about). A **success** response also carries `action`,
+an optional top-level `place_query`, and a `telemetry` object. `place_query` is a
+sibling of `action`, not an action parameter: asking where to attend does not
+replace or delay execution of the chosen action. Its closed shape is
+`{afford: str, max_distance?: int, min_expected_providers?: float, limit?: int}`;
+`afford` is one of the canonical need or interaction identifiers supported by the
+simulation's existing place-seeking scorer, and `limit` is at most 3. The
+simulation searches only that NPC's own remembered places and returns the answer
+in the next observation's `place.query_result`.
+
+`telemetry` carries `provenance` (`metered` | `unreported`), the
 `prompt_tokens` / `completion_tokens` / `total_tokens` split,
 `cached_prompt_tokens` with a `cache_reporting` flag distinguishing "no cache
 hits" from "the provider does not report them", `model_calls` (provider
@@ -145,11 +154,18 @@ nothing honours.
 
 #### The `place` observation block
 
-Optional. Carries the substrate's place knowledge: `here` (the innermost known
-zone covering the NPC's cell), a **capped** `known` list with `known_total`
-beside it, the `target` a goal names, and the `mark_budget`. `known_total >
-len(known)` means the list is a truncation, which is the only way to tell "I know
+Optional. Carries the substrate's place knowledge: `current_place` (the innermost
+known zone covering the NPC's cell), a **capped** `known_places` list with
+`known_total` beside it, `target_place` for the active journey, the optional
+one-cycle `query_result`, and the `mark_budget`. `known_total >
+len(known_places)` means the passive list is a truncation, which is the only way to tell "I know
 three places" from "I know thirty and was shown three".
+
+`query_result` is `list[PlaceDescriptor] | None`: `None`/absence means no query
+was answered this cycle, while an explicit empty list means the previous cycle's
+query ran and found no match. Non-empty results receive the same per-cycle place
+handles as the passive list and become ordinary simulation-side goal candidates;
+they never directly author an action.
 
 `mark_budget.next_slot_in_minutes` is `-1.0` when a slot is already free —
 deliberately not `0.0`, because a genuinely-zero wait is a real answer. Read
