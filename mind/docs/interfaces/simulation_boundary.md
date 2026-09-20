@@ -40,6 +40,7 @@ extends the base `entity_controller.gd::get_current_state_observation`.
 | `needs` | `drives_component.gd::create_needs_observation` | `needs` |
 | `vision` | `vision_component.gd::create_vision_observation` | `vision` |
 | `goal` | `substrate_component.gd::create_goal_observation` | `goal` |
+| `place` | `substrate_component.gd::create_place_observation` | `place` |
 | `mood` | `substrate_component.gd::create_mood_observation` | `mood` |
 | `inventory` | `inventory_component.gd::create_observation` | `inventory` |
 
@@ -123,6 +124,28 @@ later prompt carries neither a UUID nor a handle from another cycle.
 **Delivery order:** this server must deploy strictly after the simulation that
 understands `zone_id`. An older simulation refuses `{zone_id}` as a malformed
 `MOVE_TO`, at ERROR, every cycle a mind names a place.
+
+### Place queries are deferred attention, not actions
+
+With response protocol v2, reflection may return a top-level `place_query` beside
+the chosen `action`. Its shape is `{afford, max_distance?,
+min_expected_providers?, limit?}` and its vocabulary is the canonical need and
+interaction identifiers the simulation's existing `ZoneSeeking` table can score.
+The query survives independently when action salvage falls back to `WAIT`; the
+simulation queues it before dispatching the action.
+
+The simulation validates and clamps the request, searches only the querying NPC's
+own uncapped place-memory keys, ranks matches through the existing place-seeking
+utility, and exposes at most three descriptors in the next cycle's
+`place.query_result`. This server models that field as
+`list[PlaceDescriptor] | None`: absence/`None` means no query was answered, while
+an explicit `[]` means it ran and found no matching remembered place. Non-empty
+answers share the ordinary per-cycle handles and may enter the ordinary goal menu;
+the query result itself never commands movement.
+
+This is a paired response/observation contract. Deploy the protocol-v2 mind only
+with a simulation client that recognizes `place_query`, and deploy the v6 place
+observation model before a simulation begins emitting `query_result`.
 
 ## Vocabulary this server must not hardcode
 

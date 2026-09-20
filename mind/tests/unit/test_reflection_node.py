@@ -142,6 +142,34 @@ class TestReflectionNode:
         assert result.chosen_action.action == ActionType.WAIT
         assert result.chosen_action.parameters == {}
 
+    async def test_place_query_round_trips_beside_the_action(self, mock_llm, basic_state):
+        mock_llm.ainvoke.return_value = AIMessage(
+            content=VALID_RESPONSE[:-1]
+            + ', "place_query": {"afford": "harvest", "max_distance": 80, '
+            + '"min_expected_providers": 1.5, "limit": 2}}',
+            usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+        )
+        result = await ReflectionNode(mock_llm).process(basic_state)
+
+        assert result.chosen_action.action == ActionType.WAIT
+        assert result.place_query is not None
+        assert result.place_query.model_dump(exclude_none=True) == {
+            "afford": "harvest",
+            "max_distance": 80,
+            "min_expected_providers": 1.5,
+            "limit": 2,
+        }
+
+    async def test_place_query_schema_uses_only_canonical_supported_vocabulary(self):
+        schema = ReflectionOutput.model_json_schema()
+        query = schema["$defs"]["PlaceQuery"]
+        afford = query["properties"]["afford"]
+
+        assert set(afford["enum"]) == {
+            "hunger", "consume", "cook", "harvest", "harvest_plant"
+        }
+        assert query["additionalProperties"] is False
+
     async def test_appends_action_chosen_event(self, node, mock_llm, basic_state):
         """Should append an ACTION_CHOSEN event carrying the chosen action"""
         result = await node.process(basic_state)

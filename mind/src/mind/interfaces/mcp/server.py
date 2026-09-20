@@ -37,7 +37,7 @@ logger = get_logger()
 ## a client can distinguish "this server is older than telemetry" from "this
 ## server ran and reported nothing" -- two facts that would otherwise collapse
 ## into the same absent field.
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 
 def _error_response(request_id: str, error_message: str, details: str = None) -> dict:
@@ -60,9 +60,11 @@ def _error_response(request_id: str, error_message: str, details: str = None) ->
     return response
 
 
-def _success_response(request_id: str, action: dict, telemetry: dict) -> dict:
+def _success_response(
+    request_id: str, action: dict, telemetry: dict, place_query: dict | None = None
+) -> dict:
     """Helper to construct success response dict"""
-    return {
+    response = {
         "status": "success",
         "action": action,
         "error_message": None,
@@ -70,6 +72,9 @@ def _success_response(request_id: str, action: dict, telemetry: dict) -> dict:
         "protocol_version": PROTOCOL_VERSION,
         "telemetry": telemetry,
     }
+    if place_query is not None:
+        response["place_query"] = place_query
+    return response
 
 
 # The payload field whose presence marks an INTERACTION_OBSERVATION as a
@@ -502,7 +507,14 @@ class MCPServer:
                 for key in ("selected_option_id", "selection_rationale"):
                     if action_payload.get(key) is None:
                         action_payload.pop(key, None)
-                return _success_response(request_id, action_payload, telemetry.model_dump())
+                query_payload = (
+                    result.place_query.model_dump(exclude_none=True)
+                    if result.place_query is not None
+                    else None
+                )
+                return _success_response(
+                    request_id, action_payload, telemetry.model_dump(), query_payload
+                )
 
             except ValidationError as e:
                 logger.warning(

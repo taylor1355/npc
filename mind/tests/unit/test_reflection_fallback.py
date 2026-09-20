@@ -185,6 +185,38 @@ class TestReflectionSalvageMatrix:
         assert result.chosen_action.action == ActionType.WANDER
         assert result.working_memory.situation_assessment == "At the forge"
 
+    async def test_valid_query_survives_a_malformed_action(self):
+        content = (
+            "{"
+            f'"updated_working_memory": {VALID_WM}, '
+            '"new_memories": [], '
+            '"chosen_action": {"action": "fly_away", "parameters": {}}, '
+            '"place_query": {"afford": "hunger", "limit": 2}'
+            "}"
+        )
+        result = await ReflectionNode(make_failing_llm(content)).process(make_state())
+
+        assert_salvage_floors(result)
+        assert result.chosen_action.action == ActionType.WAIT
+        assert result.place_query is not None
+        assert result.place_query.afford == "hunger"
+        assert result.place_query.limit == 2
+
+    async def test_invalid_query_does_not_discard_a_valid_action(self):
+        content = (
+            "{"
+            f'"updated_working_memory": {VALID_WM}, '
+            '"new_memories": [], '
+            '"chosen_action": {"action": "wander", "parameters": {}}, '
+            '"place_query": {"afford": "invented", "limit": 99}'
+            "}"
+        )
+        result = await ReflectionNode(make_failing_llm(content)).process(make_state())
+
+        assert_salvage_floors(result)
+        assert result.chosen_action.action == ActionType.WANDER
+        assert result.place_query is None
+
     async def test_valid_action_rescued_while_empty_working_memory_is_refused(self):
         """The wipe guard: an empty WorkingMemory validates trivially, so
         salvage must refuse it and keep the current one."""
