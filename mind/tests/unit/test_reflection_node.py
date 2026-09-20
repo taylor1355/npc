@@ -165,9 +165,7 @@ class TestReflectionNode:
         query = schema["$defs"]["PlaceQuery"]
         afford = query["properties"]["afford"]
 
-        assert set(afford["enum"]) == {
-            "hunger", "consume", "cook", "harvest", "harvest_plant"
-        }
+        assert set(afford["enum"]) == {"hunger", "consume", "cook", "harvest", "harvest_plant"}
         assert query["additionalProperties"] is False
 
     async def test_appends_action_chosen_event(self, node, mock_llm, basic_state):

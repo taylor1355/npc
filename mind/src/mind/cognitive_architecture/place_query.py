@@ -17,9 +17,7 @@ class PlaceQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     afford: PlaceAfford = Field(
-        description=(
-            "Canonical need or interaction to look for in this NPC's own place knowledge"
-        )
+        description=("Canonical need or interaction to look for in this NPC's own place knowledge")
     )
     max_distance: int | None = Field(default=None, ge=0)
     min_expected_providers: float | None = Field(default=None, ge=0.0)

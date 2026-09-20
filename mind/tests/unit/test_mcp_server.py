@@ -1686,9 +1686,7 @@ class TestSelectionOutputWireFormat:
         )
 
         assert response["action"]["action"] == "wait"
-        assert response["place_query"] == {
-            "afford": "hunger", "max_distance": 40, "limit": 2
-        }
+        assert response["place_query"] == {"afford": "hunger", "max_distance": 40, "limit": 2}
 
     @pytest.mark.asyncio
     async def test_absent_place_query_is_omitted_not_null(self):
