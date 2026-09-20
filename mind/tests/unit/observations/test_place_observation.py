@@ -168,7 +168,7 @@ QUERY_RESULT_DESCRIPTOR = {
     "affords": ["harvest"],
     "provider_count": 3,
     "witnessed_age_minutes": 80,
-    "source": "visited",
+    "source": "witnessed",
     "age_minutes": 80,
     "beyond_vision": True,
     "confidence": 0.75,
@@ -287,6 +287,7 @@ class TestPlaceBlockParsing:
 
         assert place.contract_version == 6
         assert [descriptor.zone_id for descriptor in place.query_result] == ["zone_orchard"]
+        assert place.query_result[0].source == PlaceKnowledgeSource.WITNESSED
         assert "unknown contract_version" not in caplog.text
 
     def test_query_result_absence_and_answered_empty_remain_distinct(self):
@@ -313,8 +314,8 @@ class TestPlaceBlockParsing:
         assert by_id["zone_berry"].told_by == ""
 
     def test_an_unknown_source_is_refused(self):
-        """``PlaceKnowledge.Source`` is a closed three-member enum with a shipped
-        save vocabulary, so a fourth value is a breaking change and deserves to
+        """``PlaceKnowledge.Source`` is a closed four-member enum with a shipped
+        save vocabulary, so a fifth value is a breaking change and deserves to
         fail loudly -- the ``ValenceBand`` posture, not the free-string one used
         for simulation-owned open registries like interaction names."""
         with pytest.raises(ValidationError):

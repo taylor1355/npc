@@ -693,7 +693,7 @@ class PlaceKnowledgeSource(StrEnum):
     made for interaction names and declaration kinds. The discriminator is
     open-registry versus closed enum: an interaction is registered in the
     simulation and must reach the LLM with no Python change, whereas ``Source``
-    is a three-member GDScript ``enum`` whose serialized names are a save-format
+    is a four-member GDScript ``enum`` whose serialized names are a save-format
     contract "from birth" with an out-of-enum ``SOURCE_INVALID`` sentinel for
     anything that fails to parse. Nothing can widen it quietly. Same reasoning as
     ``ValenceBand``: structure fails loud.
@@ -704,6 +704,7 @@ class PlaceKnowledgeSource(StrEnum):
     CREATED = "created"
     VISITED = "visited"
     TOLD = "told"
+    WITNESSED = "witnessed"
 
 
 class PlaceDescriptor(BaseModel):
