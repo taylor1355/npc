@@ -855,6 +855,36 @@ class PlaceDescriptor(BaseModel):
         return f"{prefix}{self.label()} ({', '.join(facts)})"
 
 
+class HabitSpotDescriptor(BaseModel):
+    """One unnamed place derived from this NPC's own movement history.
+
+    The simulation re-derives these rows from ``SpatialHabitMap`` every place
+    observation pass. There is deliberately no zone id, name, contents belief
+    or source field: promotion is what turns the ground into a stable, tellable
+    place. ``focal_cell`` remains actionable through MOVE_TO's ordinary
+    ``destination`` parameter without inventing a persistent reference.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    focal_cell: tuple[int, int]
+    distance: int = 0
+    beyond_vision: bool = False
+    rank: int = 0
+    direction: str = "here"
+
+    def label(self) -> str:
+        """Possessive place vocabulary, never a generated stable name."""
+        return "Your usual spot" if self.rank == 0 else "Your other usual spot"
+
+    def render_summary(self) -> str:
+        """Prompt clause naming the spot and its ordinary cell destination."""
+        where = "here" if self.direction == "here" else f"to the {self.direction}"
+        x, y = self.focal_cell
+        sight = ", out of sight" if self.beyond_vision else ""
+        return f"{self.label()} is {where} ({self.distance} away{sight}; destination [{x}, {y}])"
+
+
 class MarkBudgetState(BaseModel):
     """How many places this NPC is currently holding, and the wait for the next.
 
@@ -915,7 +945,10 @@ class MarkBudgetState(BaseModel):
 # uncapped place-knowledge pool in response to the previous cycle's query. It is
 # a versioned addition because this model is extra="forbid" and because dropping
 # the result would make the deferred request silently inert.
-KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6})
+# v7 (NPC-1474) adds ``habit_spots``, a sibling list whose deliberately lighter
+# descriptor carries no zone reference. It is versioned because dropping this
+# strict root key would make the new perception channel silently inert.
+KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7})
 
 # The first place-block version whose descriptors spell the representative cell
 # ``focal_cell``. Every KNOWN version below it spells it ``anchor``.
@@ -1008,6 +1041,10 @@ class PlaceObservation(BaseModel):
     #: ``known_places`` rather than replacing it: the ordinary cap remains the
     #: cycle's passive context and this is the explicit attention pull.
     query_result: list[PlaceDescriptor] | None = None
+    #: Unnamed places derived from this NPC's own occupancy history (NPC-1474,
+    #: block version 7). Always a sibling of the zone-typed lists: no id means it
+    #: cannot enter ``place_handles`` or be mistaken for a tellable place.
+    habit_spots: list[HabitSpotDescriptor] = Field(default_factory=list)
     mark_budget: MarkBudgetState | None = None
 
     @model_validator(mode="before")
@@ -1165,6 +1202,10 @@ class PlaceObservation(BaseModel):
                 lines.append(f"Place query result: {listed}")
             else:
                 lines.append("Place query result: no matching places.")
+
+        if self.habit_spots:
+            listed = "; ".join(spot.render_summary() for spot in self.habit_spots)
+            lines.append(f"Personal habit spots: {listed}.")
 
         if self.mark_budget:
             lines.append(self.mark_budget.render_summary())

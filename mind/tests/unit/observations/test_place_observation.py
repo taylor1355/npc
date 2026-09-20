@@ -14,6 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.observations import (
+    HabitSpotDescriptor,
     MarkBudgetState,
     Observation,
     PlaceDescriptor,
@@ -303,6 +304,35 @@ class TestPlaceBlockParsing:
         assert "Place query result" not in absent.render_summary()
         assert "Place query result: no matching places." in answered_empty.render_summary()
 
+    def test_a_v7_block_models_personal_habit_spots(self, caplog):
+        sample = dict(
+            PLACE_BLOCK_CONTRACT_SAMPLE,
+            contract_version=7,
+            habit_spots=[
+                {
+                    "focal_cell": [12, 34],
+                    "distance": 7,
+                    "beyond_vision": True,
+                    "rank": 0,
+                    "direction": "northwest",
+                }
+            ],
+        )
+
+        place = PlaceObservation.model_validate(sample)
+
+        assert place.contract_version == 7
+        assert place.habit_spots == [
+            HabitSpotDescriptor(
+                focal_cell=(12, 34),
+                distance=7,
+                beyond_vision=True,
+                rank=0,
+                direction="northwest",
+            )
+        ]
+        assert "unknown contract_version" not in caplog.text
+
     def test_told_by_is_omitted_except_for_told(self):
         """Provenance is read from ``source``, never from the emptiness of told_by."""
         place = PlaceObservation.model_validate(PLACE_BLOCK_CONTRACT_SAMPLE)
@@ -502,6 +532,36 @@ class TestPlaceRendering:
         rendered = place.render_summary()
         assert "[p4] the old orchard" in rendered
         assert "zone_orchard" not in rendered
+
+    def test_personal_habit_spots_render_possessively_with_a_destination(self):
+        place = PlaceObservation.model_validate(
+            {
+                "contract_version": 7,
+                "habit_spots": [
+                    {
+                        "focal_cell": [12, 34],
+                        "distance": 7,
+                        "beyond_vision": True,
+                        "rank": 0,
+                        "direction": "northwest",
+                    },
+                    {
+                        "focal_cell": [50, 51],
+                        "distance": 9,
+                        "beyond_vision": True,
+                        "rank": 1,
+                        "direction": "southeast",
+                    },
+                ],
+            }
+        )
+
+        rendered = place.render_summary()
+        assert "Your usual spot" in rendered
+        assert "northwest" in rendered
+        assert "destination [12, 34]" in rendered
+        assert "Your other usual spot" in rendered
+        assert place.place_handles() == {}, "unnamed spots never masquerade as zone handles"
 
     def test_provenance_and_affordances_are_carried(self):
         rendered = self._rendered()
