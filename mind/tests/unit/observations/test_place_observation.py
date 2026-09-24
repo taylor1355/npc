@@ -563,6 +563,13 @@ class TestPlaceRendering:
         assert "Your other usual spot" in rendered
         assert place.place_handles() == {}, "unnamed spots never masquerade as zone handles"
 
+    def test_extra_habit_spot_and_here_render_without_ambiguous_prose(self):
+        third = HabitSpotDescriptor(focal_cell=(70, 71), rank=2, direction="east")
+        here = HabitSpotDescriptor(focal_cell=(4, 5), beyond_vision=True)
+
+        assert "Your usual spot #3" in third.render_summary()
+        assert here.render_summary() == "Your usual spot is here (destination [4, 5])"
+
     def test_provenance_and_affordances_are_carried(self):
         rendered = self._rendered()
         assert "told by npc_bo" in rendered

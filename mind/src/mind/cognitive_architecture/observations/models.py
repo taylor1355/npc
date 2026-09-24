@@ -875,12 +875,18 @@ class HabitSpotDescriptor(BaseModel):
 
     def label(self) -> str:
         """Possessive place vocabulary, never a generated stable name."""
-        return "Your usual spot" if self.rank == 0 else "Your other usual spot"
+        if self.rank == 0:
+            return "Your usual spot"
+        if self.rank == 1:
+            return "Your other usual spot"
+        return f"Your usual spot #{self.rank + 1}"
 
     def render_summary(self) -> str:
         """Prompt clause naming the spot and its ordinary cell destination."""
-        where = "here" if self.direction == "here" else f"to the {self.direction}"
         x, y = self.focal_cell
+        if self.direction == "here":
+            return f"{self.label()} is here (destination [{x}, {y}])"
+        where = f"to the {self.direction}"
         sight = ", out of sight" if self.beyond_vision else ""
         return f"{self.label()} is {where} ({self.distance} away{sight}; destination [{x}, {y}])"
 
