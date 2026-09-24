@@ -1591,13 +1591,13 @@ class TestDecideActionTelemetry:
         success = await self._decide_with_usage(
             server, {"memory_query": StepTokenUsage(total_tokens=5, model_calls=1)}
         )
-        assert success["protocol_version"] == 2
+        assert success["protocol_version"] == 3
 
         error_result = await MCPServer().mcp.call_tool(
             "decide_action",
             {"mind_id": "does_not_exist", "observation": self.OBSERVATION},
         )
-        assert parse_response(error_result)["protocol_version"] == 2
+        assert parse_response(error_result)["protocol_version"] == 3
 
 
 class TestSelectionOutputWireFormat:
@@ -1615,7 +1615,7 @@ class TestSelectionOutputWireFormat:
         "status": {"position": [5, 5], "movement_locked": False},
     }
 
-    async def _decide_with_action(self, action, place_query=None):
+    async def _decide_with_action(self, action, query=None):
         from mind.cognitive_architecture.state import PipelineState
 
         server = MCPServer()
@@ -1630,7 +1630,7 @@ class TestSelectionOutputWireFormat:
 
         async def mock_process(state: PipelineState) -> PipelineState:
             state.chosen_action = action
-            state.place_query = place_query
+            state.query = query
             return state
 
         server.minds["mind_test"].pipeline.process = mock_process
@@ -1676,24 +1676,31 @@ class TestSelectionOutputWireFormat:
         assert response["action"]["parameters"] == {}
 
     @pytest.mark.asyncio
-    async def test_place_query_reaches_the_response_beside_action(self):
+    async def test_typed_query_reaches_the_response_beside_action(self):
         from mind.cognitive_architecture.actions import Action
-        from mind.cognitive_architecture.place_query import PlaceQuery
+        from mind.cognitive_architecture.place_query import PlaceQuery, PlaceQueryRequest
 
         response = await self._decide_with_action(
             Action.model_construct(action="wait", parameters={}),
-            PlaceQuery(afford="hunger", max_distance=40, limit=2),
+            PlaceQueryRequest(
+                kind="place",
+                payload=PlaceQuery(afford="hunger", max_distance=40, limit=2),
+            ),
         )
 
         assert response["action"]["action"] == "wait"
-        assert response["place_query"] == {"afford": "hunger", "max_distance": 40, "limit": 2}
+        assert response["protocol_version"] == 3
+        assert response["query"] == {
+            "kind": "place",
+            "payload": {"afford": "hunger", "max_distance": 40, "limit": 2},
+        }
 
     @pytest.mark.asyncio
-    async def test_absent_place_query_is_omitted_not_null(self):
+    async def test_absent_query_is_omitted_not_null(self):
         from mind.cognitive_architecture.actions import Action
 
         response = await self._decide_with_action(
             Action.model_construct(action="wait", parameters={})
         )
 
-        assert "place_query" not in response
+        assert "query" not in response

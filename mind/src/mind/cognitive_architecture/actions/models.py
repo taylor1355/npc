@@ -285,7 +285,7 @@ class Action(BaseModel):
           refuses as naming both.
 
         Then, for a named place, the ``zone_id`` must be one of THIS cycle's place
-        handles (``PlaceObservation.resolve_place_handle``). The prompt never
+        handles (``Observation.resolve_place_handle``). The prompt never
         shows a real zone id -- places carry ``[p1]``-style handles -- so a stale
         handle, a place name or a guessed id is refused here, loudly and
         retryably, and never reaches the simulation as though it were an id. The
@@ -312,9 +312,8 @@ class Action(BaseModel):
             raise MutuallyExclusiveParametersError(MOVE_TO_TARGET_PARAMS, self.action, supplied)
 
         if has_zone:
-            place = observation.place if observation is not None else None
-            handles = list(place.place_handles()) if place is not None else []
-            if place is None or place.resolve_place_handle(str(zone_id)) is None:
+            handles = list(observation.place_handles()) if observation is not None else []
+            if observation is None or observation.resolve_place_handle(str(zone_id)) is None:
                 raise UnknownPlaceHandleError(str(zone_id), self.action, handles)
 
     def wire_payload(self, observation) -> dict:
@@ -333,10 +332,11 @@ class Action(BaseModel):
         reference = self.parameters.get("zone_id")
         if reference is None or str(reference) == "":
             return payload
-        place = observation.place if observation is not None else None
-        descriptor = place.resolve_place_handle(str(reference)) if place is not None else None
+        descriptor = (
+            observation.resolve_place_handle(str(reference)) if observation is not None else None
+        )
         if descriptor is None:
-            handles = list(place.place_handles()) if place is not None else []
+            handles = list(observation.place_handles()) if observation is not None else []
             raise UnknownPlaceHandleError(str(reference), self.action, handles)
         payload["parameters"] = {**payload["parameters"], "zone_id": descriptor.zone_id}
         return payload
@@ -352,8 +352,9 @@ class Action(BaseModel):
         params = dict(self.parameters)
         if self.action != ActionType.MOVE_TO or not params.get("zone_id"):
             return params
-        place = observation.place if observation is not None else None
-        descriptor = place.resolve_place_handle(str(params["zone_id"])) if place else None
+        descriptor = (
+            observation.resolve_place_handle(str(params["zone_id"])) if observation else None
+        )
         del params["zone_id"]
         params["place"] = descriptor.label() if descriptor is not None else "an unknown place"
         return params

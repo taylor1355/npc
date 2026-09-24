@@ -191,16 +191,17 @@ class TestReflectionSalvageMatrix:
             f'"updated_working_memory": {VALID_WM}, '
             '"new_memories": [], '
             '"chosen_action": {"action": "fly_away", "parameters": {}}, '
-            '"place_query": {"afford": "hunger", "limit": 2}'
+            '"query": {"kind": "place", "payload": {"afford": "hunger", "limit": 2}}'
             "}"
         )
         result = await ReflectionNode(make_failing_llm(content)).process(make_state())
 
         assert_salvage_floors(result)
         assert result.chosen_action.action == ActionType.WAIT
-        assert result.place_query is not None
-        assert result.place_query.afford == "hunger"
-        assert result.place_query.limit == 2
+        assert result.query is not None
+        assert result.query.kind == "place"
+        assert result.query.payload.afford == "hunger"
+        assert result.query.payload.limit == 2
 
     async def test_invalid_query_does_not_discard_a_valid_action(self):
         content = (
@@ -208,14 +209,14 @@ class TestReflectionSalvageMatrix:
             f'"updated_working_memory": {VALID_WM}, '
             '"new_memories": [], '
             '"chosen_action": {"action": "wander", "parameters": {}}, '
-            '"place_query": {"afford": "invented", "limit": 99}'
+            '"query": {"kind": "place", "payload": {"afford": "invented", "limit": 99}}'
             "}"
         )
         result = await ReflectionNode(make_failing_llm(content)).process(make_state())
 
         assert_salvage_floors(result)
         assert result.chosen_action.action == ActionType.WANDER
-        assert result.place_query is None
+        assert result.query is None
 
     async def test_valid_action_rescued_while_empty_working_memory_is_refused(self):
         """The wipe guard: an empty WorkingMemory validates trivially, so

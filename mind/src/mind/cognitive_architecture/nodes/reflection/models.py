@@ -3,7 +3,7 @@
 from pydantic import BaseModel, Field
 
 from mind.cognitive_architecture.actions import Action
-from mind.cognitive_architecture.place_query import PlaceQuery
+from mind.cognitive_architecture.place_query import PlaceQueryRequest
 from mind.cognitive_architecture.working_memory import NewMemory, WorkingMemory
 
 
@@ -24,10 +24,11 @@ class ReflectionOutput(BaseModel):
         description="New memories to store from this experience (can be empty if nothing significant)",
     )
     chosen_action: Action = Field(description="Selected action to execute")
-    place_query: PlaceQuery | None = Field(
+    query: PlaceQueryRequest | None = Field(
         default=None,
         description=(
-            "Optional attention query over this NPC's own known places. It does not replace "
-            "or modify chosen_action; matches arrive in the next cycle's place.query_result."
+            "Optional typed domain query, independent of chosen_action. The current place "
+            "handler searches this NPC's own remembered places; answers arrive next cycle "
+            "in the generic query_result observation."
         ),
     )

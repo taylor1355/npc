@@ -1,4 +1,4 @@
-"""Typed attention request for the simulation's own place knowledge (NPC-1481)."""
+"""Place-domain payload and the current arm of the typed query request union."""
 
 from typing import Literal
 
@@ -12,7 +12,7 @@ PlaceAfford = Literal["hunger", "consume", "cook", "harvest", "harvest_plant"]
 
 
 class PlaceQuery(BaseModel):
-    """Optional attention work returned beside, and independent of, an action."""
+    """Handler-owned criteria for searching this NPC's own place knowledge."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -22,3 +22,17 @@ class PlaceQuery(BaseModel):
     max_distance: int | None = Field(default=None, ge=0)
     min_expected_providers: float | None = Field(default=None, ge=0.0)
     limit: int | None = Field(default=None, ge=1, le=3)
+
+
+class PlaceQueryRequest(BaseModel):
+    """Discriminated place arm of the domain-query request contract.
+
+    The kind is closed and the payload is validated by the place handler model.
+    New domain kinds add an explicit model arm; unknown kinds remain validation
+    errors rather than silently becoming place requests.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["place"]
+    payload: PlaceQuery
