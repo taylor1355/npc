@@ -43,6 +43,7 @@ extends the base `entity_controller.gd::get_current_state_observation`.
 | `place` | `substrate_component.gd::create_place_observation` | `place` |
 | `mood` | `substrate_component.gd::create_mood_observation` | `mood` |
 | `inventory` | `inventory_component.gd::create_observation` | `inventory` |
+| `entity_memory` | `substrate_component.gd::create_entity_memory_observation` | `entity_memory` |
 
 The observation types themselves are the simulation's `src/minds/observations/`
 directory — read them there rather than from a list here.
@@ -186,23 +187,37 @@ or `to_dict()` that emits it.
 
 ## Parsing posture
 
-`Observation` is `extra="forbid"` (NPC-1116). A root key this server does not
-declare raises a `ValidationError`, `server.py` returns an error response, and
-`mcp_mind_client.gd::_on_decide_action_response` logs it at ERROR and falls back
-to a wait. That is loud but **total**: every MCP NPC stops acting, every cycle,
-until a code change ships.
+**An undeclared root key degrades; it does not refuse.** `Observation` drops it
+before validation and logs at ERROR, naming the key and saying the mind is older
+than the simulation and needs a pull and a restart; the mind then decides on the
+rest of the observation. This reverses NPC-1116's root forbid, which was loud but
+**total**: when the simulation began emitting `entity_memory` (sim `dadd2a5aa`)
+before this server declared it, every `decide_action` was refused and every MCP
+NPC waited, every cycle. `extra="forbid"` stays on the model as a backstop, so an
+unknown key is either logged-and-dropped or refused, never silently ignored. All
+shedding goes through one helper, `models.py::shed_undeclared_keys`, which also
+carries the per-block unknown-`contract_version` degrade.
 
-The consequence is a cross-repo ordering rule that runs opposite to the old one:
+What still binds the cross-repo ordering:
 
-- **A new observation type must be declared here first, and deployed**, before
-  the simulation-side `add_observation` merges. The server is a long-lived
-  process launched from `.mind_launch.json` against a sibling clone, so pulling
-  simulation `main` without restarting it is enough to cause the outage.
-- Nested blocks are **not** uniformly forbidding. The `Goal*` family and
-  `InventoryObservation` forbid; `StatusObservation`, `NeedsObservation`,
-  `VisionObservation`, `MoodObservation`, `EntityData` and `VisibleInteraction`
-  keep pydantic's default `ignore`. **Root forbid catches a new BLOCK, not a new
-  FIELD inside an existing block.**
+- **A new root block is invisible until declared here and the server
+  restarted.** It no longer stops NPCs acting, but the mind decides without it.
+  The server is a long-lived process launched from `.mind_launch.json` against a
+  sibling clone, so pulling simulation `main` is not enough on its own.
+- **A new key inside a declared block follows that block's policy.** Where the
+  simulation's wire contract promises additive keys under an unchanged
+  `contract_version` it degrades (WARNING, dropped): `PlaceDescriptor` ("descriptors
+  grow keys") and `RememberedEntity` ("rows grow keys"). Everywhere else a nested
+  forbid still refuses the **whole observation** — the `Goal*` family,
+  `InventoryObservation`, and the `place` / `entity_memory` block roots under a
+  known version — so those need this server deployed first, or a version bump.
+  `PlaceDescriptor`'s retired `anchor` key stays refused. `StatusObservation`,
+  `NeedsObservation`, `VisionObservation`, `MoodObservation`, `EntityData` and
+  `VisibleInteraction` keep pydantic's default `ignore`, which drops silently.
+- `test_observation_models.py::TestObservationRootDegrade::test_declared_root_fields_match_the_wire`
+  pins `Observation`'s fields to `tests/fixtures/observations.py::wire_full_root_payload`,
+  so a drift between the two shows in this repository's CI; the fixture itself is
+  only as current as its last re-derivation from the simulation.
 - `ConversationObservation` must never gain forbid: `server.py` validates it
   inside `try/except ValidationError: continue`, so forbidding there would
   silently skip every `INTERACTION_OBSERVATION` — the same bug one layer over.
@@ -210,8 +225,8 @@ The consequence is a cross-repo ordering rule that runs opposite to the old one:
 **The parity audit cannot see this class of defect.** `audit_mcp_parity.py`
 scans `audit_scope.substrate_files` for substrate-component getters and exports;
 inventory is not substrate state, and the audit stays green through both this
-bug and any regression of it. Forbid is the mechanism precisely because auditing
-is not.
+bug and any regression of it. The logged root drop and the field-set test are
+the mechanism precisely because auditing is not.
 
 ## See also
 

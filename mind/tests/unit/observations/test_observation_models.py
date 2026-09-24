@@ -1008,43 +1008,111 @@ class TestNeedsCeilingWireKey:
         assert NeedsObservation.model_validate(original.model_dump()).max_value == 42.0
 
 
-class TestObservationRootForbid:
-    """An undeclared root key raises instead of vanishing (NPC-1116).
+class TestObservationRootDegrade:
+    """An undeclared root key is dropped and logged at ERROR, never refused.
 
-    The wire root key set is mechanically ``{entity_id,
-    current_simulation_time}`` plus one key per ``Observation.get_type()``, so
-    a key this model does not declare is contract drift rather than noise. The
-    trade is deliberate and one-directional: the failure is loud (an error
-    response, logged at ERROR simulation-side, naming the key) but total for
-    MCP NPCs, which is why every emitted root key must be declared here BEFORE
-    the simulation-side emission merges.
+    Reverses NPC-1116's root forbid. That made an unknown block loud but TOTAL:
+    when the simulation began emitting ``entity_memory`` (sim dadd2a5aa) ahead of
+    this model, every ``decide_action`` was refused and every MCP NPC waited,
+    every cycle. The property that replaces it is "degraded, never silent": the
+    rest of the observation still parses, and the drop is logged at ERROR naming
+    the key and the remedy.
     """
 
-    def test_undeclared_root_key_is_rejected_by_observation(self):
-        """Should raise on a root key no field declares"""
-        payload = {
-            "entity_id": "x",
-            "current_simulation_time": 1,
-            # W4's key. It exists nowhere in the simulation tree today, so this
-            # test doubles as the proof that the cross-repo ordering gate is
-            # still free to establish: the mind must declare it first.
-            "shared_place": {"place_id": "tavern"},
-        }
+    @staticmethod
+    def _payload_with_an_unknown_block() -> dict:
+        from tests.fixtures.observations import wire_full_root_payload
+
+        payload = wire_full_root_payload()
+        # A key that exists nowhere in the simulation tree, standing in for the
+        # next block the simulation ships before this model declares it.
+        payload["shared_place"] = {"place_id": "tavern"}
+        return payload
+
+    @staticmethod
+    def _shed_records(caplog) -> list[logging.LogRecord]:
+        return [r for r in caplog.records if "ignoring undeclared key" in r.getMessage()]
+
+    def test_undeclared_root_key_is_dropped_and_logged_at_error(self, caplog):
+        """Should drop the unknown block, log it at ERROR, and parse the rest"""
+        with caplog.at_level(logging.WARNING):
+            obs = Observation.model_validate(self._payload_with_an_unknown_block())
+
+        records = self._shed_records(caplog)
+        assert len(records) == 1
+        record = records[0]
+        assert record.levelno == logging.ERROR
+        message = record.getMessage()
+        assert "Observation" in message
+        assert "'shared_place'" in message
+        assert "older than the simulation" in message
+        assert "restart" in message
+        # The remaining payload is intact: the mind keeps deciding on it.
+        assert obs.entity_id == "carrier_npc"
+        assert obs.status is not None
+        assert obs.goal is not None
+        assert obs.entity_memory is not None
+        assert "shared_place" not in obs.model_dump()
+
+    def test_a_declared_payload_logs_no_drop(self, caplog):
+        """Known-negative control: the log assertion above could have failed.
+
+        Without this arm, a validator that logged on EVERY payload would satisfy
+        the test above while burying the one ERROR that matters.
+        """
+        from tests.fixtures.observations import wire_full_root_payload
+
+        with caplog.at_level(logging.DEBUG):
+            Observation.model_validate(wire_full_root_payload())
+
+        assert self._shed_records(caplog) == []
+
+    def test_forbid_backstop_is_still_set(self):
+        """Should keep forbid, so the logged drop is the ONLY way past validation.
+
+        With the drop removed, the test above goes red on a ValidationError; with
+        forbid swapped for ``extra="ignore"`` and the drop removed, an unknown
+        block would vanish silently -- this pins the second half.
+        """
+        assert Observation.model_config["extra"] == "forbid"
+
+    def test_root_drop_does_not_rescue_a_key_inside_a_strict_block(self):
+        """The drop is root-only. A new key inside a block whose contract does not
+        promise additive growth (the goal block) still refuses the observation."""
+        from tests.fixtures.observations import wire_full_root_payload
+
+        payload = wire_full_root_payload()
+        payload["goal"]["not_in_the_contract"] = True
 
         with pytest.raises(ValidationError):
             Observation.model_validate(payload)
 
-    def test_root_forbid_is_falsifiable(self):
-        """Should keep forbid set, so a future merge cannot silently revert it"""
-        assert Observation.model_config["extra"] == "forbid"
+    def test_declared_root_fields_match_the_wire(self):
+        """Should declare exactly the root keys the simulation emits.
 
-    def test_full_wire_payload_parses_under_forbid(self):
+        The link-time check that makes the next drift visible in this repo's CI
+        instead of on a live NPC. ``conversations`` is the one mind-side-only
+        field (lifted out of events by ``server.py``). If this fails, re-derive
+        ``wire_full_root_payload`` from the simulation, never the other way
+        round: the key set is ``{entity_id, current_simulation_time}`` plus one
+        ``get_type()`` per observation added in
+        ``src/field/entities/entity_controller.gd`` and
+        ``src/field/npcs/npc_controller.gd::get_current_state_observation``
+        (types in ``src/minds/observations/*_observation.gd``), serialized by
+        ``src/minds/observations/composite_observation.gd::get_data``.
+        """
+        from tests.fixtures.observations import wire_full_root_payload
+
+        declared = set(Observation.model_fields) - {"conversations"}
+
+        assert declared == set(wire_full_root_payload())
+
+    def test_full_wire_payload_parses(self):
         """Should accept every root key the simulation actually emits.
 
-        The single test that would have caught a missed key before it reached a
-        live NPC. It is only as good as ``wire_full_root_payload``'s
-        transcription -- re-derive that from the simulation's ``get_data()``
-        rather than trusting it if the producers change.
+        It is only as good as ``wire_full_root_payload``'s transcription --
+        re-derive that from the simulation's ``get_data()`` rather than trusting
+        it if the producers change.
         """
         from tests.fixtures.observations import wire_full_root_payload
 
@@ -1057,8 +1125,10 @@ class TestObservationRootForbid:
         assert obs.goal is not None
         assert obs.mood is not None
         assert obs.inventory is not None
+        assert obs.place is not None
+        assert obs.entity_memory is not None
 
-    def test_model_dump_round_trips_under_forbid(self):
+    def test_model_dump_round_trips(self):
         """Should re-validate its own dump -- integration tests rely on this"""
         from tests.fixtures.observations import create_carrying_observation
 
