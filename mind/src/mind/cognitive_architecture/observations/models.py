@@ -1,5 +1,6 @@
 """Observation models for the cognitive architecture"""
 
+import logging
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -37,6 +38,79 @@ WIRE_KEY_PARAM_DESCRIPTION = "description"
 # noun, deliberately not any interaction's identifier — nothing in this package
 # may name a specific interaction.
 UNNAMED_INTERACTION = "interaction"
+
+# The tail of every log line that sheds a key the simulation sent. Whatever the
+# level, the remedy is the same: the simulation is ahead of this checkout.
+_UPGRADE_HINT = (
+    "This mind is older than the simulation that sent it: pull the mind repository "
+    "and restart the server to read it."
+)
+
+
+def _declared_wire_keys(model: type[BaseModel]) -> set[str]:
+    """Every key ``model`` accepts on the wire: field names plus their aliases.
+
+    Aliases matter because a key shed by field name alone would silently drop a
+    correctly-spelled wire key (``NeedsObservation``'s ``max_need_value`` is the
+    live example of a wire spelling differing from the field name).
+    """
+    keys: set[str] = set()
+    for name, field in model.model_fields.items():
+        keys.add(name)
+        if field.alias:
+            keys.add(field.alias)
+        alias = field.validation_alias
+        if isinstance(alias, str):
+            keys.add(alias)
+        elif isinstance(alias, AliasChoices):
+            keys.update(choice for choice in alias.choices if isinstance(choice, str))
+    return keys
+
+
+def shed_undeclared_keys(
+    model: type[BaseModel],
+    data: Any,
+    *,
+    level: int,
+    context: str,
+    keep: frozenset[str] = frozenset(),
+) -> Any:
+    """THE degrade path: drop the keys ``model`` does not declare, and say so.
+
+    Every place this module tolerates a simulation that is ahead of it goes
+    through here -- an unknown root block on ``Observation``, a key added under an
+    unchanged ``contract_version`` where that block's wire contract promises
+    additive growth, and every root key of a block whose ``contract_version``
+    this mind does not know. One path, so the property "an unread key is never
+    dropped silently" is tested once and holds everywhere.
+
+    The drop is always logged at ``level``, naming the model and every key, so
+    shedding can degrade what a mind knows but can never hide that it did.
+    Nothing is dropped when every key is declared, and nothing is logged.
+
+    ``keep`` names undeclared keys that must stay IN the payload so the model's
+    ``extra="forbid"`` still refuses them: retired keys whose presence is a real
+    contract breach rather than growth (``PlaceDescriptor``'s ``anchor``).
+
+    Runs as a ``mode="before"`` validator on purpose: an ``after`` validator would
+    never fire for exactly the payloads it exists for, because ``extra="forbid"``
+    would refuse the keys first.
+    """
+    if not isinstance(data, dict):
+        return data
+    declared = _declared_wire_keys(model)
+    undeclared = sorted(key for key in data if key not in declared and key not in keep)
+    if not undeclared:
+        return data
+    logger.log(
+        level,
+        "%s: ignoring undeclared key(s) %s (%s). %s",
+        model.__name__,
+        ", ".join(repr(key) for key in undeclared),
+        context,
+        _UPGRADE_HINT,
+    )
+    return {key: value for key, value in data.items() if key not in undeclared}
 
 
 def _format_parameter_hint(param_name: str, spec: dict) -> str:
@@ -602,10 +676,14 @@ class GoalObservation(BaseModel):
     an error. ``option_total`` counts the pre-truncation pool, so
     ``option_total > len(options)`` means a longer menu exists server-side.
 
-    ``extra="forbid"`` is this block's parsing posture (precedent:
-    ``VectorDBQuery``): the sim/mind pair ships in lockstep, and a key the
-    model does not declare is a contract drift that must fail loud rather than
-    be silently dropped.
+    ``extra="forbid"`` is this block's parsing posture at every level
+    (precedent: ``VectorDBQuery``). Unlike the place descriptors and
+    entity-memory rows, the goal contract does not promise open additive growth
+    under v1: it names its two reserved keys (``options[].confidence``,
+    ``segments[].rationale``), and both are declared below. Any other key is a
+    contract drift that must fail loud rather than be silently dropped -- and
+    because the refusal is nested, it refuses the whole observation, so a new
+    goal key still needs this model deployed first or a version bump.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -646,7 +724,9 @@ class GoalObservation(BaseModel):
             version,
             sorted(KNOWN_GOAL_CONTRACT_VERSIONS),
         )
-        return {key: value for key, value in data.items() if key in cls.model_fields}
+        return shed_undeclared_keys(
+            cls, data, level=logging.WARNING, context=f"unknown contract_version {version}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -707,6 +787,14 @@ class PlaceKnowledgeSource(StrEnum):
     WITNESSED = "witnessed"
 
 
+# Descriptor keys the simulation has RETIRED. Unlike a key the mind has not
+# learned yet, one of these arriving in a block whose version post-dates its
+# retirement means the producer regressed, so it keeps ``extra="forbid"``'s
+# refusal instead of the additive-key degrade. ``anchor`` became ``focal_cell``
+# at v4; a pre-v4 block's ``anchor`` is translated before descriptors validate.
+_RETIRED_DESCRIPTOR_KEYS = frozenset({"anchor"})
+
+
 class PlaceDescriptor(BaseModel):
     """One place this NPC knows, as the substrate ranked it this cycle.
 
@@ -714,9 +802,28 @@ class PlaceDescriptor(BaseModel):
     that carries these is capped, so every field here is paid for on every
     decision cycle for every MCP NPC -- which is why the renderer below spends
     tokens on some of them and deliberately not on others.
+
+    An undeclared key DEGRADES (logged at WARNING, dropped) rather than refusing
+    the descriptor, because the place block's wire contract promises it:
+    "descriptors grow keys ... under the *same* ``contract_version``". The one
+    exception is the retired ``anchor`` key, which stays refused -- in a v4+
+    block it is a contract breach, not growth (see ``_RETIRED_DESCRIPTOR_KEYS``).
+    ``extra="forbid"`` stays set so a key that somehow bypasses the logged drop
+    still fails loudly.
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_on_additive_keys(cls, data):
+        return shed_undeclared_keys(
+            cls,
+            data,
+            level=logging.WARNING,
+            context="additive place-descriptor key(s)",
+            keep=_RETIRED_DESCRIPTOR_KEYS,
+        )
 
     zone_id: str
     name: str = ""
@@ -1114,10 +1221,14 @@ class PlaceObservation(BaseModel):
     also findable in ``known_places`` -- and both carry the same
     ``PlaceDescriptor`` shape that list does, never a narrowed one.
 
-    ``extra="forbid"``, matching every ``Goal*`` model and
-    ``InventoryObservation``: this block is new, there is no legacy payload to
-    break, and a key added simulation-side must be a lockstep signal rather than
-    a silent drop.
+    The block ROOT is ``extra="forbid"`` under a known version, matching every
+    ``Goal*`` model and ``InventoryObservation``: the contract adds root keys
+    only by bumping ``contract_version`` (v6 ``query_result``, v7
+    ``habit_spots``), so an undeclared root key under a known version is a
+    contract breach. The DESCRIPTORS inside it are different -- the contract
+    promises they grow keys under the same version, so ``PlaceDescriptor``
+    degrades on an undeclared key instead. A nested refusal still refuses the
+    whole observation: ``Observation``'s root drop sheds unknown BLOCKS only.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1177,7 +1288,9 @@ class PlaceObservation(BaseModel):
             version,
             sorted(KNOWN_PLACE_CONTRACT_VERSIONS),
         )
-        return {key: value for key, value in data.items() if key in cls.model_fields}
+        return shed_undeclared_keys(
+            cls, data, level=logging.WARNING, context=f"unknown contract_version {version}"
+        )
 
     @staticmethod
     def _with_focal_cell_keys(data: dict) -> dict:
@@ -1530,6 +1643,113 @@ class InventoryObservation(BaseModel):
     items: list[EntityData] = Field(default_factory=list)
 
 
+# Entity-memory-block wire versions this model set knows how to read. Unknown
+# versions degrade exactly as the goal and place blocks' do -- see the validator
+# on ``EntityMemoryObservation``. Like the place block's fallback, it sheds only
+# the block's ROOT keys; a key added to a row degrades through the row's own
+# additive-key validator, at any version.
+KNOWN_ENTITY_MEMORY_CONTRACT_VERSIONS = frozenset({1})
+
+
+class RememberedEntity(BaseModel):
+    """One thing this NPC remembers but may no longer see.
+
+    Wire producer: the simulation's ``EntityMemoryObservation.Remembered.to_dict``
+    (``src/minds/observations/entity_memory_observation.gd``, NPC-1504) --
+    exactly ``entity_id`` / ``name`` / ``last_cell`` / ``present`` /
+    ``age_minutes``, all five emitted on every row. Deliberately NOT the scoring
+    surface (confidence, expected yields, interaction names): those stay
+    simulation-side on ``EntityDescriptor``.
+
+    An undeclared key DEGRADES (logged at WARNING, dropped) rather than refusing
+    the row, because the entity-memory wire contract promises it: "rows grow keys
+    under the *same* ``contract_version``". ``extra="forbid"`` stays set as the
+    backstop for anything that bypasses the logged drop.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_on_additive_keys(cls, data):
+        return shed_undeclared_keys(
+            cls, data, level=logging.WARNING, context="additive entity-memory row key(s)"
+        )
+
+    entity_id: str
+    #: A snapshot, prose only -- it may name something that no longer exists,
+    #: and is never a lookup key.
+    name: str = ""
+    #: The cell it was last seen at, ``[x, y]`` on the wire (Godot has no JSON
+    #: vector type; matches ``PlaceDescriptor.focal_cell``). Required: the
+    #: producer always emits it, and no default cell could stand for "unknown"
+    #: -- the origin is a real cell on every board.
+    last_cell: tuple[int, int]
+    #: ``False`` is a DISPROVED belief, not an unknown one: written only by an
+    #: arrival that found nothing there. Required because either default would
+    #: fabricate evidence -- ``True`` a belief, ``False`` a disproof.
+    present: bool
+    #: Game minutes since this NPC last saw it.
+    age_minutes: int
+
+
+class EntityMemoryObservation(BaseModel):
+    """What this NPC remembers about things it can no longer see (NPC-1504).
+
+    Wire producer: the simulation's ``entity_memory_observation.gd::get_data``
+    -- exactly ``contract_version`` / ``remembered`` / ``known_total``. The
+    wire contract lives in the simulation repo at
+    ``docs/reference/minds/observations.md`` ("Entity-memory block wire
+    contract"). Emitted every cycle for any NPC with a ``SubstrateComponent``,
+    even when it remembers nothing, so an empty block ("no memories") is
+    distinguishable from an absent one ("no block").
+
+    ``remembered`` is nearest-first and CAPPED simulation-side
+    (``MAX_SERIALIZED``); ``known_total`` counts the whole set, so
+    ``known_total > len(remembered)`` means a longer list exists -- the same
+    convention as ``PlaceObservation.known_places``.
+
+    The block's ROOT stays strict (``extra="forbid"``) under a known version:
+    the contract promises additive growth for rows, not for the block, so a new
+    root key at v1 is a real contract breach and refuses the block. The
+    ``Observation`` root drop does not rescue it -- that sheds undeclared ROOT
+    BLOCKS, not keys inside a declared one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: int = 1
+    remembered: list[RememberedEntity] = Field(default_factory=list)
+    known_total: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_on_unknown_contract_version(cls, data):
+        """Unknown versions degrade, never raise.
+
+        Identical in shape and reasoning to ``GoalObservation``'s: a raise here
+        collapses ``decide_action`` into an error response, which is an NPC that
+        silently stops acting because the simulation got ahead of the mind. Warn,
+        shed undeclared root keys so a purely additive future version parses
+        despite ``extra="forbid"``, and parse the rest best-effort. Known-version
+        payloads are untouched, so for them an undeclared key stays loud.
+        """
+        if not isinstance(data, dict):
+            return data
+        version = data.get("contract_version", 1)
+        if version in KNOWN_ENTITY_MEMORY_CONTRACT_VERSIONS:
+            return data
+        logger.warning(
+            "Entity-memory block carries unknown contract_version %s (known: %s); "
+            "parsing best-effort under the newest known contract.",
+            version,
+            sorted(KNOWN_ENTITY_MEMORY_CONTRACT_VERSIONS),
+        )
+        return shed_undeclared_keys(
+            cls, data, level=logging.WARNING, context=f"unknown contract_version {version}"
+        )
+
+
 class ConversationMessage(BaseModel):
     """Single conversation message.
 
@@ -1593,34 +1813,46 @@ class ConversationObservation(BaseModel):
 class Observation(BaseModel):
     """Complete structured observation.
 
-    ``extra="forbid"``: the built-in mind and the simulation ship in lockstep,
-    so a root key this model does not declare is contract drift, not noise
-    (precedent: every ``Goal*`` model; decided on NPC-1116). Every root key the
-    simulation emits is declared below -- verified against simulation
-    ``origin/main`` @ a2ac2f5a by resolving ``get_type()`` for every
+    Every root key the simulation emits is declared below -- verified against
+    simulation ``main`` after PR #794 by resolving ``get_type()`` for every
     observation added in ``entity_controller.gd`` and
     ``npc_controller.gd::get_current_state_observation``. The wire root key set
     is mechanically ``{entity_id, current_simulation_time}`` plus one key per
     ``get_type()``, because ``composite_observation.gd::get_data`` builds it
-    that way and nothing filters it afterwards.
+    that way and nothing filters it afterwards. ``TestObservationRootDegrade``
+    pins this field set against ``wire_full_root_payload``, so drift shows up
+    in this repository's CI rather than on a live NPC.
 
-    This is the one place in this module that RAISES rather than degrades, and
-    the exception is deliberate. Elsewhere a malformed payload degrades because
-    the alternative is a SILENT stop; here the failure is loud by construction
-    -- ``server.py`` returns an error response and
-    ``mcp_mind_client.gd::_on_decide_action_response`` logs it at ERROR, naming
-    the offending key, before falling back to wait. Loud-and-inert is the trade;
-    silent-and-wrong is what NPC-1116 exists to end.
+    AN UNDECLARED ROOT KEY DEGRADES, IT DOES NOT REFUSE. It is dropped before
+    validation and logged at ERROR, naming every key and saying this mind is
+    older than the simulation and needs a pull and a restart; the mind then
+    decides on the rest of the observation. This reverses NPC-1116's root
+    forbid, which made the failure loud but TOTAL: when the simulation began
+    emitting ``entity_memory`` (sim dadd2a5aa) before this model declared it,
+    every ``decide_action`` was refused and every MCP NPC waited, every cycle,
+    for nine days. A missing block costs one input; a refused observation costs
+    the NPC.
 
-    CONSEQUENCE FOR RELEASE ORDERING: a new observation type must land HERE
-    FIRST, and be deployed -- the server is a long-lived process. Merging a
-    simulation-side ``add_observation`` before the matching field exists here
-    takes every MCP NPC to wait, every cycle, until a code change ships.
+    The drop goes through ``shed_undeclared_keys``, the same path the per-block
+    unknown-``contract_version`` degrades use, so there is one degrade
+    mechanism and it always logs. ``extra="forbid"`` stays set as the backstop:
+    anything that reaches validation undeclared still raises, so an unknown key
+    is either logged-and-dropped or refused -- never silently ignored.
+
+    RELEASE ORDERING, what still binds: a new root block no longer needs to land
+    here first to keep MCP NPCs acting, but it is INVISIBLE to the mind until it
+    is declared here and the server is restarted. And the drop is root-only: a
+    new key INSIDE a declared block is governed by that block's own policy --
+    degraded where its wire contract promises additive growth
+    (``PlaceDescriptor``, ``RememberedEntity``), refused where it does not
+    (the ``Goal*`` family, ``InventoryObservation``, the ``place`` and
+    ``entity_memory`` block roots under a known version) -- so those still need
+    the mind change deployed first, or a ``contract_version`` bump.
 
     ``conversations`` is declared but never on the wire: it is lifted out of
     ``INTERACTION_OBSERVATION`` events by
     ``server.py::_extract_conversation_observations``. It stays declared so
-    ``model_dump()`` round-trips through ``model_validate`` under forbid.
+    ``model_dump()`` round-trips through ``model_validate``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1631,19 +1863,19 @@ class Observation(BaseModel):
     status: StatusObservation | None = None
     needs: NeedsObservation | None = None
     goal: GoalObservation | None = None
-    # OPTIONAL, and that is load-bearing rather than incidental: it is what
-    # removes any cross-repository merge-ordering constraint in EITHER
-    # direction. This model may merge and deploy before the simulation emits the
-    # block (the field simply reads None), and the simulation may merge first --
-    # without this field, extra="forbid" would REFUSE the whole observation, not
-    # merely ignore the block, taking every MCP NPC to wait every cycle until a
-    # deploy. That is the failure this field exists to prevent. NPC-1299 owns
-    # the producer.
+    # OPTIONAL, and that is load-bearing rather than incidental: this model may
+    # merge and deploy before the simulation emits the block (the field simply
+    # reads None). NPC-1299 owns the producer.
     place: PlaceObservation | None = None
     # Optional and independent of place knowledge: absence means no answer was
     # delivered, while a known-kind envelope with an empty payload means the
     # query executed and found nothing (NPC-1699).
     query_result: DomainQueryResult | None = None
+    # Optional for the same reason ``place`` is. The simulation began emitting
+    # this block (NPC-1504, sim dadd2a5aa) before this field existed, which is the
+    # outage that retired root forbid. Parsed only: nothing mind-side renders or
+    # stores it yet.
+    entity_memory: EntityMemoryObservation | None = None
     mood: MoodObservation | None = None
     inventory: InventoryObservation | None = None
     vision: VisionObservation | None = None
@@ -1714,6 +1946,17 @@ class Observation(BaseModel):
 
     def resolve_place_handle(self, reference: str) -> PlaceDescriptor | None:
         return self.place_handles().get(normalize_place_handle(reference))
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_on_undeclared_root_keys(cls, data):
+        """Drop an unknown root block and keep deciding; see the class doc."""
+        return shed_undeclared_keys(
+            cls,
+            data,
+            level=logging.ERROR,
+            context="unknown root observation block(s); deciding without them",
+        )
 
     def __str__(self) -> str:
         """Format observation as natural language for LLM"""

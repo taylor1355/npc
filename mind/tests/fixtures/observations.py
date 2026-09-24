@@ -154,6 +154,68 @@ def wire_inventory_block(
     }
 
 
+def wire_place_block() -> dict:
+    """A minimal ``place`` root value, verbatim from the wire at the CURRENT version.
+
+    ``place_observation.gd::get_data`` (``CONTRACT_VERSION := 8`` after
+    NPC-1699) always emits ``contract_version``, ``known_places``,
+    ``known_total``, ``mark_budget``, and ``habit_spots``; ``current_place`` and
+    ``target_place`` are optional. Query answers now occupy the separate root
+    ``query_result`` envelope. This is the always-on subset for an NPC that
+    knows no place yet; descriptor shape is pinned by
+    ``PLACE_BLOCK_CONTRACT_SAMPLE`` in ``test_place_observation.py``.
+    """
+    return {
+        "contract_version": 8,
+        "known_places": [],
+        "known_total": 0,
+        "mark_budget": {"active": 0, "cap": 2, "next_slot_in_minutes": -1.0},
+        "habit_spots": [],
+    }
+
+
+def wire_remembered_entity(
+    entity_id: str,
+    name: str,
+    last_cell: tuple[int, int],
+    present: bool = True,
+    age: int = 0,
+) -> dict:
+    """One ``entity_memory.remembered`` row, verbatim from the wire.
+
+    This IS the Godot ``EntityMemoryObservation.Remembered.to_dict()`` contract
+    (``src/minds/observations/entity_memory_observation.gd``, simulation
+    ``origin/main`` @ ``56e6df500``): exactly ``entity_id``, ``name``,
+    ``last_cell`` as a two-element LIST, ``present`` and ``age_minutes``.
+    """
+    return {
+        "entity_id": entity_id,
+        "name": name,
+        "last_cell": [last_cell[0], last_cell[1]],
+        "present": present,
+        "age_minutes": age,
+    }
+
+
+def wire_entity_memory_block(
+    remembered: list[dict] | None = None, known_total: int | None = None
+) -> dict:
+    """An ``Observation``'s ``entity_memory`` value, verbatim from the wire.
+
+    This IS the Godot ``EntityMemoryObservation.get_data()`` contract: exactly
+    ``contract_version`` (1), ``remembered`` (capped at ``MAX_SERIALIZED``
+    simulation-side) and ``known_total`` (always emitted, the uncapped count).
+    ``known_total`` defaults to ``len(remembered)``, which is what the producer
+    emits whenever the list was not truncated.
+    """
+    rows = remembered or []
+    return {
+        "contract_version": 1,
+        "remembered": rows,
+        "known_total": len(rows) if known_total is None else known_total,
+    }
+
+
 def wire_full_root_payload(simulation_time: int = 100) -> dict:
     """Every root key the simulation can put on the ``decide_action`` wire.
 
@@ -161,8 +223,22 @@ def wire_full_root_payload(simulation_time: int = 100) -> dict:
     current_simulation_time}`` plus one key per ``Observation.get_type()`` of
     every observation added in ``entity_controller.gd`` /
     ``npc_controller.gd::get_current_state_observation``. That resolves to
-    exactly the eight keys below (verified against simulation ``origin/main``
-    @ ``a2ac2f5a``).
+    exactly the eleven keys below after simulator PR #794 (the generalized
+    query transport): ``entity_id``, ``current_simulation_time``, ``needs``,
+    ``vision``, ``inventory``, ``status``, ``place``, ``entity_memory``,
+    ``query_result``, ``goal``, ``mood``. ``place`` and ``entity_memory`` are
+    attached only for an NPC with a ``SubstrateComponent``; ``query_result``
+    appears only on an answered cycle and ``mood`` only under observation
+    enrichment. Thus a production NPC can carry all eleven.
+
+    This fixture drifted once already: it stopped at eight keys while the
+    simulation grew ``place`` (NPC-1299) and ``entity_memory`` (NPC-1504, sim
+    ``dadd2a5aa``). ``place`` was declared on ``Observation`` so nothing broke;
+    ``entity_memory`` was not, and every MCP decision was refused until it was.
+    Re-derive the key list from the simulation source whenever a producer
+    changes rather than trusting it.
+    ``TestObservationRootDegrade.test_declared_root_fields_match_the_wire`` pins
+    ``Observation``'s fields to this key set.
 
     ``conversations`` is deliberately NOT here: it is a mind-side field lifted
     out of ``INTERACTION_OBSERVATION`` events by
@@ -179,7 +255,18 @@ def wire_full_root_payload(simulation_time: int = 100) -> dict:
             "movement_locked": False,
             "current_interaction": {},
             "activity_state": {"state_name": "idle"},
+            # Both or neither (status_observation.gd::get_data's omission rule).
+            "current_zone_id": "zone_berry",
+            "current_zone_name": "the berry grounds",
         },
+        "place": wire_place_block(),
+        "query_result": {"contract_version": 1, "kind": "place", "payload": []},
+        "entity_memory": wire_entity_memory_block(
+            [
+                wire_remembered_entity("apple_002", "an apple", (46, 6), present=True, age=42),
+                wire_remembered_entity("bed_001", "a bed", (3, 9), present=False, age=180),
+            ]
+        ),
         "needs": {
             "needs": {"hunger": 22.0, "energy": 41.0, "stimulation": 60.0, "social": 35.0},
             "max_need_value": 100.0,
