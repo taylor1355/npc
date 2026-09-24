@@ -125,27 +125,37 @@ later prompt carries neither a UUID nor a handle from another cycle.
 understands `zone_id`. An older simulation refuses `{zone_id}` as a malformed
 `MOVE_TO`, at ERROR, every cycle a mind names a place.
 
-### Place queries are deferred attention, not actions
+### Domain queries are deferred attention, not actions
 
-With response protocol v2, reflection may return a top-level `place_query` beside
-the chosen `action`. Its shape is `{afford, max_distance?,
-min_expected_providers?, limit?}` and its vocabulary is the canonical need and
-interaction identifiers the simulation's existing `ZoneSeeking` table can score.
-The query survives independently when action salvage falls back to `WAIT`; the
-simulation queues it before dispatching the action.
+With response protocol v3, reflection may return a top-level `query` beside the
+chosen `action`, currently `{"kind":"place","payload":{...}}`. The place
+payload shape is `{afford, max_distance?, min_expected_providers?, limit?}` and
+its vocabulary is the canonical need and interaction identifiers the
+simulation's existing `ZoneSeeking` table can score. The query survives
+independently when action salvage falls back to `WAIT`; the simulation queues it
+before dispatching the action. Unknown kinds are rejected explicitly.
 
 The simulation validates and clamps the request, searches only the querying NPC's
 own uncapped place-memory keys, ranks matches through the existing place-seeking
-utility, and exposes at most three descriptors in the next cycle's
-`place.query_result`. This server models that field as
-`list[PlaceDescriptor] | None`: absence/`None` means no query was answered, while
-an explicit `[]` means it ran and found no matching remembered place. Non-empty
-answers share the ordinary per-cycle handles and may enter the ordinary goal menu;
-the query result itself never commands movement.
+utility, and exposes at most three public descriptors in the next cycle's
+top-level `query_result` envelope:
+`{contract_version: 1, kind: "place", payload: [...]}`. Exact candidate scores
+and private per-drive tallies stay inside the simulation; the mind validates and
+renders only the serialized evidence, without reconstructing private scoring
+state.
+Absence means no query was answered; an explicit empty payload means it ran and
+found no matching remembered place. Non-empty answers share the ordinary
+per-cycle handles and may enter ordinary scoring; the result itself never
+commands movement. The passive place block is v8 and no longer carries query
+results. Narrowly scoped v6/v7 parser lifts remain for simulation deployments
+that still send the prior nested `place.query_result` field; v7 also preserves
+its passive `habit_spots` data.
 
-This is a paired response/observation contract. Deploy the protocol-v2 mind only
-with a simulation client that recognizes `place_query`, and deploy the v6 place
-observation model before a simulation begins emitting `query_result`.
+This is a paired response/observation contract. Deploy the protocol-v3 mind with
+a simulation client that recognizes `{kind, payload}` queries and the v8 passive
+place block. The mind also reads v6 and v7 nested results during rollout; the
+sim's generic top-level result requires this mind-side model to be deployed
+first.
 
 ## Vocabulary this server must not hardcode
 

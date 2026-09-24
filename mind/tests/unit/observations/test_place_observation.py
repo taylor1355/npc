@@ -14,6 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.observations import (
+    DomainQueryResult,
     HabitSpotDescriptor,
     MarkBudgetState,
     Observation,
@@ -26,7 +27,7 @@ from mind.cognitive_architecture.observations import (
 #
 # PROVENANCE: pinned against SHIPPED simulation code, re-derived from
 # ``src/minds/observations/place_observation.gd::get_data`` and
-# ``place_descriptor.gd::to_dict`` at contract version 5 (NPC-1643, which left
+# ``place_descriptor.gd::to_dict`` at contract version 8 (NPC-1699, which left
 # every key exactly where it was and changed what ``target_place`` MEANS: the
 # place this NPC is travelling to, rather than the place its active goal names).
 # Version 4 (NPC-1666) renamed the per-place ``anchor`` key to ``focal_cell``;
@@ -56,7 +57,7 @@ from mind.cognitive_architecture.observations import (
 # ``witnessed`` gates ``affords`` / ``provider_count`` / ``witnessed_age_minutes``
 # the same way -- the producer omits all three when it is false.
 PLACE_BLOCK_CONTRACT_SAMPLE = {
-    "contract_version": 5,
+    "contract_version": 8,
     # A FULL descriptor: the producer sends current_place.to_dict() off the same
     # PlaceDescriptor it puts in known_places, where this place also appears.
     "current_place": {
@@ -131,6 +132,7 @@ PLACE_BLOCK_CONTRACT_SAMPLE = {
         },
     ],
     "known_total": 7,
+    "habit_spots": [],
     "target_place": {
         "zone_id": "zone_pond",
         "name": "the pond bend",
@@ -191,7 +193,7 @@ class TestPlaceBlockParsing:
 
         place = observation.place
         assert place is not None
-        assert place.contract_version == 5
+        assert place.contract_version == 8
         assert place.known_total == 7
         assert place.current_place.name == "the berry grounds"
         assert [p.zone_id for p in place.known_places] == ["zone_berry", "zone_pond", "zone_green"]
@@ -250,59 +252,163 @@ class TestPlaceBlockParsing:
         assert observation.place.known_total == 2
         assert "unknown contract_version 99" in caplog.text
 
-    def test_a_v5_block_parses_without_the_unknown_version_warning(self, caplog):
-        """The registration itself (NPC-1643).
-
-        v5 is a MEANING change with no structural one, so an unregistered v5
-        block would still parse -- through the unknown-version fallback, with a
-        warning, having shed nothing. The distinguishable fact is the warning, so
-        that is what this asserts: without the registration the log carries
-        "unknown contract_version 5" and every place block on the deployed mind
-        reads as a version it does not know.
-        """
-        assert PLACE_BLOCK_CONTRACT_SAMPLE["contract_version"] == 5, (
-            "read the sample as the v5 producer emits it; when the contract moves, "
+    def test_a_v8_block_parses_without_the_unknown_version_warning(self, caplog):
+        """NPC-1699's removal of the query result from the passive place block."""
+        assert PLACE_BLOCK_CONTRACT_SAMPLE["contract_version"] == 8, (
+            "read the sample as the v8 producer emits it; when the contract moves, "
             "re-pin the sample rather than overriding the version here"
         )
         observation = Observation.model_validate(_observation(PLACE_BLOCK_CONTRACT_SAMPLE))
 
-        assert observation.place.contract_version == 5
+        assert observation.place.contract_version == 8
         assert observation.place.target_place.zone_id == "zone_pond"
         assert "unknown contract_version" not in caplog.text
 
-    def test_a_v6_block_models_the_deferred_query_result(self, caplog):
-        """NPC-1481's settled next-cycle response contract.
-
-        The query request's response placement is still a separate cross-repo
-        decision; the result side is not: the simulation emits ``query_result``
-        on place contract v6, and this strict model must accept the descriptors
-        rather than shedding the root key through unknown-version degradation.
-        """
-        sample = dict(
+    def test_v6_valid_place_query_result_is_lifted_to_the_generic_observation(self, caplog):
+        """The shipped v6 producer serialized up to three full descriptor dicts."""
+        legacy_place = dict(
             PLACE_BLOCK_CONTRACT_SAMPLE,
             contract_version=6,
             query_result=[QUERY_RESULT_DESCRIPTOR],
         )
+        legacy_place.pop("habit_spots")
 
-        place = PlaceObservation.model_validate(sample)
+        observation = Observation.model_validate(_observation(legacy_place))
 
-        assert place.contract_version == 6
-        assert [descriptor.zone_id for descriptor in place.query_result] == ["zone_orchard"]
-        assert place.query_result[0].source == PlaceKnowledgeSource.WITNESSED
-        assert "unknown contract_version" not in caplog.text
+        assert not hasattr(observation.place, "query_result")
+        assert observation.query_result.kind == "place"
+        assert [item.zone_id for item in observation.query_result.payload] == ["zone_orchard"]
+        assert "Adapted legacy v6" in caplog.text
+
+    def test_v7_valid_place_query_result_lifts_without_dropping_habit_spots(self, caplog):
+        """The v7 producer adds passive spots while retaining the nested v6 answer."""
+        legacy_place = dict(
+            PLACE_BLOCK_CONTRACT_SAMPLE,
+            contract_version=7,
+            habit_spots=[
+                {
+                    "focal_cell": [12, 34],
+                    "distance": 7,
+                    "beyond_vision": True,
+                    "rank": 0,
+                    "direction": "northwest",
+                }
+            ],
+            query_result=[QUERY_RESULT_DESCRIPTOR],
+        )
+
+        observation = Observation.model_validate(_observation(legacy_place))
+
+        assert observation.place.contract_version == 7
+        assert observation.place.habit_spots[0].focal_cell == (12, 34)
+        assert observation.query_result.kind == "place"
+        assert [item.zone_id for item in observation.query_result.payload] == ["zone_orchard"]
+        assert "Adapted legacy v6/v7" in caplog.text
+
+    @pytest.mark.parametrize("contract_version", [6, 7])
+    def test_legacy_explicit_null_query_result_is_still_no_answer(self, contract_version, caplog):
+        legacy_place = dict(
+            PLACE_BLOCK_CONTRACT_SAMPLE,
+            contract_version=contract_version,
+            query_result=None,
+        )
+        if contract_version == 6:
+            legacy_place.pop("habit_spots")
+        else:
+            legacy_place["habit_spots"] = []
+
+        observation = Observation.model_validate(_observation(legacy_place))
+
+        assert observation.place.contract_version == contract_version
+        assert observation.query_result is None
+        assert not hasattr(observation.place, "query_result")
+        assert "Dropped explicit null legacy" in caplog.text
+
+    def test_generic_place_result_refuses_missing_public_wire_fields(self):
+        with pytest.raises(ValidationError):
+            Observation.model_validate(
+                {
+                    **_observation(PLACE_BLOCK_CONTRACT_SAMPLE),
+                    "query_result": {
+                        "contract_version": 1,
+                        "kind": "place",
+                        "payload": [{"zone_id": "zone_orchard"}],
+                    },
+                }
+            )
+
+    def test_generic_place_result_refuses_coercive_public_wire_types(self):
+        malformed = {**QUERY_RESULT_DESCRIPTOR, "distance": "58"}
+        with pytest.raises(ValidationError):
+            Observation.model_validate(
+                {
+                    **_observation(PLACE_BLOCK_CONTRACT_SAMPLE),
+                    "query_result": {
+                        "contract_version": 1,
+                        "kind": "place",
+                        "payload": [malformed],
+                    },
+                }
+            )
+
+    def test_generic_place_result_refuses_more_than_the_producer_cap(self):
+        with pytest.raises(ValidationError):
+            Observation.model_validate(
+                {
+                    **_observation(PLACE_BLOCK_CONTRACT_SAMPLE),
+                    "query_result": {
+                        "contract_version": 1,
+                        "kind": "place",
+                        "payload": [QUERY_RESULT_DESCRIPTOR] * 4,
+                    },
+                }
+            )
+
+    def test_generic_place_result_accepts_a_validated_descriptor_instance(self):
+        descriptor = PlaceDescriptor.model_validate(QUERY_RESULT_DESCRIPTOR)
+
+        result = DomainQueryResult(contract_version=1, kind="place", payload=[descriptor])
+
+        assert result.payload == [descriptor]
 
     def test_query_result_absence_and_answered_empty_remain_distinct(self):
-        absent = PlaceObservation.model_validate(
-            dict(PLACE_BLOCK_CONTRACT_SAMPLE, contract_version=6)
-        )
-        answered_empty = PlaceObservation.model_validate(
-            dict(PLACE_BLOCK_CONTRACT_SAMPLE, contract_version=6, query_result=[])
+        absent = Observation.model_validate(_observation(PLACE_BLOCK_CONTRACT_SAMPLE))
+        answered_empty = Observation.model_validate(
+            {
+                **_observation(PLACE_BLOCK_CONTRACT_SAMPLE),
+                "query_result": {"contract_version": 1, "kind": "place", "payload": []},
+            }
         )
 
         assert absent.query_result is None
-        assert answered_empty.query_result == []
-        assert "Place query result" not in absent.render_summary()
-        assert "Place query result: no matching places." in answered_empty.render_summary()
+        assert answered_empty.query_result.payload == []
+        assert "Place query result" not in str(absent)
+        assert "Place query result: no matching places." in str(answered_empty)
+
+    def test_unknown_query_kind_and_result_contract_version_are_refused(self):
+        base = _observation(PLACE_BLOCK_CONTRACT_SAMPLE)
+        with pytest.raises(ValidationError):
+            Observation.model_validate(
+                {
+                    **base,
+                    "query_result": {
+                        "contract_version": 1,
+                        "kind": "memory",
+                        "payload": [],
+                    },
+                }
+            )
+        with pytest.raises(ValidationError):
+            Observation.model_validate(
+                {
+                    **base,
+                    "query_result": {
+                        "contract_version": 2,
+                        "kind": "place",
+                        "payload": [],
+                    },
+                }
+            )
 
     def test_a_v7_block_models_personal_habit_spots(self, caplog):
         sample = dict(
@@ -519,17 +625,20 @@ class TestPlaceRendering:
         map at p4; a second numbering scheme would make p1 mean two places in the
         same prompt and the wire translation could walk to the wrong one.
         """
-        place = PlaceObservation.model_validate(
-            dict(
-                PLACE_BLOCK_CONTRACT_SAMPLE,
-                contract_version=6,
-                query_result=[QUERY_RESULT_DESCRIPTOR],
-            )
+        observation = Observation.model_validate(
+            {
+                **_observation(PLACE_BLOCK_CONTRACT_SAMPLE),
+                "query_result": {
+                    "contract_version": 1,
+                    "kind": "place",
+                    "payload": [QUERY_RESULT_DESCRIPTOR],
+                },
+            }
         )
 
-        assert place.handle_for("zone_orchard") == "p4"
-        assert place.resolve_place_handle("[p4]").zone_id == "zone_orchard"
-        rendered = place.render_summary()
+        assert observation.handle_for("zone_orchard") == "p4"
+        assert observation.resolve_place_handle("[p4]").zone_id == "zone_orchard"
+        rendered = str(observation)
         assert "[p4] the old orchard" in rendered
         assert "zone_orchard" not in rendered
 

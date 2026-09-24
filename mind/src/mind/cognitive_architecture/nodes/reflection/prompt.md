@@ -72,16 +72,18 @@ Include any required parameters for the chosen action.
 
 **Using the Goal Options menu.** When a "Goal Options" section appears below, it lists the concrete moves this person's subconscious has already sized up, each with an `option_id` and a score. If the action you choose is one of those entries, copy its `option_id` verbatim into `selected_option_id`, make the action and parameters describe that option's first step exactly, and give a one-sentence `selection_rationale`; the simulation uses that id to recover details the action alone cannot carry. You are equally free to act off-menu (responding to a bid, acting within an interaction, or doing something the menu never offered) — in that case omit `selected_option_id` entirely. Option ids are only valid for this one decision; never reuse one from memory.
 
-### 4. Optionally query known places
+### 4. Optionally request domain evidence
 
-You may also issue one `place_query` as attention work, independently of the
-action you choose. It searches only this person's own remembered places, never
-hidden world state. Use a canonical supported value for `afford`: `hunger`,
-`consume`, `cook`, `harvest`, or `harvest_plant`. Omit the query when the places
-already shown are enough. Results arrive one decision cycle later under
-`place.query_result`; an explicit empty result means the search ran and found no
-matches. The query does not choose movement or author an action: the simulation
-scores any hits as ordinary goal options on the following cycle.
+You may also request one domain query as attention work, independently of the
+action you choose. The current registered kind is `place`; its payload searches
+only this person's own remembered places, never hidden world state. For example:
+`{{"kind":"place","payload":{{"afford":"hunger","limit":3}}}}`.
+Use a canonical supported value for `payload.afford`: `hunger`, `consume`,
+`cook`, `harvest`, or `harvest_plant`. Omit the query when the places already
+shown are enough. Results arrive one decision cycle later in the top-level
+`query_result` observation; an explicit empty payload means the search ran and
+found no matches. The query does not choose movement or author an action: the
+simulation scores any hits as ordinary goal options on the following cycle.
 
 ### Ground truth, and how to read what follows
 

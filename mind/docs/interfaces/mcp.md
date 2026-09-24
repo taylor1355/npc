@@ -76,16 +76,18 @@ Processes a structured observation and recent events through the cognitive pipel
 5. Returns action dict or error
 
 **Response fields:** every response carries `status`, `request_id` and
-`protocol_version` (an int; currently `2`, bumped when the response shape changes
+`protocol_version` (an int; currently `3`, bumped when the response shape changes
 in a way a client must know about). A **success** response also carries `action`,
-an optional top-level `place_query`, and a `telemetry` object. `place_query` is a
-sibling of `action`, not an action parameter: asking where to attend does not
-replace or delay execution of the chosen action. Its closed shape is
-`{afford: str, max_distance?: int, min_expected_providers?: float, limit?: int}`;
+an optional top-level `query`, and a `telemetry` object. A query is a sibling of
+`action`, not an action parameter: asking where to attend does not replace or
+delay execution of the chosen action. The strict request union currently has one
+production arm: `{"kind":"place","payload":{...}}`. Its closed payload shape
+is `{afford: str, max_distance?: int, min_expected_providers?: float, limit?: int}`;
 `afford` is one of the canonical need or interaction identifiers supported by the
 simulation's existing place-seeking scorer, and `limit` is at most 3. The
-simulation searches only that NPC's own remembered places and returns the answer
-in the next observation's `place.query_result`.
+simulation searches only that NPC's own remembered places and returns a typed
+answer in the next observation's top-level `query_result` block. Unknown kinds
+and malformed envelopes are explicitly refused.
 
 `telemetry` carries `provenance` (`metered` | `unreported`), the
 `prompt_tokens` / `completion_tokens` / `total_tokens` split,
@@ -154,18 +156,24 @@ nothing honours.
 
 #### The `place` observation block
 
-Optional. Carries the substrate's place knowledge: `current_place` (the innermost
-known zone covering the NPC's cell), a **capped** `known_places` list with
-`known_total` beside it, `target_place` for the active journey, the optional
-one-cycle `query_result`, and the `mark_budget`. `known_total >
+Optional. Carries the substrate's passive place knowledge: `current_place` (the
+innermost known zone covering the NPC's cell), a **capped** `known_places` list
+with `known_total` beside it, `target_place` for the active journey, and the
+`mark_budget`. `known_total >
 len(known_places)` means the passive list is a truncation, which is the only way to tell "I know
 three places" from "I know thirty and was shown three".
 
-`query_result` is `list[PlaceDescriptor] | None`: `None`/absence means no query
-was answered this cycle, while an explicit empty list means the previous cycle's
-query ran and found no match. Non-empty results receive the same per-cycle place
-handles as the passive list and become ordinary simulation-side goal candidates;
-they never directly author an action.
+#### Generic domain-query result
+
+The optional top-level `query_result` is a strict discriminated result envelope:
+`{"contract_version":1,"kind":"place","payload":[PlaceDescriptor,...]}`.
+No block means no query was answered this cycle; a present empty payload means
+the handler ran and found no match. Place results share the same per-cycle place
+handles as the passive list and can become ordinary simulation-side candidates;
+they never directly author an action. The envelope's generic layer does not
+contain place-specific rules: the registered handler owns payload validation,
+epistemic authorization, result caps, and serialization. The place result cap
+remains three.
 
 `mark_budget.next_slot_in_minutes` is `-1.0` when a slot is already free —
 deliberately not `0.0`, because a genuinely-zero wait is a real answer. Read
