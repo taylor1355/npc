@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from .actions import Action, AvailableAction
 from .memory import Memory
 from .observations import ConversationMessage, MindEvent, Observation
-from .place_query import PlaceQuery
+from .place_query import PlaceQueryRequest
 from .working_memory import FormedMemory, WorkingMemory
 
 
@@ -110,7 +110,7 @@ class PipelineState(BaseModel):
 
     # Output
     chosen_action: Action | None = None
-    place_query: PlaceQuery | None = None
+    query: PlaceQueryRequest | None = None
 
     # Metadata for observability (use merge function to accumulate values)
     tokens_used: Annotated[dict[str, StepTokenUsage], merge_dicts] = Field(default_factory=dict)

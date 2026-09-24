@@ -2,7 +2,7 @@
 
 import logging
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     AliasChoices,
@@ -970,6 +970,7 @@ class HabitSpotDescriptor(BaseModel):
     or source field: promotion is what turns the ground into a stable, tellable
     place. ``focal_cell`` remains actionable through MOVE_TO's ordinary
     ``destination`` parameter without inventing a persistent reference.
+
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -996,6 +997,114 @@ class HabitSpotDescriptor(BaseModel):
         where = f"to the {self.direction}"
         sight = ", out of sight" if self.beyond_vision else ""
         return f"{self.label()} is {where} ({self.distance} away{sight}; destination [{x}, {y}])"
+
+
+class DomainQueryResult(BaseModel):
+    """The current strict arm of the versioned domain-query result union.
+
+    The envelope is generic at the transport boundary; each known kind gives its
+    payload a strict domain model. Adding a production kind adds an explicit
+    discriminated model arm here. Unknown kinds and protocol versions fail at
+    the observation boundary instead of being silently dropped.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal[1]
+    kind: Literal["place"]
+    payload: list[PlaceDescriptor] = Field(max_length=3)
+
+    @field_validator("payload", mode="before")
+    @classmethod
+    def require_public_place_wire_payload(cls, value):
+        """Do not let permissive passive defaults hide a malformed query answer."""
+        if not isinstance(value, list):
+            return value
+
+        # The wire supplies dictionaries, while an in-process typed caller may
+        # already hold validated descriptors. Normalize those models through
+        # their explicitly-set public fields so both routes receive the same
+        # completeness checks without allowing passive defaults to invent data.
+        value = [
+            descriptor.model_dump(mode="json", exclude_unset=True)
+            if isinstance(descriptor, PlaceDescriptor)
+            else descriptor
+            for descriptor in value
+        ]
+
+        required = {
+            "zone_id",
+            "name",
+            "kind",
+            "distance",
+            "source",
+            "age_minutes",
+            "beyond_vision",
+            "confidence",
+            "expected_providers",
+            "belief_deviation",
+            "witnessed",
+            "focal_cell",
+        }
+        witnessed_fields = {"affords", "provider_count", "witnessed_age_minutes"}
+        exact_types = {
+            "zone_id": str,
+            "name": str,
+            "kind": str,
+            "distance": int,
+            "source": str,
+            "age_minutes": int,
+            "beyond_vision": bool,
+            "confidence": float,
+            "expected_providers": float,
+            "belief_deviation": float,
+            "witnessed": bool,
+        }
+        for descriptor in value:
+            if not isinstance(descriptor, dict) or not required.issubset(descriptor):
+                raise ValueError("place query results require complete public descriptors")
+            if any(type(descriptor[key]) is not expected for key, expected in exact_types.items()):
+                raise ValueError("place query results must preserve public wire field types")
+
+            focal_cell = descriptor["focal_cell"]
+            if (
+                not isinstance(focal_cell, list)
+                or len(focal_cell) != 2
+                or any(type(coordinate) is not int for coordinate in focal_cell)
+            ):
+                raise ValueError("place query results require a two-integer focal_cell")
+
+            if descriptor["witnessed"]:
+                if not witnessed_fields.issubset(descriptor):
+                    raise ValueError("witnessed query results require witnessed evidence fields")
+                if (
+                    type(descriptor["provider_count"]) is not int
+                    or type(descriptor["witnessed_age_minutes"]) is not int
+                ):
+                    raise ValueError("witnessed query result fields must retain wire types")
+                if not isinstance(descriptor["affords"], list) or any(
+                    not isinstance(afford, str) for afford in descriptor["affords"]
+                ):
+                    raise ValueError("witnessed query results require string affordances")
+            elif witnessed_fields.intersection(descriptor):
+                raise ValueError("unwitnessed query results cannot carry witnessed evidence fields")
+
+            if descriptor["source"] == PlaceKnowledgeSource.TOLD:
+                if not isinstance(descriptor.get("told_by"), str) or not descriptor["told_by"]:
+                    raise ValueError("told place query results require a nonempty told_by")
+            elif "told_by" in descriptor:
+                raise ValueError("only told place query results may carry told_by")
+
+        return value
+
+    def render_summary(self, here_zone_id: str, handles: dict[str, str]) -> str:
+        if not self.payload:
+            return "Place query result: no matching places."
+        listed = "; ".join(
+            descriptor.render_summary(here_zone_id, handles.get(descriptor.zone_id, ""))
+            for descriptor in self.payload
+        )
+        return f"Place query result: {listed}"
 
 
 class MarkBudgetState(BaseModel):
@@ -1054,14 +1163,10 @@ class MarkBudgetState(BaseModel):
 # so the old meaning has no referent left, and a v4 reader keeps parsing while
 # quietly believing something about the NPC's GOAL. Nothing structural moved,
 # which is exactly why it needed a version.
-# v6 (NPC-1481) adds ``query_result``: descriptors selected from this NPC's own
-# uncapped place-knowledge pool in response to the previous cycle's query. It is
-# a versioned addition because this model is extra="forbid" and because dropping
-# the result would make the deferred request silently inert.
-# v7 (NPC-1474) adds ``habit_spots``, a sibling list whose deliberately lighter
-# descriptor carries no zone reference. It is versioned because dropping this
-# strict root key would make the new perception channel silently inert.
-KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7})
+# v6 (NPC-1481) added the previous cycle's place-query answer inside this block.
+# v7 (NPC-1474) added passive ``habit_spots``. v8 (NPC-1699) moves query answers
+# into the generic top-level envelope, leaving this block passive again.
+KNOWN_PLACE_CONTRACT_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, 8})
 
 # The first place-block version whose descriptors spell the representative cell
 # ``focal_cell``. Every KNOWN version below it spells it ``anchor``.
@@ -1152,12 +1257,6 @@ class PlaceObservation(BaseModel):
     #: a journey, never as a property of the goal; ``render_summary`` says so in
     #: the prose the model actually sees.
     target_place: PlaceDescriptor | None = None
-    #: The answer to the place query issued with the PREVIOUS decision, delivered
-    #: one cycle later (NPC-1481, block version 6). These are full descriptors
-    #: from this NPC's own knowledge, never registry discoveries. They sit beside
-    #: ``known_places`` rather than replacing it: the ordinary cap remains the
-    #: cycle's passive context and this is the explicit attention pull.
-    query_result: list[PlaceDescriptor] | None = None
     #: Unnamed places derived from this NPC's own occupancy history (NPC-1474,
     #: block version 7). Always a sibling of the zone-typed lists: no id means it
     #: cannot enter ``place_handles`` or be mistaken for a tellable place.
@@ -1216,7 +1315,9 @@ class PlaceObservation(BaseModel):
             ]
         return translated
 
-    def place_handles(self) -> dict[str, PlaceDescriptor]:
+    def place_handles(
+        self, additional_places: list[PlaceDescriptor] | None = None
+    ) -> dict[str, PlaceDescriptor]:
         """This cycle's place handles, ``{"p1": descriptor, ...}`` (NPC-1643).
 
         A PURE FUNCTION of this block, so the prompt that shows a handle, the
@@ -1230,10 +1331,9 @@ class PlaceObservation(BaseModel):
         simulation force-includes both, so normally it does). One handle per zone
         id, so a place that appears in two sentences is one place to the model.
 
-        Extension point: any later block that lists places this cycle (PR-3's
-        ``query_result``) must be numbered by THIS function, continuing after the
-        ones above -- never by a second scheme, or ``p1`` would mean two places
-        in one prompt.
+        ``additional_places`` are place descriptors supplied by another typed
+        observation block, such as a domain-query answer. They continue the same
+        map rather than inventing a second numbering scheme.
         """
         handles: dict[str, PlaceDescriptor] = {}
         seen: set[str] = set()
@@ -1241,7 +1341,7 @@ class PlaceObservation(BaseModel):
             *self.known_places,
             self.current_place,
             self.target_place,
-            *(self.query_result or []),
+            *(additional_places or []),
         ]
         for descriptor in ordered:
             if descriptor is None or descriptor.zone_id in seen:
@@ -1268,7 +1368,7 @@ class PlaceObservation(BaseModel):
         """
         return self.place_handles().get(normalize_place_handle(reference))
 
-    def render_summary(self) -> str:
+    def render_summary(self, additional_places: list[PlaceDescriptor] | None = None) -> str:
         """The place block as prompt prose, or "" when there is nothing to say.
 
         Returning "" for an empty block is what keeps every existing fixture
@@ -1283,7 +1383,8 @@ class PlaceObservation(BaseModel):
         lines: list[str] = []
         here_zone_id = self.current_place.zone_id if self.current_place else ""
         handles = {
-            descriptor.zone_id: handle for handle, descriptor in self.place_handles().items()
+            descriptor.zone_id: handle
+            for handle, descriptor in self.place_handles(additional_places).items()
         }
 
         if self.current_place:
@@ -1311,16 +1412,6 @@ class PlaceObservation(BaseModel):
             # wording matches the simulation's own ``place_observation.gd::
             # format_for_npc``, so the two tiers cannot describe one fact two ways.
             lines.append(f"You are headed for {label}.")
-
-        if self.query_result is not None:
-            if self.query_result:
-                listed = "; ".join(
-                    place.render_summary(here_zone_id, handles.get(place.zone_id, ""))
-                    for place in self.query_result
-                )
-                lines.append(f"Place query result: {listed}")
-            else:
-                lines.append("Place query result: no matching places.")
 
         if self.habit_spots:
             listed = "; ".join(spot.render_summary() for spot in self.habit_spots)
@@ -1723,7 +1814,7 @@ class Observation(BaseModel):
     """Complete structured observation.
 
     Every root key the simulation emits is declared below -- verified against
-    simulation ``origin/main`` @ 3d07f5192 by resolving ``get_type()`` for every
+    simulation ``main`` after PR #794 by resolving ``get_type()`` for every
     observation added in ``entity_controller.gd`` and
     ``npc_controller.gd::get_current_state_observation``. The wire root key set
     is mechanically ``{entity_id, current_simulation_time}`` plus one key per
@@ -1776,6 +1867,10 @@ class Observation(BaseModel):
     # merge and deploy before the simulation emits the block (the field simply
     # reads None). NPC-1299 owns the producer.
     place: PlaceObservation | None = None
+    # Optional and independent of place knowledge: absence means no answer was
+    # delivered, while a known-kind envelope with an empty payload means the
+    # query executed and found nothing (NPC-1699).
+    query_result: DomainQueryResult | None = None
     # Optional for the same reason ``place`` is. The simulation began emitting
     # this block (NPC-1504, sim dadd2a5aa) before this field existed, which is the
     # outage that retired root forbid. Parsed only: nothing mind-side renders or
@@ -1785,6 +1880,72 @@ class Observation(BaseModel):
     inventory: InventoryObservation | None = None
     vision: VisionObservation | None = None
     conversations: list[ConversationObservation] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_legacy_place_query_result(cls, data):
+        """Lift merged v6/v7 producers' nested answers into the generic envelope.
+
+        This is a cross-repository rollout seam only. Current producers send the
+        independent top-level envelope; v6 and v7 simulations send an optional
+        list under ``place``. v7 also carries passive habit spots, which remain
+        in the place block. If both query-result forms appear, the response is
+        contradictory and is refused rather than choosing one silently.
+        """
+        if not isinstance(data, dict):
+            return data
+        place = data.get("place")
+        if not isinstance(place, dict) or "query_result" not in place:
+            return data
+        if place.get("contract_version", 1) not in {6, 7}:
+            return data
+        if "query_result" in data:
+            raise ValueError("query_result was supplied in both legacy and generic envelopes")
+
+        translated = dict(data)
+        translated_place = dict(place)
+        legacy_payload = translated_place.pop("query_result")
+        translated["place"] = translated_place
+        if legacy_payload is None:
+            logger.warning("Dropped explicit null legacy v6/v7 place.query_result as no answer.")
+            return translated
+        translated["query_result"] = {
+            "contract_version": 1,
+            "kind": "place",
+            "payload": legacy_payload,
+        }
+        logger.warning(
+            "Adapted legacy v6/v7 place.query_result into the generic domain-query envelope."
+        )
+        return translated
+
+    def _place_query_descriptors(self) -> list[PlaceDescriptor]:
+        if self.query_result is None or self.query_result.kind != "place":
+            return []
+        return self.query_result.payload
+
+    def place_handles(self) -> dict[str, PlaceDescriptor]:
+        """One cycle-scoped handle map over passive places and query evidence."""
+        additional = self._place_query_descriptors()
+        if self.place is not None:
+            return self.place.place_handles(additional)
+        handles: dict[str, PlaceDescriptor] = {}
+        seen: set[str] = set()
+        for descriptor in additional:
+            if descriptor.zone_id in seen:
+                continue
+            seen.add(descriptor.zone_id)
+            handles[f"{PLACE_HANDLE_PREFIX}{len(handles) + 1}"] = descriptor
+        return handles
+
+    def handle_for(self, zone_id: str) -> str:
+        for handle, descriptor in self.place_handles().items():
+            if descriptor.zone_id == zone_id:
+                return handle
+        return ""
+
+    def resolve_place_handle(self, reference: str) -> PlaceDescriptor | None:
+        return self.place_handles().get(normalize_place_handle(reference))
 
     @model_validator(mode="before")
     @classmethod
@@ -1836,9 +1997,20 @@ class Observation(BaseModel):
         # the goal pull and before mood because where you are and what you know
         # of it read together with what you are drawn toward.
         if self.place:
-            place_text = self.place.render_summary()
+            place_text = self.place.render_summary(self._place_query_descriptors())
             if place_text:
                 parts.append(place_text)
+
+        if self.query_result is not None:
+            here_zone_id = (
+                self.place.current_place.zone_id
+                if self.place is not None and self.place.current_place is not None
+                else ""
+            )
+            handles_by_zone = {
+                descriptor.zone_id: handle for handle, descriptor in self.place_handles().items()
+            }
+            parts.append(self.query_result.render_summary(here_zone_id, handles_by_zone))
 
         if self.mood:
             parts.append(
@@ -2026,7 +2198,7 @@ class Observation(BaseModel):
             # zone_id is advertised only when this cycle HAS a place handle to put
             # in it (NPC-1643). With no places known it could only be refused, and
             # these tokens sit below the cache breakpoint on every cycle.
-            if self.place and self.place.place_handles():
+            if self.place_handles():
                 actions.append(
                     AvailableAction(
                         name=ActionType.MOVE_TO,

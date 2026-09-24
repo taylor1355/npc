@@ -29,7 +29,7 @@ from mind.cognitive_architecture.nodes.formatting import (
     format_interaction_status as _format_interaction_status,
 )
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
-from mind.cognitive_architecture.place_query import PlaceQuery
+from mind.cognitive_architecture.place_query import PlaceQueryRequest
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.working_memory import (
     FormedMemory,
@@ -160,7 +160,7 @@ class ReflectionNode(LLMNode):
         # A sibling output, not an action parameter. The simulation queues it as
         # one-cycle attention work even when the chosen action is WAIT or is
         # later refused by its own apply boundary.
-        state.place_query = output.place_query
+        state.query = output.query
 
         # Create ACTION_CHOSEN event
         action_event = MindEvent(
@@ -239,11 +239,15 @@ class ReflectionNode(LLMNode):
         except ValidationError:
             pass
 
-        salvaged_query: PlaceQuery | None = None
-        if data.get("place_query") is not None:
+        salvaged_query: PlaceQueryRequest | None = None
+        if data.get("query") is not None:
             try:
-                salvaged_query = PlaceQuery.model_validate(data.get("place_query"))
-            except ValidationError:
+                salvaged_query = PlaceQueryRequest.model_validate(data.get("query"))
+            except ValidationError as query_error:
+                logger.warning(
+                    f"{entity_tag(state)} Unsupported or malformed domain query was dropped: "
+                    f"{query_error}"
+                )
                 pass
 
         logger.warning(
@@ -264,5 +268,5 @@ class ReflectionNode(LLMNode):
             updated_working_memory=salvaged_wm,
             new_memories=salvaged_memories,
             chosen_action=salvaged_action,
-            place_query=salvaged_query,
+            query=salvaged_query,
         )

@@ -41,7 +41,7 @@ NON_INPUT_FIELDS = {
     "retrieved_memories",
     "daily_memories",
     "chosen_action",
-    "place_query",
+    "query",
     "tokens_used",
     "time_ms",
 }

@@ -157,23 +157,20 @@ def wire_inventory_block(
 def wire_place_block() -> dict:
     """A minimal ``place`` root value, verbatim from the wire at the CURRENT version.
 
-    ``place_observation.gd::get_data`` (``CONTRACT_VERSION := 6`` at simulation
-    ``origin/main`` @ ``56e6df500``) always emits ``contract_version``,
-    ``known_places``, ``known_total`` and ``mark_budget``; ``current_place``,
-    ``target_place`` and ``query_result`` only when set. This is the always-on
-    subset for an NPC that knows no place yet -- the descriptor shape is pinned
-    by ``PLACE_BLOCK_CONTRACT_SAMPLE`` in ``test_place_observation.py``.
-
-    Deliberately still v6: simulation ``origin/main`` @ ``3d07f5192`` emits v7,
-    adding an always-present ``habit_spots`` list (NPC-1474), and teaching this
-    mind v7 is the open habit-spots mind PR's job, not this fixture's. Until it
-    lands a v7 block parses through the unknown-version degrade.
+    ``place_observation.gd::get_data`` (``CONTRACT_VERSION := 8`` after
+    NPC-1699) always emits ``contract_version``, ``known_places``,
+    ``known_total``, ``mark_budget``, and ``habit_spots``; ``current_place`` and
+    ``target_place`` are optional. Query answers now occupy the separate root
+    ``query_result`` envelope. This is the always-on subset for an NPC that
+    knows no place yet; descriptor shape is pinned by
+    ``PLACE_BLOCK_CONTRACT_SAMPLE`` in ``test_place_observation.py``.
     """
     return {
-        "contract_version": 6,
+        "contract_version": 8,
         "known_places": [],
         "known_total": 0,
         "mark_budget": {"active": 0, "cap": 2, "next_slot_in_minutes": -1.0},
+        "habit_spots": [],
     }
 
 
@@ -226,12 +223,13 @@ def wire_full_root_payload(simulation_time: int = 100) -> dict:
     current_simulation_time}`` plus one key per ``Observation.get_type()`` of
     every observation added in ``entity_controller.gd`` /
     ``npc_controller.gd::get_current_state_observation``. That resolves to
-    exactly the ten keys below (verified against simulation ``origin/main``
-    @ ``56e6df500`` and unchanged at ``3d07f5192``): ``entity_id``, ``current_simulation_time``, ``needs``,
+    exactly the eleven keys below after simulator PR #794 (the generalized
+    query transport): ``entity_id``, ``current_simulation_time``, ``needs``,
     ``vision``, ``inventory``, ``status``, ``place``, ``entity_memory``,
-    ``goal``, ``mood``. ``place`` and ``entity_memory`` are attached only for an
-    NPC with a ``SubstrateComponent`` and ``mood`` only under observation
-    enrichment, so a production NPC can carry all ten.
+    ``query_result``, ``goal``, ``mood``. ``place`` and ``entity_memory`` are
+    attached only for an NPC with a ``SubstrateComponent``; ``query_result``
+    appears only on an answered cycle and ``mood`` only under observation
+    enrichment. Thus a production NPC can carry all eleven.
 
     This fixture drifted once already: it stopped at eight keys while the
     simulation grew ``place`` (NPC-1299) and ``entity_memory`` (NPC-1504, sim
@@ -262,6 +260,7 @@ def wire_full_root_payload(simulation_time: int = 100) -> dict:
             "current_zone_name": "the berry grounds",
         },
         "place": wire_place_block(),
+        "query_result": {"contract_version": 1, "kind": "place", "payload": []},
         "entity_memory": wire_entity_memory_block(
             [
                 wire_remembered_entity("apple_002", "an apple", (46, 6), present=True, age=42),
