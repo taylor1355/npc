@@ -1057,6 +1057,8 @@ class TestObservationRootForbid:
         assert obs.goal is not None
         assert obs.mood is not None
         assert obs.inventory is not None
+        assert obs.place is not None
+        assert obs.entity_memory is not None
 
     def test_model_dump_round_trips_under_forbid(self):
         """Should re-validate its own dump -- integration tests rely on this"""

@@ -1392,6 +1392,97 @@ class InventoryObservation(BaseModel):
     items: list[EntityData] = Field(default_factory=list)
 
 
+# Entity-memory-block wire versions this model set knows how to read. Unknown
+# versions degrade exactly as the goal and place blocks' do -- see the validator
+# on ``EntityMemoryObservation``. Like the place block's fallback, it sheds only
+# ROOT keys: a row key added under an unknown version still fails the row's
+# ``extra="forbid"``.
+KNOWN_ENTITY_MEMORY_CONTRACT_VERSIONS = frozenset({1})
+
+
+class RememberedEntity(BaseModel):
+    """One thing this NPC remembers but may no longer see.
+
+    Wire producer: the simulation's ``EntityMemoryObservation.Remembered.to_dict``
+    (``src/minds/observations/entity_memory_observation.gd``, NPC-1504) --
+    exactly ``entity_id`` / ``name`` / ``last_cell`` / ``present`` /
+    ``age_minutes``, all five emitted on every row. Deliberately NOT the scoring
+    surface (confidence, expected yields, interaction names): those stay
+    simulation-side on ``EntityDescriptor``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity_id: str
+    #: A snapshot, prose only -- it may name something that no longer exists,
+    #: and is never a lookup key.
+    name: str = ""
+    #: The cell it was last seen at, ``[x, y]`` on the wire (Godot has no JSON
+    #: vector type; matches ``PlaceDescriptor.focal_cell``). Required: the
+    #: producer always emits it, and no default cell could stand for "unknown"
+    #: -- the origin is a real cell on every board.
+    last_cell: tuple[int, int]
+    #: ``False`` is a DISPROVED belief, not an unknown one: written only by an
+    #: arrival that found nothing there. Required because either default would
+    #: fabricate evidence -- ``True`` a belief, ``False`` a disproof.
+    present: bool
+    #: Game minutes since this NPC last saw it.
+    age_minutes: int
+
+
+class EntityMemoryObservation(BaseModel):
+    """What this NPC remembers about things it can no longer see (NPC-1504).
+
+    Wire producer: the simulation's ``entity_memory_observation.gd::get_data``
+    -- exactly ``contract_version`` / ``remembered`` / ``known_total``. The
+    wire contract lives in the simulation repo at
+    ``docs/reference/minds/observations.md`` ("Entity-memory block wire
+    contract"). Emitted every cycle for any NPC with a ``SubstrateComponent``,
+    even when it remembers nothing, so an empty block ("no memories") is
+    distinguishable from an absent one ("no block").
+
+    ``remembered`` is nearest-first and CAPPED simulation-side
+    (``MAX_SERIALIZED``); ``known_total`` counts the whole set, so
+    ``known_total > len(remembered)`` means a longer list exists -- the same
+    convention as ``PlaceObservation.known_places``.
+
+    ``extra="forbid"``, matching every ``Goal*`` model, ``PlaceObservation`` and
+    ``InventoryObservation``: a key added simulation-side must be a lockstep
+    signal rather than a silent drop.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: int = 1
+    remembered: list[RememberedEntity] = Field(default_factory=list)
+    known_total: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_on_unknown_contract_version(cls, data):
+        """Unknown versions degrade, never raise.
+
+        Identical in shape and reasoning to ``GoalObservation``'s: a raise here
+        collapses ``decide_action`` into an error response, which is an NPC that
+        silently stops acting because the simulation got ahead of the mind. Warn,
+        shed undeclared root keys so a purely additive future version parses
+        despite ``extra="forbid"``, and parse the rest best-effort. Known-version
+        payloads are untouched, so for them an undeclared key stays loud.
+        """
+        if not isinstance(data, dict):
+            return data
+        version = data.get("contract_version", 1)
+        if version in KNOWN_ENTITY_MEMORY_CONTRACT_VERSIONS:
+            return data
+        logger.warning(
+            "Entity-memory block carries unknown contract_version %s (known: %s); "
+            "parsing best-effort under the newest known contract.",
+            version,
+            sorted(KNOWN_ENTITY_MEMORY_CONTRACT_VERSIONS),
+        )
+        return {key: value for key, value in data.items() if key in cls.model_fields}
+
+
 class ConversationMessage(BaseModel):
     """Single conversation message.
 
@@ -1459,7 +1550,7 @@ class Observation(BaseModel):
     so a root key this model does not declare is contract drift, not noise
     (precedent: every ``Goal*`` model; decided on NPC-1116). Every root key the
     simulation emits is declared below -- verified against simulation
-    ``origin/main`` @ a2ac2f5a by resolving ``get_type()`` for every
+    ``origin/main`` @ 56e6df500 by resolving ``get_type()`` for every
     observation added in ``entity_controller.gd`` and
     ``npc_controller.gd::get_current_state_observation``. The wire root key set
     is mechanically ``{entity_id, current_simulation_time}`` plus one key per
@@ -1502,6 +1593,11 @@ class Observation(BaseModel):
     # deploy. That is the failure this field exists to prevent. NPC-1299 owns
     # the producer.
     place: PlaceObservation | None = None
+    # Optional for the same reason ``place`` is. The simulation began emitting
+    # this block (NPC-1504, sim dadd2a5aa) before this field existed, and
+    # extra="forbid" refused every MCP observation until it did. Parsed only:
+    # nothing mind-side renders or stores it yet.
+    entity_memory: EntityMemoryObservation | None = None
     mood: MoodObservation | None = None
     inventory: InventoryObservation | None = None
     vision: VisionObservation | None = None
