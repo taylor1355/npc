@@ -10,6 +10,8 @@ specification; see the provenance note on ``PLACE_BLOCK_CONTRACT_SAMPLE`` for
 what re-derives it once that producer lands.
 """
 
+import logging
+
 import pytest
 from pydantic import ValidationError
 
@@ -197,23 +199,27 @@ class TestPlaceBlockParsing:
         assert place.target_place.zone_id == "zone_pond"
         assert place.mark_budget.cap == 3
 
-    def test_an_undeclared_root_key_is_still_refused(self):
+    def test_an_undeclared_root_block_reads_as_absent_and_logs_error(self, caplog):
         """Control arm: the test above could have gone red.
 
-        ``extra="forbid"`` is what made the place block a hard parse failure
-        rather than a silent drop, and it is still live -- so the sample parsing
-        cleanly is evidence that ``place`` is DECLARED, not evidence that the
-        observation stopped checking. Without this arm the test above would pass
-        just as happily against a model that forbade nothing.
+        An undeclared root block is dropped and logged at ERROR rather than
+        refused, so a block this model did NOT declare would parse too -- as
+        absent. The sample reaching ``observation.place`` above is therefore
+        evidence that ``place`` is DECLARED; this arm shows what the other
+        outcome looks like.
         """
-        with pytest.raises(ValidationError):
-            Observation.model_validate(
+        with caplog.at_level(logging.WARNING):
+            observation = Observation.model_validate(
                 {
                     "entity_id": "npc_alice",
                     "current_simulation_time": 100,
                     "place_knowledge": {"contract_version": 1},
                 }
             )
+
+        assert observation.place is None
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert any("'place_knowledge'" in r.getMessage() for r in errors)
 
     def test_the_place_block_is_optional(self):
         """The property that removes every cross-repository ordering constraint.
@@ -226,9 +232,30 @@ class TestPlaceBlockParsing:
         assert observation.place is None
 
     def test_an_undeclared_key_inside_the_place_block_is_refused(self):
-        """``extra="forbid"`` on the block itself, matching every Goal* model."""
+        """``extra="forbid"`` on the block itself, matching every Goal* model.
+
+        The block ROOT stays strict: its contract adds root keys only by bumping
+        ``contract_version``. Contrast the descriptor test below.
+        """
         with pytest.raises(ValidationError):
             Observation.model_validate(_observation({"contract_version": 1, "invented_key": 1}))
+
+    def test_an_additive_descriptor_key_degrades_rather_than_refusing(self, caplog):
+        """The contract promises "descriptors grow keys ... under the *same*
+        ``contract_version``", so a key this mind has not learned yet is dropped
+        with a WARNING naming it, and the rest of the descriptor parses."""
+        descriptor = {"zone_id": "zone_berry", "name": "the berry grounds", "a_new_key": 0.4}
+
+        with caplog.at_level(logging.WARNING):
+            observation = Observation.model_validate(
+                _observation({"contract_version": 5, "known_places": [descriptor]})
+            )
+
+        assert observation.place.known_places[0].name == "the berry grounds"
+        warnings = [r for r in caplog.records if "'a_new_key'" in r.getMessage()]
+        assert len(warnings) == 1
+        assert warnings[0].levelno == logging.WARNING
+        assert "PlaceDescriptor" in warnings[0].getMessage()
 
     def test_an_unknown_contract_version_degrades_rather_than_raising(self, caplog):
         """A simulation ahead of this mind must not be able to kill the cycle.

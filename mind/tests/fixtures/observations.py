@@ -163,6 +163,11 @@ def wire_place_block() -> dict:
     ``target_place`` and ``query_result`` only when set. This is the always-on
     subset for an NPC that knows no place yet -- the descriptor shape is pinned
     by ``PLACE_BLOCK_CONTRACT_SAMPLE`` in ``test_place_observation.py``.
+
+    Deliberately still v6: simulation ``origin/main`` @ ``3d07f5192`` emits v7,
+    adding an always-present ``habit_spots`` list (NPC-1474), and teaching this
+    mind v7 is the open habit-spots mind PR's job, not this fixture's. Until it
+    lands a v7 block parses through the unknown-version degrade.
     """
     return {
         "contract_version": 6,
@@ -222,7 +227,7 @@ def wire_full_root_payload(simulation_time: int = 100) -> dict:
     every observation added in ``entity_controller.gd`` /
     ``npc_controller.gd::get_current_state_observation``. That resolves to
     exactly the ten keys below (verified against simulation ``origin/main``
-    @ ``56e6df500``): ``entity_id``, ``current_simulation_time``, ``needs``,
+    @ ``56e6df500`` and unchanged at ``3d07f5192``): ``entity_id``, ``current_simulation_time``, ``needs``,
     ``vision``, ``inventory``, ``status``, ``place``, ``entity_memory``,
     ``goal``, ``mood``. ``place`` and ``entity_memory`` are attached only for an
     NPC with a ``SubstrateComponent`` and ``mood`` only under observation
@@ -234,6 +239,8 @@ def wire_full_root_payload(simulation_time: int = 100) -> dict:
     ``entity_memory`` was not, and every MCP decision was refused until it was.
     Re-derive the key list from the simulation source whenever a producer
     changes rather than trusting it.
+    ``TestObservationRootDegrade.test_declared_root_fields_match_the_wire`` pins
+    ``Observation``'s fields to this key set.
 
     ``conversations`` is deliberately NOT here: it is a mind-side field lifted
     out of ``INTERACTION_OBSERVATION`` events by

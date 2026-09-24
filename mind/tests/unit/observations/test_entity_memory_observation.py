@@ -76,20 +76,31 @@ class TestEntityMemoryRootBlock:
 
 class TestEntityMemoryContract:
     def test_undeclared_block_key_is_refused(self):
-        """``extra="forbid"`` on the block, matching every Goal*/Place model"""
+        """The block ROOT stays strict under a known version: the contract promises
+        additive growth for rows, not for the block."""
         block = wire_entity_memory_block([])
         block["confidence"] = 0.5
 
         with pytest.raises(ValidationError):
             EntityMemoryObservation.model_validate(block)
 
-    def test_undeclared_row_key_is_refused(self):
-        """The row forbids extras too: the scoring surface is not on this wire"""
-        row = wire_remembered_entity("apple_002", "an apple", (46, 6))
+    def test_additive_row_key_degrades_rather_than_refusing(self, caplog):
+        """The contract promises "rows grow keys under the *same*
+        ``contract_version``", so an unlearned row key is dropped with a WARNING
+        naming it, and the row still parses."""
+        row = wire_remembered_entity("apple_002", "an apple", (46, 6), age=7)
         row["expected_yield"] = 3.0
 
-        with pytest.raises(ValidationError):
-            EntityMemoryObservation.model_validate(wire_entity_memory_block([row]))
+        with caplog.at_level(logging.WARNING):
+            obs = Observation.model_validate(_observation(wire_entity_memory_block([row])))
+
+        parsed = obs.entity_memory.remembered[0]
+        assert parsed.entity_id == "apple_002"
+        assert parsed.age_minutes == 7
+        warnings = [r for r in caplog.records if "'expected_yield'" in r.getMessage()]
+        assert len(warnings) == 1
+        assert warnings[0].levelno == logging.WARNING
+        assert "RememberedEntity" in warnings[0].getMessage()
 
     @pytest.mark.parametrize("key", ["entity_id", "last_cell", "present", "age_minutes"])
     def test_evidence_fields_are_required(self, key):
