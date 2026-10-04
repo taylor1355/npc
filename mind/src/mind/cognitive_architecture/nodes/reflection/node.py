@@ -24,6 +24,7 @@ from mind.cognitive_architecture.nodes.formatting import (
     format_personality,
     format_recent_events,
     format_substrate_goal,
+    format_terseness_instruction,
 )
 from mind.cognitive_architecture.nodes.formatting import (
     format_interaction_status as _format_interaction_status,
@@ -116,6 +117,12 @@ class ReflectionNode(LLMNode):
 
         goal_obs = state.observation.goal if state.observation else None
 
+        # Dynamic suffix only (the static prefix must stay byte-identical). Empty
+        # unless a conversation is active AND wits is strained, so a fresh or
+        # unreported mind renders exactly the prompt it always did.
+        terseness = format_terseness_instruction(state.wits) if state.conversation_histories else ""
+        terseness_text = f"\n\n{terseness}" if terseness else ""
+
         output = cast(
             ReflectionOutput,
             await self.call_llm(
@@ -133,6 +140,7 @@ class ReflectionNode(LLMNode):
                 conversation_histories=format_conversation_histories(
                     state.conversation_histories, state.observation.entity_id
                 ),
+                terseness_instruction=terseness_text,
                 substrate_goal=format_substrate_goal(goal_obs),
                 goal_options=format_goal_options(goal_obs),
                 retrieved_memories=memories_text,
