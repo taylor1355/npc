@@ -50,10 +50,9 @@ class Mind:
     conversation_histories: dict[str, list[ConversationMessage]] = field(default_factory=dict)
     _finished_conversation_ids: set[str] = field(default_factory=set, repr=False)
 
-    # Latest wits reported on any conversation observation (None = never
-    # reported, or the latest observation omitted it). Overwritten, not merged:
-    # the newest reading is the truth, and an omitted field must not leave a
-    # stale strained value behind.
+    # Wits from the latest conversation observation (None = never reported, or
+    # that observation omitted it). The latest conversation observation wins;
+    # between conversation observations the reading is the last one received.
     latest_wits: float | None = None
 
     event_buffer: list[MindEvent] = field(default_factory=list)

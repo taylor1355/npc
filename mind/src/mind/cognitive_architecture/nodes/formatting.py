@@ -200,10 +200,7 @@ def format_goal_options(goal: GoalObservation | None) -> str:
     return "\n".join(lines)
 
 
-# Wits at or above this reads as a fresh mind: no terseness instruction. The
-# simulation mirrors the value (its brevity threshold) and each side pins it
-# with a test; this side owns the band edges and the text, the simulation owns
-# the number.
+# Wits at or above this renders no terseness instruction.
 WITS_FRESH_THRESHOLD = 60.0
 WITS_EXHAUSTED_THRESHOLD = 40.0
 WITS_DEPLETED_THRESHOLD = 20.0
