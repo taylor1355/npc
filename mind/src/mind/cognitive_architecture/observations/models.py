@@ -1808,6 +1808,11 @@ class ConversationObservation(BaseModel):
     participants: list[str]
     initiator_id: str = ""  # Entity who initiated this conversation
     conversation_history: list[ConversationMessage]  # Last K messages from simulation
+    # This participant's cognitive-energy level (0-100) as of the observation.
+    # Optional: the simulation omits it when the participant has no such drive,
+    # and an older simulation never sends it. None means "unknown", which the
+    # terseness formatter treats like a fresh mind (no instruction).
+    wits: float | None = None
 
 
 class Observation(BaseModel):

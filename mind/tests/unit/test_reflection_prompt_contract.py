@@ -34,6 +34,7 @@ DYNAMIC_VARIABLES = {
     "retrieved_memories",
     "recent_events",
     "conversation_histories",
+    "terseness_instruction",
     "observation_text",
     "available_actions",
 }
@@ -51,6 +52,16 @@ class TestReflectionPromptContract:
         variables = set(PromptTemplate.from_template(static_text).input_variables)
 
         assert variables == STATIC_VARIABLES
+
+    def test_marker_survives_and_static_variable_set_is_unchanged(self):
+        """The terseness instruction lives below the breakpoint: the marker
+        still occurs once and the static half gained no variable."""
+        raw = PROMPT_PATH.read_text()
+        assert raw.count(CACHE_BREAKPOINT_MARKER) == 1
+        static_text, dynamic_text = raw.split(CACHE_BREAKPOINT_MARKER)
+        assert "terseness_instruction" not in static_text
+        assert "{terseness_instruction}" in dynamic_text
+        assert set(PromptTemplate.from_template(static_text).input_variables) == STATIC_VARIABLES
 
     def test_dynamic_half_declares_exactly_the_per_call_set(self):
         _, dynamic_text = PROMPT_PATH.read_text().split(CACHE_BREAKPOINT_MARKER)

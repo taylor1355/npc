@@ -50,6 +50,11 @@ class Mind:
     conversation_histories: dict[str, list[ConversationMessage]] = field(default_factory=dict)
     _finished_conversation_ids: set[str] = field(default_factory=set, repr=False)
 
+    # Wits from the latest conversation observation (None = never reported, or
+    # that observation omitted it). The latest conversation observation wins;
+    # between conversation observations the reading is the last one received.
+    latest_wits: float | None = None
+
     event_buffer: list[MindEvent] = field(default_factory=list)
 
     # Pending incoming interaction bids (keyed by bid_id from payload)
@@ -187,6 +192,7 @@ class Mind:
         """
         for conv_obs in conversations:
             interaction_id = conv_obs.interaction_id
+            self.latest_wits = conv_obs.wits
 
             # Initialize if new conversation
             if interaction_id not in self.conversation_histories:
@@ -323,6 +329,7 @@ class Mind:
                 interaction_id: list(messages)
                 for interaction_id, messages in self.conversation_histories.items()
             },
+            wits=self.latest_wits,
             recent_events=self.event_buffer,
             pending_incoming_bids=self.pending_incoming_bids,
         )

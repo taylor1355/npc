@@ -94,6 +94,11 @@ class PipelineState(BaseModel):
     # Conversation histories aggregated by interaction_id
     conversation_histories: dict[str, list[ConversationMessage]] = Field(default_factory=dict)
 
+    # Latest cognitive-energy level (0-100) reported on a conversation
+    # observation; None when none was reported. Prompt CONTENT only: it shapes
+    # the conversation-length instruction and never routes a decision.
+    wits: float | None = None
+
     # Event buffer (managed by Mind, passed for node access)
     # Events are distinct from observations - they're temporal occurrences that accumulate
     recent_events: list[MindEvent] = Field(default_factory=list)

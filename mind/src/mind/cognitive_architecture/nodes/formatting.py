@@ -198,3 +198,29 @@ def format_goal_options(goal: GoalObservation | None) -> str:
             f"({goal.option_total - shown} lower-scoring options exist but are not shown.)"
         )
     return "\n".join(lines)
+
+
+# Wits at or above this renders no terseness instruction.
+WITS_FRESH_THRESHOLD = 60.0
+WITS_EXHAUSTED_THRESHOLD = 40.0
+WITS_DEPLETED_THRESHOLD = 20.0
+
+
+def format_terseness_instruction(wits: float | None) -> str:
+    """Render the response-length instruction for the NPC's cognitive energy.
+
+    Returns "" for a fresh or unknown mind (``wits`` is None, NaN, or at or above
+    ``WITS_FRESH_THRESHOLD``), so a caller that interpolates the result renders
+    byte-identical output for those cases. Otherwise the return value carries its
+    own section header. Out-of-range readings clamp to the nearest band: a
+    negative value is the most strained band, a value above 100 is fresh.
+    """
+    if wits is None or wits != wits or wits >= WITS_FRESH_THRESHOLD:
+        return ""
+    if wits >= WITS_EXHAUSTED_THRESHOLD:
+        text = "You're getting mentally tired. Keep responses to 1-2 sentences."
+    elif wits >= WITS_DEPLETED_THRESHOLD:
+        text = "You're mentally exhausted. Respond in short phrases only."
+    else:
+        text = "You can barely think. One-word or very brief responses only."
+    return f"### Mental Fatigue\n{text}"
