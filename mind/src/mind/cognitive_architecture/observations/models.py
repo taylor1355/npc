@@ -601,9 +601,7 @@ class GoalStepFactors(BaseModel):
 
     ``hope`` is the pursuit-hope discount (``claim / urgency``): ``1.0`` at full
     hope, approaching ``0`` as the NPC gives up on the need. It defaults to
-    ``1.0`` so a sim that predates the field still validates; a sim that sends
-    it requires this model to be deployed first (``extra="forbid"``).
-    """
+    ``1.0`` so a sim that predates the field still validates."""
 
     model_config = ConfigDict(extra="forbid")
 

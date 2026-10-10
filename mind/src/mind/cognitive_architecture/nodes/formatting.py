@@ -186,8 +186,7 @@ def format_goal_options(goal: GoalObservation | None) -> str:
             for step in segment.steps:
                 params = ", ".join(f"{k}={v}" for k, v in step.action.parameters.items())
                 action_text = f"{step.action.name}({params})" if params else step.action.name
-                # Hope is shown only when diminished: full hope is the unremarkable
-                # case, and "lost hope of food" is the legible, story-bearing one.
+                # Shown only when diminished, so full-hope prompts are unchanged.
                 hope_text = f"hope {step.factors.hope:.2f}, " if step.factors.hope < 1.0 else ""
                 lines.append(
                     f"  - serves '{segment.goal_label}': {action_text} "
