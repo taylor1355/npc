@@ -616,7 +616,12 @@ class GoalStepFactors(BaseModel):
 
 class GoalOptionStep(BaseModel):
     """One step of one plan segment. ``step_score`` equals the product of the
-    factors (urgency x utility x responsiveness x policy_modifier x hope), and equals the option's ``score`` while options are single-step."""
+    factors (urgency x utility x responsiveness x policy_modifier x hope), and
+    equals the option's ``score`` while options are single-step.
+
+    The sim computes ``step_score``; this model documents the relation rather
+    than validating it, so float drift across the wire never refuses an
+    observation."""
 
     model_config = ConfigDict(extra="forbid")
 

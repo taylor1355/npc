@@ -1,14 +1,11 @@
 """``hope`` on goal-step factors (NPC-1896): additive, defaulted, range-checked."""
 
-import math
-
 import pytest
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.nodes.formatting import format_goal_options
 from mind.cognitive_architecture.observations import (
     GoalObservation,
-    GoalOptionStep,
     GoalStepFactors,
 )
 
@@ -62,20 +59,6 @@ def test_out_of_range_hope_rejected(bad):
 def test_other_unknown_factor_keys_still_rejected():
     with pytest.raises(ValidationError):
         GoalStepFactors.model_validate({**BASE, "mystery": 1.0})
-
-
-def test_step_score_is_product_including_hope():
-    factors = {**BASE, "hope": 0.5}
-    expected = math.prod(factors.values())
-    step = _goal(factors, expected).options[0].segments[0].steps[0]
-    assert isinstance(step, GoalOptionStep)
-    assert step.step_score == pytest.approx(
-        step.factors.urgency
-        * step.factors.utility
-        * step.factors.responsiveness
-        * step.factors.policy_modifier
-        * step.factors.hope
-    )
 
 
 def test_prompt_shows_hope_only_when_diminished():
