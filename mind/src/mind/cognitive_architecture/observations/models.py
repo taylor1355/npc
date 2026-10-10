@@ -598,7 +598,10 @@ class GoalStepFactors(BaseModel):
 
     ``responsiveness`` is ``1.0`` whenever the step has no target —
     multiplicative identity for "habituation does not apply", not a sentinel.
-    """
+
+    ``hope`` is the pursuit-hope discount (``claim / urgency``): ``1.0`` at full
+    hope, approaching ``0`` as the NPC gives up on the need. It defaults to
+    ``1.0`` so a sim that predates the field still validates."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -606,11 +609,17 @@ class GoalStepFactors(BaseModel):
     utility: float
     responsiveness: float
     policy_modifier: float
+    hope: float = Field(default=1.0, gt=0.0, le=1.0)
 
 
 class GoalOptionStep(BaseModel):
     """One step of one plan segment. ``step_score`` equals the product of the
-    factors, and equals the option's ``score`` while options are single-step."""
+    factors (urgency x utility x responsiveness x policy_modifier x hope), and
+    equals the option's ``score`` while options are single-step.
+
+    The sim computes ``step_score``; this model documents the relation rather
+    than validating it, so float drift across the wire never refuses an
+    observation."""
 
     model_config = ConfigDict(extra="forbid")
 
