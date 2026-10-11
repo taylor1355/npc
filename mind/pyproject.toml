@@ -54,7 +54,13 @@ requires-python = ">=3.11,<3.13"
 # installed by a bare `uv sync`.
 dependencies = [
     "ipykernel>=6.29.5,<7",
-    "sentence-transformers>=3.0.1,<4",
+    # [image]: EmbeddingGemma 2 is a multimodal checkpoint, and sentence-transformers
+    # builds its image processor (Pillow, torchvision) while loading even for text-only
+    # use. Without the extra, construction raises ImportError naming PIL.
+    "sentence-transformers[image]>=6.1.0,<7",
+    # EmbeddingGemma 2's `embedding_gemma2` architecture first loads in 5.19; older
+    # releases raise "does not recognize this architecture" at model construction.
+    "transformers>=5.19.0,<6",
     "config>=0.5.1,<0.6",
     "pydantic>=2.9.0,<3",
     "rich>=13.8.1,<14",
@@ -94,10 +100,11 @@ dev = [
 # TORCH: CPU BY DEFAULT, CUDA BY EXPLICIT OPT-IN.
 #
 # Nothing in src/ or tests/ imports torch — `grep -rn "import torch" src tests`
-# is empty. Its single consumer is SentenceTransformer("all-MiniLM-L6-v2"),
-# constructed in `vector_db_memory.py::VectorDBMemory.__init__`: a 22M-parameter
-# model embedding short strings one at a time, where CPU inference is
-# single-digit milliseconds and the GPU's batch advantage does not apply. torch
+# is empty. Its single consumer is SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
+# (EmbeddingGemma 2, google/embeddinggemma-2), constructed in
+# `vector_db_memory.py::VectorDBMemory.__init__`: a model embedding short strings
+# one at a time, where CPU inference is tens of milliseconds and the GPU's batch
+# advantage does not apply. torch
 # is declared here only to decide WHICH BUILD gets installed — left alone it
 # arrives transitively from sentence-transformers, and PyPI's Linux torch wheel
 # is the CUDA one, which is the multi-GB cost this migration exists to stop

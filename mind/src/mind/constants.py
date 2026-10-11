@@ -29,7 +29,27 @@ CACHE_CONTROL_MODELS = frozenset({SONNET, GEMINI_FLASH, GEMINI_FLASH_LITE})
 MIN_CACHEABLE_PREFIX_CHARS = 4 * 1024
 
 # Embedding Models
-DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+#
+# EmbeddingGemma 2 (768 dimensions, Apache-2.0). The simulation tier embeds with the
+# same model (an ONNX q4 build of it), so a phrase and a memory live in one vector
+# space family and one prompt convention. Loading it through sentence-transformers
+# needs sentence-transformers >= 6.1 and transformers >= 5.19: older releases do not
+# know the `embedding_gemma2` architecture.
+#
+# Every collection records the model that wrote its vectors (see
+# VectorDBMemory.EMBEDDING_MODEL_KEY), and a collection written by any other model -
+# including the all-MiniLM-L6-v2 (384-d) one this replaced - is re-embedded from its
+# stored documents when it is opened, never queried with a mismatched encoder.
+DEFAULT_EMBEDDING_MODEL = "google/embeddinggemma-2"
+
+# Models that expect a task prefix on every text they embed, keyed by model id. The
+# literal is the one sentence-transformers publishes for the model's
+# "SentenceSimilarity" prompt, spelled out here rather than looked up by name so the
+# prompt cannot drift with a model-card edit and so it matches the simulation tier's
+# constant character for character. Models absent from this table take no prompt.
+EMBEDDING_MODEL_PROMPTS = {
+    "google/embeddinggemma-2": "task: sentence similarity | query: ",
+}
 
 # Memory Configuration
 DEFAULT_MEMORY_STORAGE_PATH = "./chroma_db"

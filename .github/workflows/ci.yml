@@ -83,7 +83,8 @@ jobs:
           cache-dependency-glob: "mind/uv.lock"
 
       # A function of which embedding models the tests load (~90MB for
-      # all-MiniLM-L6-v2). Its key uses run_id, which never hits exactly, so it
+      # all-MiniLM-L6-v2, the small stand-in tests/conftest.py substitutes for the
+      # ~1.5GB default google/embeddinggemma-2 so no CI job downloads that). Its key uses run_id, which never hits exactly, so it
       # restores from the newest previous run and RE-SAVES every run - a model
       # change updates it instead of freezing it at the first snapshot forever.
       - name: Cache huggingface models

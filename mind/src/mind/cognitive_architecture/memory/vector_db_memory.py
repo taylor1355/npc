@@ -1,13 +1,18 @@
 """Simple memory store using ChromaDB for vector storage"""
 
 import os
+import time
 
 import chromadb
 from chromadb.errors import NotFoundError
 from pydantic import BaseModel, ConfigDict
 from sentence_transformers import SentenceTransformer
 
-from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_RECENCY_REINFORCEMENT_ALPHA
+from mind.constants import (
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_RECENCY_REINFORCEMENT_ALPHA,
+    EMBEDDING_MODEL_PROMPTS,
+)
 from mind.logging_config import get_logger
 
 from ..id_generator import IdGenerator
@@ -24,6 +29,20 @@ from .retrieval import (
 )
 
 logger = get_logger()
+
+# Collection-metadata key recording which embedding model wrote a collection's vectors.
+# ChromaDB fixes a collection's vector width at its first write and cannot change a
+# collection's metadata afterwards (even re-sending hnsw:space is refused), so the stamp
+# can only be applied when a collection is CREATED - which is why a collection that lacks
+# it is rebuilt rather than stamped in place.
+EMBEDDING_MODEL_KEY = "embedding_model"
+
+# Suffix of the staging collection a re-embed builds beside the live one. Chroma's
+# collection names allow it, and it sorts beside its source in a listing.
+REEMBED_SUFFIX = "__reembed"
+
+# Rows read from the old collection, embedded, and written to the new one per round trip.
+REEMBED_BATCH_SIZE = 64
 
 
 def _delete_collection_if_exists(client: chromadb.ClientAPI, collection_name: str) -> None:
@@ -167,7 +186,9 @@ class VectorDBMemory:
         self.recency_reinforcement_alpha = recency_reinforcement_alpha
 
         # Initialize embedding model
+        self.embedding_model = embedding_model
         self.encoder = SentenceTransformer(embedding_model)
+        self._prompt = EMBEDDING_MODEL_PROMPTS.get(embedding_model)
 
         # Initialize ChromaDB with telemetry disabled
         settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
@@ -177,10 +198,168 @@ class VectorDBMemory:
         else:
             self.client = chromadb.EphemeralClient(settings=settings)
 
-        # Get or create collection
-        self.collection = self.client.get_or_create_collection(
-            name=collection_name, metadata={"hnsw:space": "cosine"}
+        # Get or create the collection, re-embedding it first when another model wrote it
+        self.collection = self._open_collection(collection_name)
+
+    def _collection_metadata(self) -> dict[str, str]:
+        """Metadata a collection is created with: cosine space plus the writing model."""
+        return {"hnsw:space": "cosine", EMBEDDING_MODEL_KEY: self.embedding_model}
+
+    def _encode(self, texts):
+        """Embed one text or a list of them, applying the model's task prefix if it has one.
+
+        Every embedding this store writes or queries goes through here, so a stored
+        vector and a query vector can never disagree about the prefix.
+        """
+        if self._prompt is None:
+            return self.encoder.encode(texts, show_progress_bar=False)
+        return self.encoder.encode(texts, prompt=self._prompt, show_progress_bar=False)
+
+    def _open_collection(self, collection_name: str):
+        """Open the named collection, guaranteeing its vectors came from self.encoder.
+
+        A collection is only usable if the model that wrote its vectors is the one that
+        will embed the queries. Two ways to violate that fail very differently, and
+        neither may be left to chance:
+          - a different WIDTH (all-MiniLM-L6-v2's 384 against EmbeddingGemma 2's 768)
+            is refused by ChromaDB with InvalidDimension on the first query, which at
+            least announces itself;
+          - the same width from a different model is accepted and returns
+            nearest-neighbours that are meaningless, with nothing reporting it.
+        So the check is on the model's identity, not on the width: each collection is
+        created carrying EMBEDDING_MODEL_KEY, and a non-empty collection whose stamp is
+        absent (every collection written before the stamp existed) or names another
+        model is rebuilt from its stored documents under self.encoder. It is never
+        queried as is and never has new vectors appended beside the old ones.
+
+        A rebuild is invisible to the caller apart from the time it takes: ids,
+        documents and metadata (importance, timestamps, recency anchors, tags) are
+        carried over verbatim, because only the vectors are a function of the model.
+        """
+        staging_name = f"{collection_name}{REEMBED_SUFFIX}"
+        existing = {c.name for c in self.client.list_collections()}
+
+        if collection_name not in existing and staging_name in existing:
+            # A previous rebuild finished writing the staging collection, dropped the
+            # old one, and died before the rename. Staging is only ever promoted after
+            # it holds every row, so it is complete and finishing the rename is the
+            # whole recovery.
+            logger.warning(
+                f"Recovering memory collection '{collection_name}': finishing an interrupted "
+                f"re-embed by promoting '{staging_name}'"
+            )
+            self.client.get_collection(staging_name).modify(name=collection_name)
+            existing = {c.name for c in self.client.list_collections()}
+
+        if collection_name not in existing:
+            # get_or_create rather than create: two stores opening one new name at once
+            # must both get a collection, as they did before the stamp existed.
+            return self.client.get_or_create_collection(
+                name=collection_name, metadata=self._collection_metadata()
+            )
+
+        collection = self.client.get_collection(collection_name)
+        written_by = (collection.metadata or {}).get(EMBEDDING_MODEL_KEY)
+        if written_by == self.embedding_model:
+            return collection
+
+        if collection.count() == 0:
+            # Nothing to carry over, only a stamp to apply - and a stamp can only be
+            # applied at creation.
+            self.client.delete_collection(collection_name)
+            return self.client.create_collection(
+                name=collection_name, metadata=self._collection_metadata()
+            )
+
+        return self._reembed_collection(collection, written_by)
+
+    def _reembed_collection(self, collection, written_by: str | None):
+        """Rebuild `collection` under self.encoder and return the replacement.
+
+        Built beside the original and swapped in only once it holds every row, so a
+        failure at any point before the swap leaves the original untouched and a failure
+        during the swap is recovered by _open_collection. A document that cannot be
+        re-embedded (no stored text) aborts the whole rebuild loudly: dropping the row
+        would be silent memory loss, and keeping its old vector would be exactly the
+        mixed-model state this exists to prevent.
+        """
+        name = collection.name
+        staging_name = f"{name}{REEMBED_SUFFIX}"
+        total = collection.count()
+        started = time.monotonic()
+        logger.warning(
+            f"Re-embedding memory collection '{name}' ({total} memories): written by "
+            f"{written_by or 'an unrecorded model'}, opened with {self.embedding_model}"
         )
+
+        # A staging collection that coexists with the original is a rebuild that died
+        # before completing: partial, so discarded rather than resumed.
+        _delete_collection_if_exists(self.client, staging_name)
+        staging = self.client.create_collection(
+            name=staging_name, metadata=self._collection_metadata()
+        )
+        try:
+            copied = 0
+            while copied < total:
+                page = collection.get(
+                    limit=REEMBED_BATCH_SIZE,
+                    offset=copied,
+                    include=["documents", "metadatas"],
+                )
+                ids = page["ids"]
+                if not ids:
+                    break
+                documents = page["documents"]
+                for row_id, document in zip(ids, documents, strict=True):
+                    if document is None:
+                        raise RuntimeError(
+                            f"Cannot re-embed memory '{row_id}' in collection '{name}': "
+                            "it has no stored document. The collection was left unchanged."
+                        )
+                vectors = self._encode(list(documents)).tolist()
+                self._add_rows(staging, ids, vectors, documents, page["metadatas"])
+                copied += len(ids)
+
+            if staging.count() != total:
+                raise RuntimeError(
+                    f"Re-embedding collection '{name}' wrote {staging.count()} of {total} "
+                    "memories. The collection was left unchanged."
+                )
+        except Exception:
+            _delete_collection_if_exists(self.client, staging_name)
+            raise
+
+        self.client.delete_collection(name)
+        staging.modify(name=name)
+        logger.warning(
+            f"Re-embedded memory collection '{name}': {total} memories in "
+            f"{time.monotonic() - started:.1f}s"
+        )
+        return staging
+
+    @staticmethod
+    def _add_rows(collection, ids, vectors, documents, metadatas) -> None:
+        """Add rows, keeping the ones stored without metadata free of it.
+
+        ChromaDB reads a metadata-less row back as None and refuses an empty dict, so a
+        batch is split on that rather than coerced; see add_memory for why metadatas
+        must never be passed as None for a row that has some.
+        """
+        with_meta = [i for i, m in enumerate(metadatas) if m]
+        without_meta = [i for i, m in enumerate(metadatas) if not m]
+        if with_meta:
+            collection.add(
+                ids=[ids[i] for i in with_meta],
+                embeddings=[vectors[i] for i in with_meta],
+                documents=[documents[i] for i in with_meta],
+                metadatas=[metadatas[i] for i in with_meta],
+            )
+        if without_meta:
+            collection.add(
+                ids=[ids[i] for i in without_meta],
+                embeddings=[vectors[i] for i in without_meta],
+                documents=[documents[i] for i in without_meta],
+            )
 
     @staticmethod
     def collection_exists(storage_path: str, collection_name: str) -> bool:
@@ -211,6 +390,13 @@ class VectorDBMemory:
             client.get_collection(name=collection_name)
             return True
         except NotFoundError:
+            pass
+        # An interrupted re-embed leaves the full rebuilt collection under the staging
+        # name; opening the store promotes it, so the memories do survive.
+        try:
+            client.get_collection(name=f"{collection_name}{REEMBED_SUFFIX}")
+            return True
+        except NotFoundError:
             return False
 
     @staticmethod
@@ -239,6 +425,7 @@ class VectorDBMemory:
         settings = chromadb.Settings(anonymized_telemetry=False, allow_reset=True)
         client = chromadb.PersistentClient(path=storage_path, settings=settings)
         _delete_collection_if_exists(client, collection_name)
+        _delete_collection_if_exists(client, f"{collection_name}{REEMBED_SUFFIX}")
 
     def add_memory(
         self,
@@ -290,7 +477,7 @@ class VectorDBMemory:
         )
 
         # Generate embedding
-        embedding = self.encoder.encode(content, show_progress_bar=False).tolist()
+        embedding = self._encode(content).tolist()
         memory.embedding = embedding
 
         metadata = VectorDBMetadata(
@@ -338,7 +525,7 @@ class VectorDBMemory:
         """Search for memories using semantic similarity"""
 
         # Generate query embedding
-        query_embedding = self.encoder.encode(query.query, show_progress_bar=False).tolist()
+        query_embedding = self._encode(query.query).tolist()
 
         # Search in ChromaDB
         collection_count = self.collection.count()
@@ -473,6 +660,7 @@ class VectorDBMemory:
         types to guard it.
         """
         _delete_collection_if_exists(self.client, self.collection.name)
+        _delete_collection_if_exists(self.client, f"{self.collection.name}{REEMBED_SUFFIX}")
 
     def clear(self):
         """Clear all memories, leaving an empty collection behind.
@@ -497,5 +685,5 @@ class VectorDBMemory:
         collection_name = self.collection.name
         self.drop_collection()
         self.collection = self.client.get_or_create_collection(
-            name=collection_name, metadata={"hnsw:space": "cosine"}
+            name=collection_name, metadata=self._collection_metadata()
         )

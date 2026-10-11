@@ -51,7 +51,7 @@ For each cluster, estimate cohesiveness to determine "theme strength":
 - **Weighted by importance:** Factor in constituent memories' importance scores
 - **Temporal coherence bonus:** Memories from similar time windows boost cohesiveness
 
-**High-dimensional challenge:** Current embeddings are 384-dimensional (MiniLM). Full covariance matrix = 384x384. Solutions:
+**High-dimensional challenge:** Current embeddings are 768-dimensional (EmbeddingGemma 2; 384 under the MiniLM it replaced). Full covariance matrix = 768x768. Solutions:
 - **Diagonal covariance:** Assume dimension independence
 - **Dimensionality reduction:** PCA/UMAP to reduce to 10-50 dimensions before Gaussian estimation
 - **Matryoshka embeddings:** Use variable-size embeddings (models trained to be meaningful at multiple truncation sizes: 64, 128, 256, 384 dims). Could use smaller dimensions for clustering/cohesiveness computation, full dimensions for retrieval

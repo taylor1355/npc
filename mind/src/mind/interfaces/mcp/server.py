@@ -211,9 +211,14 @@ class MCPServer:
         #     the stored ones at all. Mind.reattach hands it to VectorDBMemory, which
         #     builds its own SentenceTransformer and embeds queries client-side, so a
         #     mind rehydrated under the default model queries a collection written by
-        #     a different one - InvalidDimension when the widths differ, and silently
-        #     meaningless nearest-neighbours when they happen to match. Nothing
-        #     reports the second case, which makes it strictly worse than "not_found".
+        #     a different one. VectorDBMemory stamps each collection with the model that
+        #     wrote it and re-embeds a collection another model wrote (or none did) when
+        #     it is opened, so the width mismatch (InvalidDimension) and the silent
+        #     same-width mismatch (meaningless nearest-neighbours) can no longer reach a
+        #     query. The recorded model still matters: rehydrating under the wrong one
+        #     is no longer a failure, it is a full re-embed of that mind's memories
+        #     into the wrong model, which is consistent but is not what the client
+        #     configured.
         #   - traits / personality_dimensions / llm_model decide who the rehydrated
         #     NPC actually is; defaulting them returns a personality-less stranger.
         #
