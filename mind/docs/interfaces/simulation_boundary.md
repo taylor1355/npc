@@ -231,6 +231,17 @@ What still binds the cross-repo ordering:
 - `ConversationObservation` must never gain forbid: `server.py` validates it
   inside `try/except ValidationError: continue`, so forbidding there would
   silently skip every `INTERACTION_OBSERVATION` — the same bug one layer over.
+- **The perception channel (NPC-1903) is two additive keys inside ignore-models,
+  so either repository can merge first with no outage.** `EntityData.appearance`
+  and `ConversationObservation.partners[].appearance` carry `{channel, band}` rows
+  (`PublicCue`), non-neutral cues only; an absent key means the partner was
+  unreadable (beyond the simulation's cue radius) and `[]` means readable with
+  nothing notable. Both fields are open `str`: the simulation owns the vocabulary
+  (`public_cue_bands.gd`), so a new channel or band reaches the prompt with no
+  change here. An older server drops the keys silently (pydantic `ignore`), so
+  merge this repository first and the simulation never ships a payload the mind
+  discards. The parity audit cannot see a dropped nested key either, which is why
+  `test_observation_models.py::TestPerceptionChannel` pins the parse.
 
 **The parity audit cannot see this class of defect.** `audit_mcp_parity.py`
 scans `audit_scope.substrate_files` for substrate-component getters and exports;

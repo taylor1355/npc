@@ -1589,6 +1589,36 @@ class VisibleInteraction(BaseModel):
         return f"{head} -- not joinable{f': {reason}' if reason else ''}"
 
 
+class PublicCue(BaseModel):
+    """One banded appearance fact about another entity, as the observer read it.
+
+    Wire producer: ``perceived_appearance.gd::to_wire`` -- ``{channel, band}``
+    rows, NON-NEUTRAL cues only. Both fields are open strings on purpose: the
+    simulation owns the vocabulary (``public_cue_bands.gd``), exactly as it owns
+    declaration kinds, so a channel or band added there reaches the prompt with
+    no change here and nothing in this repository enumerates it.
+
+    The band is what the observer *perceived*, which below full familiarity can
+    be one step closer to neutral than the truth. Never treat it as ground truth.
+    """
+
+    channel: str
+    band: str
+
+
+def render_appearance(cues: list[PublicCue] | None) -> str:
+    """Prose for an appearance: ``"hungry, carrying food"``, or ``""``.
+
+    Mirrors the simulation's ``PerceivedAppearance.describe()`` so a mind reading
+    prose is told what one reading the structured form is. ``""`` for ``None``
+    (unreadable) and for ``[]`` (readable, nothing notable): the caller prints
+    nothing in either case.
+    """
+    if not cues:
+        return ""
+    return ", ".join(cue.band.replace("_", " ") for cue in cues)
+
+
 class EntityData(BaseModel):
     """Visible entity with interaction affordances"""
 
@@ -1598,6 +1628,10 @@ class EntityData(BaseModel):
     interactions: dict[str, dict] = Field(default_factory=dict)
     relationship: RelationshipState | None = None
     current_interaction: VisibleInteraction | None = None
+    # What the observer reads of this entity's appearance (NPC-1903). ``None``
+    # means unreadable: outside the simulation's cue radius, or an entity that
+    # shows no cues. ``[]`` means readable with nothing notable.
+    appearance: list[PublicCue] | None = None
 
     @field_validator("current_interaction", mode="before")
     @classmethod
@@ -1809,8 +1843,27 @@ class ConversationMessage(BaseModel):
         return " ".join(markers)
 
 
+class ConversationPartner(BaseModel):
+    """One other participant of a conversation, as the receiving mind perceives them.
+
+    Wire producer: ``ConversationObservation.Partner.to_dict`` -- the receiver's
+    own row is never listed. ``appearance`` follows ``EntityData.appearance``:
+    absent means unreadable (a partner can talk from beyond the cue radius),
+    ``[]`` means readable with nothing notable.
+    """
+
+    entity_id: str
+    display_name: str = ""
+    appearance: list[PublicCue] | None = None
+
+
 class ConversationObservation(BaseModel):
-    """Conversation state for a specific interaction"""
+    """Conversation state for a specific interaction
+
+    ``extra`` stays at the default (ignore): the simulation grows this payload
+    additively, and a forbid here would turn every new key into a refused
+    observation (see ``docs/interfaces/simulation_boundary.md``).
+    """
 
     interaction_id: str  # Identifies which conversation
     interaction_name: str
@@ -1822,6 +1875,9 @@ class ConversationObservation(BaseModel):
     # and an older simulation never sends it. None means "unknown", which the
     # terseness formatter treats like a fresh mind (no instruction).
     wits: float | None = None
+    # The other participants and what this mind reads of them (NPC-1903). Empty
+    # when the simulation omits the key.
+    partners: list[ConversationPartner] = Field(default_factory=list)
 
 
 class Observation(BaseModel):
@@ -2067,6 +2123,13 @@ class Observation(BaseModel):
                         f"sentiment {rel.sentiment:+.2f}, "
                         f"{rel.interaction_count} shared interactions"
                     )
+
+                # What this mind reads of the entity's appearance (NPC-1903).
+                # Only when something is notable, so an entity with nothing to
+                # show renders exactly as it did before the channel existed.
+                appears = render_appearance(entity.appearance)
+                if appears:
+                    entity_parts.append(f"    Appears: {appears}")
 
                 # After the relationship line and before the affordance list:
                 # what this entity is doing now bears on whether to approach it

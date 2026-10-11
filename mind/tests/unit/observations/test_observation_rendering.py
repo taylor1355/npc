@@ -16,6 +16,7 @@ from mind.cognitive_architecture.observations import (
     MoodObservation,
     NeedsObservation,
     Observation,
+    PublicCue,
     RelationshipState,
     StatusObservation,
     ValenceBand,
@@ -203,6 +204,61 @@ class TestRelationshipRendering:
         )
 
         assert "sentiment -0.20" in str(obs)
+
+
+def _vision_of(*entities: EntityData) -> VisionObservation:
+    return VisionObservation(visible_entities=list(entities))
+
+
+class TestAppearanceRendering:
+    """NPC-1903: a visible entity's appearance renders only when something is notable"""
+
+    def _entity(self, appearance) -> EntityData:
+        return EntityData(
+            entity_id="bo_npc", display_name="Bo", position=(6, 10), appearance=appearance
+        )
+
+    def test_notable_cues_render_one_line(self):
+        obs = _base_observation(
+            vision=_vision_of(
+                self._entity(
+                    [
+                        PublicCue(channel="hunger", band="hungry"),
+                        PublicCue(channel="carrying_food", band="carrying_food"),
+                    ]
+                )
+            )
+        )
+
+        assert "    Appears: hungry, carrying food" in str(obs)
+
+    def test_appearance_follows_the_relationship_line(self):
+        obs = _base_observation(
+            vision=_vision_of(
+                EntityData(
+                    entity_id="bo_npc",
+                    display_name="Bo",
+                    position=(6, 10),
+                    relationship=RelationshipState(
+                        familiarity=0.5, sentiment=0.0, interaction_count=2
+                    ),
+                    appearance=[PublicCue(channel="fatigue", band="tired")],
+                )
+            )
+        )
+
+        text = str(obs)
+
+        assert text.index("Relationship:") < text.index("Appears: tired")
+
+    def test_unreadable_and_unremarkable_entities_render_no_line(self):
+        for appearance in (None, []):
+            assert "Appears:" not in str(
+                _base_observation(vision=_vision_of(self._entity(appearance)))
+            )
+
+    def test_control_arm_is_byte_identical_with_no_appearance(self):
+        assert str(_base_observation()) == GOLDEN_UNENRICHED
 
 
 def _conversation(*messages) -> ConversationObservation:
