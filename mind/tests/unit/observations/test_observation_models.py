@@ -93,6 +93,29 @@ class TestObservationModels:
         assert len(conv.conversation_history) == 2
         assert conv.participants == ["npc_1", "npc_2"]
 
+    def test_conversation_message_keeps_its_addressees(self):
+        """The wire's addressee_ids survives parsing; absent reads as an empty list."""
+        addressed = ConversationMessage.model_validate(
+            {
+                "id": "message_addressed",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Bo, the larder is empty.",
+                "addressee_ids": ["npc_2"],
+            }
+        )
+        legacy = ConversationMessage.model_validate(
+            {
+                "id": "message_legacy",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Hi",
+            }
+        )
+
+        assert addressed.addressee_ids == ["npc_2"]
+        assert legacy.addressee_ids == []
+
     def test_create_composite_observation(self):
         """Should create full composite observation"""
         obs = Observation(
