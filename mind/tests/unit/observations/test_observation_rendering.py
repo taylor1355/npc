@@ -17,6 +17,7 @@ from mind.cognitive_architecture.observations import (
     NeedsObservation,
     Observation,
     RelationshipState,
+    StandingState,
     StatusObservation,
     ValenceBand,
     VisionObservation,
@@ -147,6 +148,36 @@ class TestMoodRendering:
         assert "resting 0.50" in text
 
     def test_absent_mood_renders_nothing(self):
+        assert str(_base_observation()) == GOLDEN_UNENRICHED
+
+
+class TestStandingRendering:
+    """A standing line appears only where the observer holds a row (NPC-1906)"""
+
+    def test_creditor_fixture_renders_owed_pressure_and_grievance(self):
+        from tests.fixtures.observations import create_creditor_observation
+
+        text = str(create_creditor_observation())
+
+        assert "    Standing: you owe them 0.42 (it presses 0.41)" in text
+        assert "    Standing: they owe you 0.20" in text
+        assert text.count("Standing:") == 2, "the stranger carries no standing line"
+
+    def test_standing_line_sits_under_its_relationship_line(self):
+        from tests.fixtures.observations import create_creditor_observation
+
+        text = str(create_creditor_observation())
+
+        assert text.index("Relationship: familiarity 0.30") < text.index("Standing: you owe them")
+
+    def test_settled_clauses_are_omitted(self):
+        assert StandingState(owed=0.005, grievance=0.0, pressure=0.0).render() == ""
+        assert StandingState(owed=0.3, grievance=0.0, pressure=0.0).render() == (
+            "Standing: you owe them 0.30"
+        )
+
+    def test_a_payload_without_standing_renders_byte_identically(self):
+        """The control arm: adding the field changes no existing rendering"""
         assert str(_base_observation()) == GOLDEN_UNENRICHED
 
 

@@ -19,6 +19,7 @@ from mind.cognitive_architecture.observations import (
     NeedsObservation,
     Observation,
     RelationshipState,
+    StandingState,
     StatusObservation,
     ValenceBand,
     VisionObservation,
@@ -922,6 +923,46 @@ class TestRelationshipEnrichment:
 
         with pytest.raises(ValidationError):
             RelationshipState(familiarity=0.5, sentiment=-2.0)
+
+
+class TestStandingEnrichment:
+    """Standing rides the visible entity it describes (NPC-1906)"""
+
+    def test_standing_survives_validation(self):
+        obs = Observation.model_validate(
+            {
+                "entity_id": "test_npc",
+                "current_simulation_time": 100,
+                "vision": {
+                    "visible_entities": [
+                        {
+                            "entity_id": "bo_npc",
+                            "display_name": "Bo",
+                            "position": (1, 2),
+                            "interactions": {},
+                            "standing": {"owed": 0.42, "grievance": 0.2, "pressure": 0.3},
+                        }
+                    ]
+                },
+            }
+        )
+
+        standing = obs.vision.visible_entities[0].standing
+        assert standing is not None
+        assert standing.owed == 0.42
+        assert standing.grievance == 0.2
+        assert standing.pressure == 0.3
+
+    def test_entity_without_standing_carries_none(self):
+        assert EntityData(entity_id="x", display_name="X", position=(0, 0)).standing is None
+
+    def test_out_of_domain_standing_values_are_rejected(self):
+        """The ledger clamps every column to [0, 1], so a violation is a bug"""
+        with pytest.raises(ValidationError):
+            StandingState(owed=1.4, grievance=0.0, pressure=0.0)
+
+        with pytest.raises(ValidationError):
+            StandingState(owed=0.2, grievance=-0.1, pressure=0.0)
 
 
 class TestInventoryObservation:
