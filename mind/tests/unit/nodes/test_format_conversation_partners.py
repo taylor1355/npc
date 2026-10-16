@@ -77,14 +77,14 @@ def _mind() -> Mind:
     )
 
 
-def _observation(partner: ConversationPartner) -> ConversationObservation:
+def _observation(partner: ConversationPartner | None = None) -> ConversationObservation:
     return ConversationObservation(
         interaction_id=INTERACTION_ID,
         interaction_name="conversation",
         participants=["npc_alice", "npc_bo"],
         initiator_id="npc_alice",
         conversation_history=[],
-        partners=[partner],
+        partners=[] if partner is None else [partner],
     )
 
 
@@ -114,3 +114,27 @@ def test_snapshot_carries_partners_and_cleanup_drops_them():
     assert state.conversation_partners[INTERACTION_ID][0].appearance is not None
     assert INTERACTION_ID not in mind.conversation_partners
     assert INTERACTION_ID not in mind.conversation_histories
+
+
+def test_an_observation_after_the_finish_marker_is_cleaned_up_on_the_next_build():
+    mind = _mind()
+    mind._finished_conversation_ids.add(INTERACTION_ID)
+    mind.update_conversations([_observation(_hungry_bo())])
+    assert INTERACTION_ID in mind.conversation_partners
+
+    mind.build_pipeline_state(create_blacksmith_observation())
+
+    assert INTERACTION_ID not in mind.conversation_partners
+    assert INTERACTION_ID not in mind.conversation_histories
+    assert INTERACTION_ID not in mind._finished_conversation_ids
+
+
+def test_an_observation_that_omits_partners_replaces_the_stored_list_with_empty():
+    mind = _mind()
+    mind.update_conversations([_observation(_hungry_bo())])
+
+    mind.update_conversations([_observation()])
+
+    assert mind.conversation_partners[INTERACTION_ID] == [], (
+        "partners is authoritative per observation: an omitted key means []"
+    )

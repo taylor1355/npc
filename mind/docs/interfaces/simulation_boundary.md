@@ -234,11 +234,19 @@ What still binds the cross-repo ordering:
 - **The perception channel (NPC-1903) is two additive keys inside ignore-models,
   so either repository can merge first with no outage.** `EntityData.appearance`
   and `ConversationObservation.partners[].appearance` carry `{channel, band}` rows
-  (`PublicCue`), non-neutral cues only; an absent key means the partner was
-  unreadable (beyond the simulation's cue radius) and `[]` means readable with
-  nothing notable. Both fields are open `str`: the simulation owns the vocabulary
-  (`public_cue_bands.gd`), so a new channel or band reaches the prompt with no
-  change here. An older server drops the keys silently (pydantic `ignore`), so
+  (`PublicCue`), plus `subject` on categorical rows, non-neutral cues only; an
+  absent key means the partner was unreadable (beyond the simulation's cue radius)
+  and `[]` means readable with nothing notable. `channel` and `band` are open
+  `str`: the simulation owns the vocabulary (`public_cue_bands.gd`), so a new
+  channel or band reaches the prompt with no change here. `subject` is a
+  snake_case item id (the item's config type id, for example `berries`), present
+  only on categorical rows such as `carrying` and absent on graded ones; it is
+  never an empty string. Rows arrive sorted by channel, then subject, and the
+  prose keeps that order.
+- **`ConversationObservation.partners` is authoritative per observation.** The
+  mind replaces its stored list with each conversation observation's `partners`,
+  so an omitted key means `[]` (nothing known), not "unchanged". The simulation
+  always sends the key; a partial observation would drop the cues. An older server drops the keys silently (pydantic `ignore`), so
   merge this repository first and the simulation never ships a payload the mind
   discards. The parity audit cannot see a dropped nested key either, which is why
   `test_observation_models.py::TestPerceptionChannel` pins the parse.

@@ -1593,10 +1593,12 @@ class PublicCue(BaseModel):
     """One banded appearance fact about another entity, as the observer read it.
 
     Wire producer: ``perceived_appearance.gd::to_wire`` -- ``{channel, band}``
-    rows, plus ``subject`` on categorical rows, NON-NEUTRAL cues only. Both fields are open strings on purpose: the
-    simulation owns the vocabulary (``public_cue_bands.gd``), exactly as it owns
-    declaration kinds, so a channel or band added there reaches the prompt with
-    no change here and nothing in this repository enumerates it.
+    rows, plus ``subject`` on categorical rows only, NON-NEUTRAL cues only.
+    ``channel`` and ``band`` are open strings on purpose: the simulation owns the
+    vocabulary (``public_cue_bands.gd``), exactly as it owns declaration kinds, so
+    a channel or band added there reaches the prompt with no change here and
+    nothing in this repository enumerates it. ``subject`` is optional (a
+    snake_case item id, absent on graded rows).
 
     The band is what the observer *perceived*, which below full familiarity can
     be one step closer to neutral than the truth. Never treat it as ground truth.
@@ -1612,7 +1614,11 @@ class PublicCue(BaseModel):
 def _carried_kind(subject: str) -> str:
     """``"apple"`` -> ``"an apple"``; ``"berries"`` -> ``"berries"``.
 
-    An id ending in ``s`` reads as plural or mass and takes no article.
+    A heuristic over a snake_case id: an id ending in ``s`` reads as plural or mass
+    and takes no article, so ``glass``, ``moss`` and ``grass`` render bare (and a
+    singular ``bus`` would too). The article is ``an`` before a vowel letter, so
+    ``hour`` and ``unicorn`` are misjudged. The long-term fix is for the simulation
+    to send a display noun; that is a wire-contract change, deferred.
     """
     kind = subject.replace("_", " ")
     if kind.endswith("s"):
@@ -1624,22 +1630,22 @@ def _carried_kind(subject: str) -> str:
 def render_appearance(cues: list[PublicCue] | None) -> str:
     """Prose for an appearance: ``"hungry, carrying an apple"``, or ``""``.
 
-    Mirrors the simulation's ``PerceivedAppearance.describe()`` so a mind reading
-    prose is told what one reading the structured form is. ``""`` for ``None``
-    (unreadable) and for ``[]`` (readable, nothing notable): the caller prints
-    nothing in either case.
+    Mirrors the simulation's ``PerceivedAppearance.describe()`` in structure: one
+    phrase per row, in wire order (the simulation sorts rows by channel, then
+    subject, so ``carrying`` precedes ``fatigue`` and ``hunger``), and each
+    categorical row is its own phrase (``carrying an apple, carrying berries``). The
+    only difference is the article on the subject, which reads as prose here.
+    ``""`` for ``None`` (unreadable) and for ``[]`` (readable, nothing notable): the
+    caller prints nothing in either case.
     """
     if not cues:
         return ""
     parts: list[str] = []
-    carried: list[str] = []
     for cue in cues:
-        if cue.channel == "carrying" and cue.subject:
-            carried.append(_carried_kind(cue.subject))
-        else:
-            parts.append(cue.band.replace("_", " "))
-    if carried:
-        parts.append("carrying " + " and ".join(carried))
+        phrase = cue.band.replace("_", " ")
+        if cue.subject:
+            phrase += " " + _carried_kind(cue.subject)
+        parts.append(phrase)
     return ", ".join(parts)
 
 
@@ -1652,7 +1658,8 @@ class EntityData(BaseModel):
     interactions: dict[str, dict] = Field(default_factory=dict)
     relationship: RelationshipState | None = None
     current_interaction: VisibleInteraction | None = None
-    # What the observer reads of this entity's appearance (NPC-1903). ``None``
+    # What the observer reads of this entity's appearance (NPC-1903), as
+    # ``{channel, band}`` rows plus ``subject`` on categorical rows. ``None``
     # means unreadable: outside the simulation's cue radius, or an entity that
     # shows no cues. ``[]`` means readable with nothing notable.
     appearance: list[PublicCue] | None = None
@@ -1871,9 +1878,10 @@ class ConversationPartner(BaseModel):
     """One other participant of a conversation, as the receiving mind perceives them.
 
     Wire producer: ``ConversationObservation.Partner.to_dict`` -- the receiver's
-    own row is never listed. ``appearance`` follows ``EntityData.appearance``:
-    absent means unreadable (a partner can talk from beyond the cue radius),
-    ``[]`` means readable with nothing notable.
+    own row is never listed. ``appearance`` follows ``EntityData.appearance``
+    (``{channel, band}`` rows, plus ``subject`` on categorical rows): absent means
+    unreadable (a partner can talk from beyond the cue radius), ``[]`` means
+    readable with nothing notable.
     """
 
     entity_id: str
@@ -1900,7 +1908,8 @@ class ConversationObservation(BaseModel):
     # terseness formatter treats like a fresh mind (no instruction).
     wits: float | None = None
     # The other participants and what this mind reads of them (NPC-1903). Empty
-    # when the simulation omits the key.
+    # when the simulation omits the key. Authoritative per observation: an omitted
+    # key means ``[]``, not "unchanged".
     partners: list[ConversationPartner] = Field(default_factory=list)
 
 

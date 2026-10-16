@@ -5,6 +5,8 @@ consumes, so anything that does not render here is invisible to the LLM no
 matter how faithfully it crosses the wire.
 """
 
+import pytest
+
 from mind.cognitive_architecture.observations import (
     ArousalBand,
     ConversationMessage,
@@ -224,16 +226,46 @@ class TestAppearanceRendering:
             vision=_vision_of(
                 self._entity(
                     [
-                        PublicCue(channel="hunger", band="hungry"),
                         PublicCue(channel="carrying", band="carrying", subject="apple"),
+                        PublicCue(channel="hunger", band="hungry"),
                     ]
                 )
             )
         )
 
-        assert "    Appears: hungry, carrying an apple" in str(obs)
+        assert "    Appears: carrying an apple, hungry" in str(obs)
 
-    def test_two_subjects_join_with_and(self):
+    def test_rows_render_in_wire_order(self):
+        text = render_appearance(
+            [
+                PublicCue(channel="hunger", band="hungry"),
+                PublicCue(channel="carrying", band="carrying", subject="apple"),
+            ]
+        )
+
+        assert text == "hungry, carrying an apple", (
+            "the simulation sorts rows by channel (carrying first); the mind keeps what it is sent"
+        )
+
+    @pytest.mark.parametrize(
+        ("subject", "phrase"),
+        [
+            ("apple", "carrying an apple"),
+            ("egg", "carrying an egg"),
+            ("pear", "carrying a pear"),
+            ("glass", "carrying glass"),
+            ("moss", "carrying moss"),
+            ("grass", "carrying grass"),
+            ("berries", "carrying berries"),
+        ],
+    )
+    def test_article_heuristic_is_pinned(self, subject, phrase):
+        assert (
+            render_appearance([PublicCue(channel="carrying", band="carrying", subject=subject)])
+            == phrase
+        )
+
+    def test_two_subjects_render_as_two_phrases(self):
         text = render_appearance(
             [
                 PublicCue(channel="carrying", band="carrying", subject="apple"),
@@ -241,7 +273,7 @@ class TestAppearanceRendering:
             ]
         )
 
-        assert text == "carrying an apple and berries"
+        assert text == "carrying an apple, carrying berries"
 
     def test_subject_underscores_become_spaces_with_article_by_first_letter(self):
         text = render_appearance(
@@ -250,10 +282,10 @@ class TestAppearanceRendering:
 
         assert text == "carrying a wooden spoon"
 
-    def test_unknown_categorical_channel_renders_its_band(self):
+    def test_unknown_categorical_channel_renders_its_band_and_subject(self):
         text = render_appearance([PublicCue(channel="wearing", band="wearing", subject="hat")])
 
-        assert text == "wearing"
+        assert text == "wearing a hat", "any categorical row renders its band and subject"
 
     def test_carrying_row_without_subject_renders_its_band(self):
         assert render_appearance([PublicCue(channel="carrying", band="carrying")]) == "carrying"
