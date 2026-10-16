@@ -22,6 +22,7 @@ from mind.cognitive_architecture.observations import (
     ValenceBand,
     VisionObservation,
 )
+from mind.cognitive_architecture.observations.models import render_appearance
 
 
 def _base_observation(**overrides) -> Observation:
@@ -224,13 +225,38 @@ class TestAppearanceRendering:
                 self._entity(
                     [
                         PublicCue(channel="hunger", band="hungry"),
-                        PublicCue(channel="carrying_food", band="carrying_food"),
+                        PublicCue(channel="carrying", band="carrying", subject="apple"),
                     ]
                 )
             )
         )
 
-        assert "    Appears: hungry, carrying food" in str(obs)
+        assert "    Appears: hungry, carrying an apple" in str(obs)
+
+    def test_two_subjects_join_with_and(self):
+        text = render_appearance(
+            [
+                PublicCue(channel="carrying", band="carrying", subject="apple"),
+                PublicCue(channel="carrying", band="carrying", subject="berries"),
+            ]
+        )
+
+        assert text == "carrying an apple and berries"
+
+    def test_subject_underscores_become_spaces_with_article_by_first_letter(self):
+        text = render_appearance(
+            [PublicCue(channel="carrying", band="carrying", subject="wooden_spoon")]
+        )
+
+        assert text == "carrying a wooden spoon"
+
+    def test_unknown_categorical_channel_renders_its_band(self):
+        text = render_appearance([PublicCue(channel="wearing", band="wearing", subject="hat")])
+
+        assert text == "wearing"
+
+    def test_carrying_row_without_subject_renders_its_band(self):
+        assert render_appearance([PublicCue(channel="carrying", band="carrying")]) == "carrying"
 
     def test_appearance_follows_the_relationship_line(self):
         obs = _base_observation(

@@ -1593,7 +1593,7 @@ class PublicCue(BaseModel):
     """One banded appearance fact about another entity, as the observer read it.
 
     Wire producer: ``perceived_appearance.gd::to_wire`` -- ``{channel, band}``
-    rows, NON-NEUTRAL cues only. Both fields are open strings on purpose: the
+    rows, plus ``subject`` on categorical rows, NON-NEUTRAL cues only. Both fields are open strings on purpose: the
     simulation owns the vocabulary (``public_cue_bands.gd``), exactly as it owns
     declaration kinds, so a channel or band added there reaches the prompt with
     no change here and nothing in this repository enumerates it.
@@ -1604,10 +1604,25 @@ class PublicCue(BaseModel):
 
     channel: str
     band: str
+    # Categorical rows only (``carrying``): a snake_case canonical item id such
+    # as ``berries``. Absent on graded rows, never empty when present.
+    subject: str | None = None
+
+
+def _carried_kind(subject: str) -> str:
+    """``"apple"`` -> ``"an apple"``; ``"berries"`` -> ``"berries"``.
+
+    An id ending in ``s`` reads as plural or mass and takes no article.
+    """
+    kind = subject.replace("_", " ")
+    if kind.endswith("s"):
+        return kind
+    article = "an" if kind[:1].lower() in "aeiou" else "a"
+    return f"{article} {kind}"
 
 
 def render_appearance(cues: list[PublicCue] | None) -> str:
-    """Prose for an appearance: ``"hungry, carrying food"``, or ``""``.
+    """Prose for an appearance: ``"hungry, carrying an apple"``, or ``""``.
 
     Mirrors the simulation's ``PerceivedAppearance.describe()`` so a mind reading
     prose is told what one reading the structured form is. ``""`` for ``None``
@@ -1616,7 +1631,16 @@ def render_appearance(cues: list[PublicCue] | None) -> str:
     """
     if not cues:
         return ""
-    return ", ".join(cue.band.replace("_", " ") for cue in cues)
+    parts: list[str] = []
+    carried: list[str] = []
+    for cue in cues:
+        if cue.channel == "carrying" and cue.subject:
+            carried.append(_carried_kind(cue.subject))
+        else:
+            parts.append(cue.band.replace("_", " "))
+    if carried:
+        parts.append("carrying " + " and ".join(carried))
+    return ", ".join(parts)
 
 
 class EntityData(BaseModel):

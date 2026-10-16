@@ -943,14 +943,19 @@ class TestPerceptionChannel:
         entity = self._entity(
             appearance=[
                 {"channel": "hunger", "band": "hungry"},
-                {"channel": "carrying_food", "band": "carrying_food"},
+                {"channel": "carrying", "band": "carrying", "subject": "apple"},
             ]
         )
 
         assert entity.appearance == [
             PublicCue(channel="hunger", band="hungry"),
-            PublicCue(channel="carrying_food", band="carrying_food"),
+            PublicCue(channel="carrying", band="carrying", subject="apple"),
         ]
+
+    def test_graded_row_without_subject_parses_with_none(self):
+        entity = self._entity(appearance=[{"channel": "hunger", "band": "hungry"}])
+
+        assert entity.appearance[0].subject is None
 
     def test_absent_appearance_is_unreadable_not_empty(self):
         assert self._entity().appearance is None
