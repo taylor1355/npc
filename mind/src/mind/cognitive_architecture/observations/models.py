@@ -1493,6 +1493,34 @@ class RelationshipState(BaseModel):
     interaction_count: int = 0
 
 
+class StandingState(BaseModel):
+    """What the observer owes one visible entity and holds against it (NPC-1906).
+
+    Mirrors the simulation's ``StandingLedger`` row for that entity, read from the
+    OBSERVER's own ledger: the holder's belief, never world truth, and never the other
+    side's view. ``pressure`` is ``owed x (1 - communality)``: how hard the debt
+    presses, discounted by how close the two already are. Each value is bounded to
+    [0, 1] by the ledger, so a violation is a bug. The key is omitted when the observer
+    holds no row, so its presence is itself the signal.
+    """
+
+    owed: float = Field(ge=0.0, le=1.0)
+    grievance: float = Field(ge=0.0, le=1.0)
+    pressure: float = Field(ge=0.0, le=1.0)
+
+    def render(self) -> str:
+        """``Standing: you owe them 0.42 (it presses 0.30); they owe you 0.20``, or ""."""
+        clauses = []
+        if self.owed >= 0.01:
+            clause = f"you owe them {self.owed:.2f}"
+            if self.pressure >= 0.01:
+                clause += f" (it presses {self.pressure:.2f})"
+            clauses.append(clause)
+        if self.grievance >= 0.01:
+            clauses.append(f"they owe you {self.grievance:.2f}")
+        return "Standing: " + "; ".join(clauses) if clauses else ""
+
+
 class VisibleInteraction(BaseModel):
     """The interaction a VISIBLE entity is currently engaged in.
 
@@ -1597,6 +1625,7 @@ class EntityData(BaseModel):
     position: tuple[int, int]
     interactions: dict[str, dict] = Field(default_factory=dict)
     relationship: RelationshipState | None = None
+    standing: StandingState | None = None
     current_interaction: VisibleInteraction | None = None
 
     @field_validator("current_interaction", mode="before")
@@ -2067,6 +2096,14 @@ class Observation(BaseModel):
                         f"sentiment {rel.sentiment:+.2f}, "
                         f"{rel.interaction_count} shared interactions"
                     )
+
+                # Directly under the relationship it qualifies; omitted when the
+                # observer holds no row, and each clause below a hundredth, so an
+                # unenriched payload renders byte-identically (NPC-1906).
+                if entity.standing:
+                    line = entity.standing.render()
+                    if line:
+                        entity_parts.append(f"    {line}")
 
                 # After the relationship line and before the affordance list:
                 # what this entity is doing now bears on whether to approach it

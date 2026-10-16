@@ -24,6 +24,7 @@ from mind.cognitive_architecture.observations import (
     NeedsObservation,
     Observation,
     RelationshipState,
+    StandingState,
     StatusObservation,
     ValenceBand,
     VisionObservation,
@@ -840,6 +841,42 @@ def create_enriched_observation(simulation_time: int = 100) -> Observation:
             ]
         ),
         conversations=[],
+    )
+
+
+def create_creditor_observation(simulation_time: int = 100) -> Observation:
+    """An NPC that owes a visible partner and holds a grievance against another (NPC-1906).
+
+    Bo told it of a place that held up and pressed it to repay; Cass sent it to an
+    empty one. The third visible NPC, a stranger, carries no standing key at all.
+    """
+    return Observation(
+        entity_id="ann_npc",
+        current_simulation_time=simulation_time,
+        vision=VisionObservation(
+            visible_entities=[
+                EntityData(
+                    entity_id="bo_npc",
+                    display_name="Bo",
+                    position=(6, 5),
+                    relationship=RelationshipState(
+                        familiarity=0.30, sentiment=0.10, interaction_count=2
+                    ),
+                    standing=StandingState(owed=0.42, grievance=0.0, pressure=0.41),
+                ),
+                EntityData(
+                    entity_id="cass_npc",
+                    display_name="Cass",
+                    position=(7, 5),
+                    standing=StandingState(owed=0.0, grievance=0.20, pressure=0.0),
+                ),
+                EntityData(
+                    entity_id="stranger_npc",
+                    display_name="Stranger",
+                    position=(9, 5),
+                ),
+            ]
+        ),
     )
 
 
