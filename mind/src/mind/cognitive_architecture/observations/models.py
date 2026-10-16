@@ -1848,6 +1848,12 @@ class ConversationMessage(BaseModel):
     legacy path alive for a producer that does not exist; an id-less payload is
     instead refused loudly at the parse boundary (see
     ``_extract_conversation_observations``).
+
+    ``addressee_ids`` lists who the speaker spoke *to*, never who heard:
+    everyone in the conversation hears every message. The simulation resolves
+    "everyone" to an explicit list at commit, so an empty list means the message
+    addressed no one (or predates the field), not the whole room. Consumers must
+    never read ``[]`` as "everyone"; the order the simulation sent is preserved.
     """
 
     speaker_id: str
@@ -1857,6 +1863,7 @@ class ConversationMessage(BaseModel):
     timestamp: int | None = None
     is_system: bool = False
     declarations: list[dict] = Field(default_factory=list)
+    addressee_ids: list[str] = Field(default_factory=list)
 
     def render_markers(self) -> str:
         """Trailing ``[system] [farewell]``-style markers, or "" when there are none.
