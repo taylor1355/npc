@@ -131,7 +131,11 @@ class TestObservationModels:
         assert message.addressee_ids == ["npc_3", "npc_2"]
 
     def test_an_empty_addressee_list_is_not_everyone(self):
-        """[] means no one was addressed (or a legacy payload); it never widens to the room."""
+        """[] means no one was addressed (or a legacy payload); it never widens to the room.
+
+        No consumer reads ``addressee_ids`` yet, so a future consumer needs its own
+        "[] is not everyone" test.
+        """
         message = ConversationMessage.model_validate(
             {
                 "id": "message_nobody",
@@ -143,7 +147,6 @@ class TestObservationModels:
         )
 
         assert message.addressee_ids == []
-        assert "npc_2" not in message.addressee_ids, "no participant is implied by an empty list"
 
     def test_create_composite_observation(self):
         """Should create full composite observation"""
