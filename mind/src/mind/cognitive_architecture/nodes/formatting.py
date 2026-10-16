@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from mind.cognitive_architecture.observations import (
         ConversationMessage,
+        ConversationPartner,
         GoalObservation,
         MindEvent,
         Observation,
@@ -73,7 +74,9 @@ def format_recent_events(events: list[MindEvent]) -> str:
 
 
 def format_conversation_histories(
-    histories: dict[str, list[ConversationMessage]], entity_id: str
+    histories: dict[str, list[ConversationMessage]],
+    entity_id: str,
+    partners: dict[str, list[ConversationPartner]] | None = None,
 ) -> str:
     """Render every message in every active, simulation-bounded conversation.
 
@@ -81,13 +84,25 @@ def format_conversation_histories(
     or summarization: it supplies the typed aggregate that overlapping event
     windows were built to reconstruct, with identity and semantic markers made
     explicit for the reflecting NPC.
+
+    ``partners`` (keyed by interaction id) adds one ``  Bo appears hungry.``
+    line under a conversation's header per partner whose appearance reads as
+    notable. Absent or empty, the output is byte-identical to what it was before
+    the perception channel existed.
     """
     if not histories:
         return "No active conversation."
 
+    from mind.cognitive_architecture.observations import render_appearance
+
     lines: list[str] = []
     for interaction_id in sorted(histories):
         lines.append(f"Conversation {interaction_id}:")
+        for partner in (partners or {}).get(interaction_id, []):
+            appears = render_appearance(partner.appearance)
+            if appears:
+                name = partner.display_name.strip() or partner.entity_id
+                lines.append(f"  {name} appears {appears}.")
         for message in histories[interaction_id]:
             speaker = message.speaker_name.strip() or message.speaker_id or "Unknown speaker"
             if message.speaker_id == entity_id:

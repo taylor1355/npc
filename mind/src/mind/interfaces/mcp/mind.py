@@ -7,6 +7,7 @@ from mind.apis.langchain_llm import get_llm
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
 from mind.cognitive_architecture.observations import (
     ConversationMessage,
+    ConversationPartner,
     MindEvent,
     MindEventType,
     Observation,
@@ -49,6 +50,11 @@ class Mind:
     # Conversation history aggregation (keyed by interaction_id)
     conversation_histories: dict[str, list[ConversationMessage]] = field(default_factory=dict)
     _finished_conversation_ids: set[str] = field(default_factory=set, repr=False)
+
+    # The other participants of each active conversation and what this mind reads
+    # of them (NPC-1903). The latest conversation observation per interaction wins:
+    # appearance is a reading of NOW, not an accumulating history.
+    conversation_partners: dict[str, list[ConversationPartner]] = field(default_factory=dict)
 
     # Wits from the latest conversation observation (None = never reported, or
     # that observation omitted it). The latest conversation observation wins;
@@ -193,6 +199,7 @@ class Mind:
         for conv_obs in conversations:
             interaction_id = conv_obs.interaction_id
             self.latest_wits = conv_obs.wits
+            self.conversation_partners[interaction_id] = list(conv_obs.partners)
 
             # Initialize if new conversation
             if interaction_id not in self.conversation_histories:
@@ -329,11 +336,16 @@ class Mind:
                 interaction_id: list(messages)
                 for interaction_id, messages in self.conversation_histories.items()
             },
+            conversation_partners={
+                interaction_id: list(partners)
+                for interaction_id, partners in self.conversation_partners.items()
+            },
             wits=self.latest_wits,
             recent_events=self.event_buffer,
             pending_incoming_bids=self.pending_incoming_bids,
         )
         for interaction_id in self._finished_conversation_ids:
+            self.conversation_partners.pop(interaction_id, None)
             if self.conversation_histories.pop(interaction_id, None) is not None:
                 logger.debug(
                     f"[{self.entity_id}] Cleaned up conversation history for {interaction_id}"

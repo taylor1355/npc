@@ -5,6 +5,8 @@ consumes, so anything that does not render here is invisible to the LLM no
 matter how faithfully it crosses the wire.
 """
 
+import pytest
+
 from mind.cognitive_architecture.observations import (
     ArousalBand,
     ConversationMessage,
@@ -16,11 +18,13 @@ from mind.cognitive_architecture.observations import (
     MoodObservation,
     NeedsObservation,
     Observation,
+    PublicCue,
     RelationshipState,
     StatusObservation,
     ValenceBand,
     VisionObservation,
 )
+from mind.cognitive_architecture.observations.models import render_appearance
 
 
 def _base_observation(**overrides) -> Observation:
@@ -203,6 +207,116 @@ class TestRelationshipRendering:
         )
 
         assert "sentiment -0.20" in str(obs)
+
+
+def _vision_of(*entities: EntityData) -> VisionObservation:
+    return VisionObservation(visible_entities=list(entities))
+
+
+class TestAppearanceRendering:
+    """NPC-1903: a visible entity's appearance renders only when something is notable"""
+
+    def _entity(self, appearance) -> EntityData:
+        return EntityData(
+            entity_id="bo_npc", display_name="Bo", position=(6, 10), appearance=appearance
+        )
+
+    def test_notable_cues_render_one_line(self):
+        obs = _base_observation(
+            vision=_vision_of(
+                self._entity(
+                    [
+                        PublicCue(channel="carrying", band="carrying", subject="apple"),
+                        PublicCue(channel="hunger", band="hungry"),
+                    ]
+                )
+            )
+        )
+
+        assert "    Appears: carrying an apple, hungry" in str(obs)
+
+    def test_rows_render_in_wire_order(self):
+        text = render_appearance(
+            [
+                PublicCue(channel="hunger", band="hungry"),
+                PublicCue(channel="carrying", band="carrying", subject="apple"),
+            ]
+        )
+
+        assert text == "hungry, carrying an apple", (
+            "the simulation sorts rows by channel (carrying first); the mind keeps what it is sent"
+        )
+
+    @pytest.mark.parametrize(
+        ("subject", "phrase"),
+        [
+            ("apple", "carrying an apple"),
+            ("egg", "carrying an egg"),
+            ("pear", "carrying a pear"),
+            ("glass", "carrying glass"),
+            ("moss", "carrying moss"),
+            ("grass", "carrying grass"),
+            ("berries", "carrying berries"),
+        ],
+    )
+    def test_article_heuristic_is_pinned(self, subject, phrase):
+        assert (
+            render_appearance([PublicCue(channel="carrying", band="carrying", subject=subject)])
+            == phrase
+        )
+
+    def test_two_subjects_render_as_two_phrases(self):
+        text = render_appearance(
+            [
+                PublicCue(channel="carrying", band="carrying", subject="apple"),
+                PublicCue(channel="carrying", band="carrying", subject="berries"),
+            ]
+        )
+
+        assert text == "carrying an apple, carrying berries"
+
+    def test_subject_underscores_become_spaces_with_article_by_first_letter(self):
+        text = render_appearance(
+            [PublicCue(channel="carrying", band="carrying", subject="wooden_spoon")]
+        )
+
+        assert text == "carrying a wooden spoon"
+
+    def test_unknown_categorical_channel_renders_its_band_and_subject(self):
+        text = render_appearance([PublicCue(channel="wearing", band="wearing", subject="hat")])
+
+        assert text == "wearing a hat", "any categorical row renders its band and subject"
+
+    def test_carrying_row_without_subject_renders_its_band(self):
+        assert render_appearance([PublicCue(channel="carrying", band="carrying")]) == "carrying"
+
+    def test_appearance_follows_the_relationship_line(self):
+        obs = _base_observation(
+            vision=_vision_of(
+                EntityData(
+                    entity_id="bo_npc",
+                    display_name="Bo",
+                    position=(6, 10),
+                    relationship=RelationshipState(
+                        familiarity=0.5, sentiment=0.0, interaction_count=2
+                    ),
+                    appearance=[PublicCue(channel="fatigue", band="tired")],
+                )
+            )
+        )
+
+        text = str(obs)
+
+        assert text.index("Relationship:") < text.index("Appears: tired")
+
+    def test_unreadable_and_unremarkable_entities_render_no_line(self):
+        for appearance in (None, []):
+            assert "Appears:" not in str(
+                _base_observation(vision=_vision_of(self._entity(appearance)))
+            )
+
+    def test_control_arm_is_byte_identical_with_no_appearance(self):
+        assert str(_base_observation()) == GOLDEN_UNENRICHED
 
 
 def _conversation(*messages) -> ConversationObservation:
