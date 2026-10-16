@@ -1787,7 +1787,8 @@ class ConversationMessage(BaseModel):
     ``addressee_ids`` lists who the speaker spoke *to*, never who heard:
     everyone in the conversation hears every message. The simulation resolves
     "everyone" to an explicit list at commit, so an empty list means the message
-    addressed no one (or predates the field), not the whole room.
+    addressed no one (or predates the field), not the whole room. Consumers must
+    never read ``[]`` as "everyone"; the order the simulation sent is preserved.
     """
 
     speaker_id: str

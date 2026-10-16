@@ -116,6 +116,35 @@ class TestObservationModels:
         assert addressed.addressee_ids == ["npc_2"]
         assert legacy.addressee_ids == []
 
+    def test_two_addressees_keep_the_order_sent(self):
+        """Order is part of what survives parsing, for any consumer that renders it."""
+        message = ConversationMessage.model_validate(
+            {
+                "id": "message_two",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Bo, Cy, the larder is empty.",
+                "addressee_ids": ["npc_3", "npc_2"],
+            }
+        )
+
+        assert message.addressee_ids == ["npc_3", "npc_2"]
+
+    def test_an_empty_addressee_list_is_not_everyone(self):
+        """[] means no one was addressed (or a legacy payload); it never widens to the room."""
+        message = ConversationMessage.model_validate(
+            {
+                "id": "message_nobody",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Hm.",
+                "addressee_ids": [],
+            }
+        )
+
+        assert message.addressee_ids == []
+        assert "npc_2" not in message.addressee_ids, "no participant is implied by an empty list"
+
     def test_create_composite_observation(self):
         """Should create full composite observation"""
         obs = Observation(
