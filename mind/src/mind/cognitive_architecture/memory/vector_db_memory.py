@@ -2,6 +2,7 @@
 
 import os
 import time
+from typing import TYPE_CHECKING
 
 import chromadb
 from chromadb.errors import NotFoundError
@@ -27,6 +28,9 @@ from .retrieval import (
     reinforced_time,
     should_reinforce,
 )
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = get_logger()
 
@@ -205,7 +209,7 @@ class VectorDBMemory:
         """Metadata a collection is created with: cosine space plus the writing model."""
         return {"hnsw:space": "cosine", EMBEDDING_MODEL_KEY: self.embedding_model}
 
-    def _encode(self, texts):
+    def _encode(self, texts: str | list[str]) -> "np.ndarray":
         """Embed one text or a list of them, applying the model's task prefix if it has one.
 
         Every embedding this store writes or queries goes through here, so a stored

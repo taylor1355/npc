@@ -126,8 +126,13 @@ dev = [
 # uv.lock: it carries a THIRD torch fork (plain PyPI) for the neither-group
 # combination, reachable only via `uv sync --no-default-groups`. That is an
 # explicit opt-out of the default, not a silent fallback.
-cpu = ["torch>=2.2.0,<3"]
-cuda = ["torch>=2.2.0,<3"]
+#
+# torchvision rides the same index as torch. sentence-transformers[image] pulls it in,
+# and left on PyPI it resolves to a build compiled against PyPI's (CUDA) torch, which
+# does not load against the CPU torch here: on Linux, `transformers` then fails to
+# import PreTrainedModel and every test errors at collection.
+cpu = ["torch>=2.2.0,<3", "torchvision>=0.17,<1"]
+cuda = ["torch>=2.2.0,<3", "torchvision>=0.17,<1"]
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -143,6 +148,10 @@ explicit = true
 
 [tool.uv.sources]
 torch = [
+    { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cu121", group = "cuda" },
+]
+torchvision = [
     { index = "pytorch-cpu", group = "cpu" },
     { index = "pytorch-cu121", group = "cuda" },
 ]
