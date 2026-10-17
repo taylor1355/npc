@@ -127,10 +127,8 @@ dev = [
 # combination, reachable only via `uv sync --no-default-groups`. That is an
 # explicit opt-out of the default, not a silent fallback.
 #
-# torchvision rides the same index as torch. sentence-transformers[image] pulls it in,
-# and left on PyPI it resolves to a build compiled against PyPI's (CUDA) torch, which
-# does not load against the CPU torch here: on Linux, `transformers` then fails to
-# import PreTrainedModel and every test errors at collection.
+# torchvision rides the same index as torch: sentence-transformers[image] pulls it in, and
+# PyPI's Linux build is compiled against CUDA torch and will not load against the CPU one.
 cpu = ["torch>=2.2.0,<3", "torchvision>=0.17,<1"]
 cuda = ["torch>=2.2.0,<3", "torchvision>=0.17,<1"]
 

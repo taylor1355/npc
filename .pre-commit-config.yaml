@@ -163,7 +163,9 @@ repos:
       # tests/integration/test_mcp_server.py - path-qualified, because
       # tests/unit/test_mcp_server.py (mocked) shares the basename and IS run.
       # A cold machine needs network on first run: tests/unit/test_vector_db_memory.py
-      # downloads the embedding model (~90MB). That was true before the scope
+      # downloads all-MiniLM-L6-v2 (~90MB), the stand-in encoder tests/conftest.py swaps in for
+      # the default model; EmbeddingGemma 2 itself (~1.5 GB) loads only under
+      # MIND_TEST_REAL_EMBEDDING_MODEL=1. A network precondition was true before the scope
       # extension too - the two integration files add no new preconditions.
       - id: pytest-unit
         name: pytest-unit
