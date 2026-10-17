@@ -85,7 +85,7 @@ The `MemoryDatabase` provides semantic memory storage and retrieval for NPCs usi
     *   Returns memories with relevance scores and metadata.
 *   **Configuration:**
     *   `collection_name: str` - ChromaDB collection for the agent's memories
-    *   `embedding_model: str = "all-MiniLM-L6-v2"` - Model used for generating embeddings
+    *   `embedding_model: str = "google/embeddinggemma-2"` - Model used for generating embeddings (768-d; every collection records the model that wrote it and is re-embedded on open if another model did)
 *   **Integration:**
     *   Used by the Agent class to maintain long-term memory
     *   Provides context for decision-making based on past experiences
