@@ -2219,7 +2219,7 @@ class Observation(BaseModel):
 
                 # What the observer has watched this entity do. Omitted when no
                 # record exists, so an unwatched entity renders as before.
-                if entity.conduct:
+                if entity.conduct is not None:
                     entity_parts.append(f"    Conduct: {entity.conduct.render_summary()}")
 
                 # What this mind reads of the entity's appearance (NPC-1903).

@@ -97,10 +97,8 @@ class TestRendering:
             _entity(relationship=RelationshipState(familiarity=0.6, sentiment=0.3))
         )
         assert "owe" not in with_default
-        assert (
-            "    Relationship: familiarity 0.60, sentiment +0.30, 0 shared interactions\n"
-            in with_default + "\n"
-        )
+        expected = "    Relationship: familiarity 0.60, sentiment +0.30, 0 shared interactions"
+        assert expected in with_default.splitlines()
 
     def test_conduct_absent_is_byte_identical(self):
         base = _text(_entity())
