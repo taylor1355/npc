@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from .actions import Action, AvailableAction
 from .memory import Memory
-from .observations import ConversationMessage, MindEvent, Observation
+from .observations import ConversationMessage, ConversationPartner, MindEvent, Observation
 from .place_query import PlaceQueryRequest
 from .working_memory import FormedMemory, WorkingMemory
 
@@ -93,6 +93,11 @@ class PipelineState(BaseModel):
 
     # Conversation histories aggregated by interaction_id
     conversation_histories: dict[str, list[ConversationMessage]] = Field(default_factory=dict)
+
+    # What this mind reads of each conversation's other participants, from the
+    # latest conversation observation per interaction (NPC-1903). Prompt CONTENT
+    # only, like ``wits``: it never routes a decision.
+    conversation_partners: dict[str, list[ConversationPartner]] = Field(default_factory=dict)
 
     # Latest cognitive-energy level (0-100) reported on a conversation
     # observation; None when none was reported. Prompt CONTENT only: it shapes

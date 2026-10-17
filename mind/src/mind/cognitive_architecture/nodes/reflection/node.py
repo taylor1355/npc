@@ -138,7 +138,9 @@ class ReflectionNode(LLMNode):
                 # a stale working-memory belief gets corrected this cycle (NPC-688).
                 interaction_status=_format_interaction_status(state.observation),
                 conversation_histories=format_conversation_histories(
-                    state.conversation_histories, state.observation.entity_id
+                    state.conversation_histories,
+                    state.observation.entity_id,
+                    state.conversation_partners,
                 ),
                 terseness_instruction=terseness_text,
                 substrate_goal=format_substrate_goal(goal_obs),

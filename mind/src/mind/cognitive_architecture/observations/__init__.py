@@ -10,6 +10,7 @@ from .models import (
     ArousalBand,
     ConversationMessage,
     ConversationObservation,
+    ConversationPartner,
     DomainQueryResult,
     EntityData,
     EntityMemoryObservation,
@@ -33,12 +34,14 @@ from .models import (
     PlaceDescriptor,
     PlaceKnowledgeSource,
     PlaceObservation,
+    PublicCue,
     RelationshipState,
     RememberedEntity,
     StatusObservation,
     ValenceBand,
     VisibleInteraction,
     VisionObservation,
+    render_appearance,
 )
 
 __all__ = [
@@ -51,6 +54,7 @@ __all__ = [
     "ArousalBand",
     "ConversationMessage",
     "ConversationObservation",
+    "ConversationPartner",
     "DomainQueryResult",
     "EntityData",
     "EntityMemoryObservation",
@@ -74,10 +78,12 @@ __all__ = [
     "PlaceDescriptor",
     "PlaceKnowledgeSource",
     "PlaceObservation",
+    "PublicCue",
     "RelationshipState",
     "RememberedEntity",
     "StatusObservation",
     "ValenceBand",
     "VisibleInteraction",
     "VisionObservation",
+    "render_appearance",
 ]

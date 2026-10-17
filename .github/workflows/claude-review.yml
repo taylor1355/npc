@@ -134,6 +134,10 @@ jobs:
         with:
           additional_permissions: |
             actions: read
+          # Agents push and open PRs as this App. The action refuses any non-User
+          # actor not named here, failing before the model runs. Named rather than
+          # '*', which would let any App drive the prompt.
+          allowed_bots: emergent-npcs-agent
           # Exactly one of these is non-empty, by construction: the OAuth secret
           # passes through as-is (empty when unset), and the API key is passed
           # only when the selection step above chose it. See the precedence note

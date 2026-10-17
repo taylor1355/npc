@@ -9,6 +9,7 @@ from mind.cognitive_architecture.observations import (
     ArousalBand,
     ConversationMessage,
     ConversationObservation,
+    ConversationPartner,
     EntityData,
     GoalDetail,
     GoalObservation,
@@ -18,6 +19,7 @@ from mind.cognitive_architecture.observations import (
     MoodObservation,
     NeedsObservation,
     Observation,
+    PublicCue,
     RelationshipState,
     StatusObservation,
     ValenceBand,
@@ -92,6 +94,61 @@ class TestObservationModels:
         assert conv.interaction_id == "conv_1"
         assert len(conv.conversation_history) == 2
         assert conv.participants == ["npc_1", "npc_2"]
+
+    def test_conversation_message_keeps_its_addressees(self):
+        """The wire's addressee_ids survives parsing; absent reads as an empty list."""
+        addressed = ConversationMessage.model_validate(
+            {
+                "id": "message_addressed",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Bo, the larder is empty.",
+                "addressee_ids": ["npc_2"],
+            }
+        )
+        legacy = ConversationMessage.model_validate(
+            {
+                "id": "message_legacy",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Hi",
+            }
+        )
+
+        assert addressed.addressee_ids == ["npc_2"]
+        assert legacy.addressee_ids == []
+
+    def test_two_addressees_keep_the_order_sent(self):
+        """Order is part of what survives parsing, for any consumer that renders it."""
+        message = ConversationMessage.model_validate(
+            {
+                "id": "message_two",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Bo, Cy, the larder is empty.",
+                "addressee_ids": ["npc_3", "npc_2"],
+            }
+        )
+
+        assert message.addressee_ids == ["npc_3", "npc_2"]
+
+    def test_an_empty_addressee_list_is_not_everyone(self):
+        """[] means no one was addressed (or a legacy payload); it never widens to the room.
+
+        No consumer reads ``addressee_ids`` yet, so a future consumer needs its own
+        "[] is not everyone" test.
+        """
+        message = ConversationMessage.model_validate(
+            {
+                "id": "message_nobody",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Hm.",
+                "addressee_ids": [],
+            }
+        )
+
+        assert message.addressee_ids == []
 
     def test_create_composite_observation(self):
         """Should create full composite observation"""
@@ -922,6 +979,100 @@ class TestRelationshipEnrichment:
 
         with pytest.raises(ValidationError):
             RelationshipState(familiarity=0.5, sentiment=-2.0)
+
+
+class TestPerceptionChannel:
+    """NPC-1903: banded appearance cues ride the entity and each conversation partner.
+
+    Both new fields sit inside models that ignore unknown keys, so an older mind
+    drops them silently and a newer mind reads them; these tests pin the NEW
+    mind reading them, which is the half the parity audit cannot see.
+    """
+
+    def _entity(self, **extra) -> EntityData:
+        return EntityData.model_validate(
+            {"entity_id": "bo", "display_name": "Bo", "position": (1, 2), **extra}
+        )
+
+    def test_entity_appearance_parses(self):
+        entity = self._entity(
+            appearance=[
+                {"channel": "hunger", "band": "hungry"},
+                {"channel": "carrying", "band": "carrying", "subject": "apple"},
+            ]
+        )
+
+        assert entity.appearance == [
+            PublicCue(channel="hunger", band="hungry"),
+            PublicCue(channel="carrying", band="carrying", subject="apple"),
+        ]
+
+    def test_graded_row_without_subject_parses_with_none(self):
+        entity = self._entity(appearance=[{"channel": "hunger", "band": "hungry"}])
+
+        assert entity.appearance[0].subject is None
+
+    def test_absent_appearance_is_unreadable_not_empty(self):
+        assert self._entity().appearance is None
+
+    def test_empty_appearance_is_readable_with_nothing_notable(self):
+        assert self._entity(appearance=[]).appearance == []
+
+    def test_unknown_channel_and_band_parse_because_the_vocabulary_is_the_simulations(self):
+        entity = self._entity(appearance=[{"channel": "limp", "band": "pronounced"}])
+
+        assert entity.appearance == [PublicCue(channel="limp", band="pronounced")]
+
+    def test_conversation_partners_parse(self):
+        conv = ConversationObservation.model_validate(
+            {
+                "interaction_id": "c1",
+                "interaction_name": "conversation",
+                "participants": ["a", "b"],
+                "conversation_history": [],
+                "partners": [
+                    {
+                        "entity_id": "b",
+                        "display_name": "Bo",
+                        "appearance": [{"channel": "hunger", "band": "peckish"}],
+                    },
+                    {"entity_id": "c", "display_name": "Cy"},
+                ],
+            }
+        )
+
+        assert conv.partners[0] == ConversationPartner(
+            entity_id="b",
+            display_name="Bo",
+            appearance=[PublicCue(channel="hunger", band="peckish")],
+        )
+        assert conv.partners[1].appearance is None
+
+    def test_a_simulation_that_predates_partners_parses_with_none(self):
+        conv = ConversationObservation.model_validate(
+            {
+                "interaction_id": "c1",
+                "interaction_name": "conversation",
+                "participants": ["a", "b"],
+                "conversation_history": [],
+            }
+        )
+
+        assert conv.partners == []
+
+    def test_conversation_observation_still_ignores_unknown_keys(self):
+        """The simulation boundary contract: this model must never gain forbid."""
+        conv = ConversationObservation.model_validate(
+            {
+                "interaction_id": "c1",
+                "interaction_name": "conversation",
+                "participants": ["a"],
+                "conversation_history": [],
+                "some_future_key": 1,
+            }
+        )
+
+        assert conv.interaction_id == "c1"
 
 
 class TestInventoryObservation:

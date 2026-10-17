@@ -1589,6 +1589,66 @@ class VisibleInteraction(BaseModel):
         return f"{head} -- not joinable{f': {reason}' if reason else ''}"
 
 
+class PublicCue(BaseModel):
+    """One banded appearance fact about another entity, as the observer read it.
+
+    Wire producer: ``perceived_appearance.gd::to_wire`` -- ``{channel, band}``
+    rows, plus ``subject`` on categorical rows only, NON-NEUTRAL cues only.
+    ``channel`` and ``band`` are open strings on purpose: the simulation owns the
+    vocabulary (``public_cue_bands.gd``), exactly as it owns declaration kinds, so
+    a channel or band added there reaches the prompt with no change here and
+    nothing in this repository enumerates it. ``subject`` is optional (a
+    snake_case item id, absent on graded rows).
+
+    The band is what the observer *perceived*, which below full familiarity can
+    be one step closer to neutral than the truth. Never treat it as ground truth.
+    """
+
+    channel: str
+    band: str
+    # Categorical rows only (``carrying``): a snake_case canonical item id such
+    # as ``berries``. Absent on graded rows, never empty when present.
+    subject: str | None = None
+
+
+def _carried_kind(subject: str) -> str:
+    """``"apple"`` -> ``"an apple"``; ``"berries"`` -> ``"berries"``.
+
+    A heuristic over a snake_case id: an id ending in ``s`` reads as plural or mass
+    and takes no article, so ``glass``, ``moss`` and ``grass`` render bare (and a
+    singular ``bus`` would too). The article is ``an`` before a vowel letter, so
+    ``hour`` and ``unicorn`` are misjudged. The long-term fix is for the simulation
+    to send a display noun; that is a wire-contract change, deferred.
+    """
+    kind = subject.replace("_", " ")
+    if kind.endswith("s"):
+        return kind
+    article = "an" if kind[:1].lower() in "aeiou" else "a"
+    return f"{article} {kind}"
+
+
+def render_appearance(cues: list[PublicCue] | None) -> str:
+    """Prose for an appearance: ``"hungry, carrying an apple"``, or ``""``.
+
+    Mirrors the simulation's ``PerceivedAppearance.describe()`` in structure: one
+    phrase per row, in wire order (the simulation sorts rows by channel, then
+    subject, so ``carrying`` precedes ``fatigue`` and ``hunger``), and each
+    categorical row is its own phrase (``carrying an apple, carrying berries``). The
+    only difference is the article on the subject, which reads as prose here.
+    ``""`` for ``None`` (unreadable) and for ``[]`` (readable, nothing notable): the
+    caller prints nothing in either case.
+    """
+    if not cues:
+        return ""
+    parts: list[str] = []
+    for cue in cues:
+        phrase = cue.band.replace("_", " ")
+        if cue.subject:
+            phrase += " " + _carried_kind(cue.subject)
+        parts.append(phrase)
+    return ", ".join(parts)
+
+
 class EntityData(BaseModel):
     """Visible entity with interaction affordances"""
 
@@ -1598,6 +1658,11 @@ class EntityData(BaseModel):
     interactions: dict[str, dict] = Field(default_factory=dict)
     relationship: RelationshipState | None = None
     current_interaction: VisibleInteraction | None = None
+    # What the observer reads of this entity's appearance (NPC-1903), as
+    # ``{channel, band}`` rows plus ``subject`` on categorical rows. ``None``
+    # means unreadable: outside the simulation's cue radius, or an entity that
+    # shows no cues. ``[]`` means readable with nothing notable.
+    appearance: list[PublicCue] | None = None
 
     @field_validator("current_interaction", mode="before")
     @classmethod
@@ -1783,6 +1848,12 @@ class ConversationMessage(BaseModel):
     legacy path alive for a producer that does not exist; an id-less payload is
     instead refused loudly at the parse boundary (see
     ``_extract_conversation_observations``).
+
+    ``addressee_ids`` lists who the speaker spoke *to*, never who heard:
+    everyone in the conversation hears every message. The simulation resolves
+    "everyone" to an explicit list at commit, so an empty list means the message
+    addressed no one (or predates the field), not the whole room. Consumers must
+    never read ``[]`` as "everyone"; the order the simulation sent is preserved.
     """
 
     speaker_id: str
@@ -1792,6 +1863,7 @@ class ConversationMessage(BaseModel):
     timestamp: int | None = None
     is_system: bool = False
     declarations: list[dict] = Field(default_factory=list)
+    addressee_ids: list[str] = Field(default_factory=list)
 
     def render_markers(self) -> str:
         """Trailing ``[system] [farewell]``-style markers, or "" when there are none.
@@ -1809,8 +1881,28 @@ class ConversationMessage(BaseModel):
         return " ".join(markers)
 
 
+class ConversationPartner(BaseModel):
+    """One other participant of a conversation, as the receiving mind perceives them.
+
+    Wire producer: ``ConversationObservation.Partner.to_dict`` -- the receiver's
+    own row is never listed. ``appearance`` follows ``EntityData.appearance``
+    (``{channel, band}`` rows, plus ``subject`` on categorical rows): absent means
+    unreadable (a partner can talk from beyond the cue radius), ``[]`` means
+    readable with nothing notable.
+    """
+
+    entity_id: str
+    display_name: str = ""
+    appearance: list[PublicCue] | None = None
+
+
 class ConversationObservation(BaseModel):
-    """Conversation state for a specific interaction"""
+    """Conversation state for a specific interaction
+
+    ``extra`` stays at the default (ignore): the simulation grows this payload
+    additively, and a forbid here would turn every new key into a refused
+    observation (see ``docs/interfaces/simulation_boundary.md``).
+    """
 
     interaction_id: str  # Identifies which conversation
     interaction_name: str
@@ -1822,6 +1914,10 @@ class ConversationObservation(BaseModel):
     # and an older simulation never sends it. None means "unknown", which the
     # terseness formatter treats like a fresh mind (no instruction).
     wits: float | None = None
+    # The other participants and what this mind reads of them (NPC-1903). Empty
+    # when the simulation omits the key. Authoritative per observation: an omitted
+    # key means ``[]``, not "unchanged".
+    partners: list[ConversationPartner] = Field(default_factory=list)
 
 
 class Observation(BaseModel):
@@ -2067,6 +2163,13 @@ class Observation(BaseModel):
                         f"sentiment {rel.sentiment:+.2f}, "
                         f"{rel.interaction_count} shared interactions"
                     )
+
+                # What this mind reads of the entity's appearance (NPC-1903).
+                # Only when something is notable, so an entity with nothing to
+                # show renders exactly as it did before the channel existed.
+                appears = render_appearance(entity.appearance)
+                if appears:
+                    entity_parts.append(f"    Appears: {appears}")
 
                 # After the relationship line and before the affordance list:
                 # what this entity is doing now bears on whether to approach it
