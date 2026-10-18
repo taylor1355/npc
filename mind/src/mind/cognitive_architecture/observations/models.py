@@ -1485,12 +1485,59 @@ class RelationshipState(BaseModel):
     simulation to reuse, and inventing one inside a serializer would put prompt
     copy in the simulation tier. The rendering below owns the words.
 
+    Directed: every value is the OBSERVER's view of the TARGET (observer -> target,
+    NPC-1632), never a symmetric property of the pair. ``owed`` in particular is
+    what the observer owes the target, not what the target owes back.
+
     Bounded, unlike mood: every registry write clamps these to their domains.
     """
 
     familiarity: float = Field(ge=0.0, le=1.0)
     sentiment: float = Field(ge=-1.0, le=1.0)
     interaction_count: int = 0
+    #: What the observer owes the target, in [0, 1]. The simulation omits the key
+    #: below its epsilon, so absence and 0.0 both mean "owes nothing".
+    owed: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class ConductState(BaseModel):
+    """What the observer has seen one visible NPC do (FS10b lane 0b).
+
+    Mirrors the simulation's ``EntityData.Conduct.to_wire``. Present only when the
+    observer holds a conduct record about the target; every part is optional
+    because the simulation omits absent parts (no deed yet, no zone, no cell).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    #: The target's reputation in the observer's eyes; the simulation clamps to [-1, 1].
+    reputation: float = Field(default=0.0, ge=-1.0, le=1.0)
+    #: Total reputation weight watched; 0 means seen acting but never judged.
+    evidence: float = Field(default=0.0, ge=0.0)
+    last_act: str | None = None
+    patient: str | None = None
+    place: str | None = None
+    minutes_ago: float | None = Field(default=None, ge=0.0)
+    last_cell: tuple[int, int] | None = None
+
+    def render_summary(self) -> str:
+        """One line: the verdict, then the latest deed when one is recorded."""
+        if self.evidence > 0.0:
+            text = f"reputation {self.reputation:+.2f} (evidence {self.evidence:.1f})"
+        else:
+            text = "seen acting, not yet judged"
+        if not self.last_act:
+            return text
+        deed = f"last seen: {self.last_act}"
+        if self.patient:
+            deed += f" to {self.patient}"
+        if self.place:
+            deed += f" at {self.place}"
+        if self.minutes_ago is not None:
+            deed += f", {self.minutes_ago:.0f} min ago"
+        if self.last_cell is not None:
+            deed += f", cell {self.last_cell}"
+        return f"{text}; {deed}"
 
 
 class VisibleInteraction(BaseModel):
@@ -1657,6 +1704,9 @@ class EntityData(BaseModel):
     position: tuple[int, int]
     interactions: dict[str, dict] = Field(default_factory=dict)
     relationship: RelationshipState | None = None
+    # What the observer has seen this entity do (FS10b lane 0b). ``None`` means the
+    # observer holds no conduct record about it.
+    conduct: ConductState | None = None
     current_interaction: VisibleInteraction | None = None
     # What the observer reads of this entity's appearance (NPC-1903), as
     # ``{channel, band}`` rows plus ``subject`` on categorical rows. ``None``
@@ -2162,7 +2212,15 @@ class Observation(BaseModel):
                         f"    Relationship: familiarity {rel.familiarity:.2f}, "
                         f"sentiment {rel.sentiment:+.2f}, "
                         f"{rel.interaction_count} shared interactions"
+                        # Absent when nothing is owed, so the line is byte-identical
+                        # to its pre-debt form for the common row.
+                        + (f", you owe them {rel.owed:.2f}" if rel.owed > 0.0 else "")
                     )
+
+                # What the observer has watched this entity do. Omitted when no
+                # record exists, so an unwatched entity renders as before.
+                if entity.conduct is not None:
+                    entity_parts.append(f"    Conduct: {entity.conduct.render_summary()}")
 
                 # What this mind reads of the entity's appearance (NPC-1903).
                 # Only when something is notable, so an entity with nothing to
