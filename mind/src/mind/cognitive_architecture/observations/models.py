@@ -1879,9 +1879,7 @@ class EntityMemoryObservation(BaseModel):
 # ``TasteObservation``.
 KNOWN_TASTE_CONTRACT_VERSIONS = frozenset({1})
 
-# How a taste band TOKEN reads in a prompt, second person. The simulation sends
-# tokens, never words (NPC-1308): this table is the "mind payload owns the words"
-# half of that split, and it is the only place this repository words a taste band.
+# How each taste band token reads in a prompt, second person.
 _TASTE_BAND_PHRASES: dict[str, str] = {
     "likes": "like",
     "leans_toward": "lean toward",
@@ -1893,12 +1891,8 @@ _TASTE_BAND_PHRASES: dict[str, str] = {
 class TasteRow(BaseModel):
     """One settled taste this NPC holds, as a band token and what it is about.
 
-    Wire producer: the simulation's ``TasteObservation.get_data``
-    (``src/minds/observations/taste_observation.gd``, NPC-1308) -- rows of
-    ``band`` / ``interaction_type`` / ``interaction_label``, plus ``target_id`` and
-    ``target_label`` TOGETHER when the taste is about a partner or provider (a taste
-    for the activity itself names no target). Never a number: the learned trace value
-    stays simulation-side.
+    ``target_id`` and ``target_label`` arrive together or not at all; a taste for
+    the activity itself names no target. A row never carries a number.
 
     ``band`` is an open ``str`` that renders only through ``_TASTE_BAND_PHRASES``;
     a token with no wording is withheld from the prompt and logged once at parse
@@ -1949,19 +1943,11 @@ class TasteRow(BaseModel):
 
 
 class TasteObservation(BaseModel):
-    """What this NPC has come to like and dislike, as band tokens (NPC-1308).
+    """What this NPC has come to like and dislike, as band tokens.
 
-    Wire producer: the simulation's ``taste_observation.gd::get_data`` -- exactly
-    ``contract_version`` / ``tastes``. Emitted every cycle for any NPC with a
-    ``SubstrateComponent``, even with no settled tastes, so ``tastes == []`` ("none
-    yet") is distinguishable from an absent block ("no producer"). Likes come first,
-    then dislikes, already capped simulation-side. The wire contract lives in the
-    simulation repo at ``docs/reference/minds/observations.md`` ("Taste block wire
-    contract").
-
-    The block's ROOT stays strict (``extra="forbid"``) under a known version, the
-    ``EntityMemoryObservation`` policy: the contract promises additive growth for
-    rows, not for the block.
+    ``tastes == []`` means no settled tastes yet; an absent block means an older
+    simulation. Likes come first, then dislikes, already capped. The root stays
+    strict under a known version; only rows grow keys.
     """
 
     model_config = ConfigDict(extra="forbid")
