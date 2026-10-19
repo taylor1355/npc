@@ -29,6 +29,9 @@ Update the working memory with:
 - It is the complete transcript retained by the simulation for the active conversation, not a summary or a recent slice.
 - `[YOU]` marks this person's own messages. Respond to the other participant's latest relevant turn rather than addressing yourself.
 - Declaration markers are speaker-authored meaning. A `[farewell]` message means that speaker is closing their participation; keep the words and declaration behaviorally consistent.
+- `<key>` markers name the remark each message was recorded as saying - the same vocabulary you name your own turns in.
+
+**Name the remark your words say.** Whenever a "Remarks You Can Name" section appears below, every `act_in_interaction` turn in that conversation must set `utterance_element` to one key from it: the remark your words actually say, not the closest-sounding one. Use `response` for a plain reply, and the greeting, greeting-reply and farewell remarks for those. A remark marked `[declares K via p1, p2]` says something with consequences, so the same turn must set those parameters; a remark with no `declares` mark must set none of them, and one turn declares at most one thing. You still write your own words in `message` - the gloss only shows what the remark means, with `{{slot}}` standing for what your words fill in.
 
 **Keeping working memory current:**
 - Recent events show actions you just took - update working memory to reflect their outcomes
@@ -122,7 +125,7 @@ Produce the fields in the order given: the working-memory update first, then new
 {interaction_status}
 
 ### Active Conversation Transcript
-{conversation_histories}{terseness_instruction}
+{conversation_histories}{terseness_instruction}{remark_catalogue}
 
 ### Subconscious Pull
 {substrate_goal}

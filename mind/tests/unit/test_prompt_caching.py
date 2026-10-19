@@ -21,6 +21,8 @@ from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.working_memory import WorkingMemory
+from tests.fixtures.remark_catalogue import catalogue as remark_catalogue_fixture
+from tests.fixtures.remark_catalogue import remark_conversation_state
 
 VALID_RESPONSE = (
     '{"updated_working_memory": {"situation_assessment": "ok"}, '
@@ -239,3 +241,66 @@ class TestReflectionNodeCaching:
         assert first_content[0]["cache_control"] == {"type": "ephemeral"}, (
             "a retried decision must still read the cache"
         )
+
+
+class TestRemarkCatalogueInThePrompt:
+    """NPC-1916 Decision 3: the general knowledge is static; the catalogue is
+    dynamic and appears only while a remark turn is possible."""
+
+    HEADER = "### Remarks You Can Name"
+
+    async def _sent(self, state: PipelineState) -> tuple[str, str]:
+        llm = make_llm()
+        node = ReflectionNode(llm)
+        await node.process(state)
+        return node.static_prefix, llm.ainvoke.call_args[0][0][0].content
+
+    @pytest.mark.asyncio
+    async def test_catalogue_block_appears_in_a_remark_conversation_below_the_prefix(self):
+        state = remark_conversation_state()
+        prefix, sent = await self._sent(state)
+
+        block = state.remark_catalogue.prompt_block()
+        assert self.HEADER in sent and block in sent
+        assert sent.startswith(prefix)
+        assert self.HEADER not in prefix and block not in prefix
+
+    @pytest.mark.asyncio
+    async def test_no_catalogue_means_no_block(self):
+        _, sent = await self._sent(remark_conversation_state(with_catalogue=False))
+
+        assert self.HEADER not in sent
+
+    @pytest.mark.asyncio
+    async def test_outside_a_conversation_the_prompt_is_byte_identical_to_no_catalogue(self):
+        with_catalogue = make_state()
+        with_catalogue.remark_catalogue = remark_catalogue_fixture()
+        _, sent_with = await self._sent(with_catalogue)
+        _, sent_without = await self._sent(make_state())
+
+        assert self.HEADER not in sent_with
+        assert sent_with == sent_without
+
+    @pytest.mark.asyncio
+    async def test_static_prefix_is_identical_across_npcs_with_and_without_a_catalogue(self):
+        other_npc = remark_conversation_state()
+        other_npc.observation.entity_id = "npc_b"
+        prefixes_and_sent = [
+            await self._sent(remark_conversation_state()),
+            await self._sent(other_npc),
+            await self._sent(make_state()),
+        ]
+
+        prefixes = {prefix for prefix, _ in prefixes_and_sent}
+        assert len(prefixes) == 1
+        (prefix,) = prefixes
+        assert all(sent.startswith(prefix) for _, sent in prefixes_and_sent)
+
+    def test_static_prefix_carries_the_conversation_knowledge_and_the_naming_rule(self):
+        prefix = ReflectionNode(make_llm()).static_prefix
+
+        assert "What Conversations Can Accomplish" in prefix
+        assert "Ask who told someone" in prefix
+        assert "Name the remark your words say." in prefix
+        assert "`utterance_element`" in prefix
+        assert "{slot}" in prefix, "the escaped placeholder must render as a literal"

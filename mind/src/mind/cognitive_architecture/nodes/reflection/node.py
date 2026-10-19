@@ -52,6 +52,24 @@ CACHE_BREAKPOINT_MARKER = (
 )
 
 
+def _format_remark_catalogue(state: PipelineState) -> str:
+    """The "Remarks You Can Name" block, or "" when no remark turn is possible.
+
+    Present only with a catalogue, a live interaction, and an interaction that
+    advertises the remark parameter: the same condition under which Action
+    validation REQUIRES utterance_element, so the list is shown exactly when
+    naming one is owed (NPC-1916, Decision 3). The catalogue renders the lines;
+    it owns the vocabulary.
+    """
+    catalogue = state.remark_catalogue
+    observation = state.observation
+    if catalogue is None or observation is None or not observation.is_interacting():
+        return ""
+    if not catalogue.applies_to(observation.status.act_parameter_hints()):
+        return ""
+    return "\n\n### Remarks You Can Name\n" + catalogue.prompt_block()
+
+
 class ReflectionNode(LLMNode):
     """Updates cognitive state and selects an action in a single call.
 
@@ -143,6 +161,8 @@ class ReflectionNode(LLMNode):
                     state.conversation_partners,
                 ),
                 terseness_instruction=terseness_text,
+                # Dynamic suffix only; "" outside a remark-speaking interaction.
+                remark_catalogue=_format_remark_catalogue(state),
                 substrate_goal=format_substrate_goal(goal_obs),
                 goal_options=format_goal_options(goal_obs),
                 retrieved_memories=memories_text,
