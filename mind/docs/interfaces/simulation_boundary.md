@@ -251,6 +251,16 @@ What still binds the cross-repo ordering:
   discards. The parity audit cannot see a dropped nested key either, which is why
   `test_observation_models.py::TestPerceptionChannel` pins the parse.
 
+- **`ConversationMessage.utterance_element` is an additive key inside an
+  ignore-model** (NPC-1916, following NPC-1918's `addressee_ids`). It is the
+  grammar remark the simulation *recorded* for the message, after its own
+  `ConversationInteraction._agreed_element` check, so a key the mind sent that
+  disagreed with its declaration arrives here as `""`. Absent reads as `""`. The
+  transcript shows it as a `<key>` marker on every row, the mind's own included,
+  between `[system]` and the declaration kinds. Remark keys are simulation
+  vocabulary in the same sense as declaration kinds: nothing in this repository
+  names one (pinned by `tests/unit/test_remark_vocabulary.py`).
+
 **The parity audit cannot see this class of defect.** `audit_mcp_parity.py`
 scans `audit_scope.substrate_files` for substrate-component getters and exports;
 inventory is not substrate state, and the audit stays green through both this

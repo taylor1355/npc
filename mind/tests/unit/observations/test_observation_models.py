@@ -150,6 +150,50 @@ class TestObservationModels:
 
         assert message.addressee_ids == []
 
+    def test_conversation_message_keeps_its_utterance_element(self):
+        """The wire's utterance_element survives parsing; absent reads as ""."""
+        keyed = ConversationMessage.model_validate(
+            {
+                "id": "message_keyed",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Hello there!",
+                "utterance_element": "remark_from_the_wire",
+            }
+        )
+        legacy = ConversationMessage.model_validate(
+            {
+                "id": "message_legacy",
+                "speaker_id": "npc_1",
+                "speaker_name": "Guard",
+                "message": "Hi",
+            }
+        )
+
+        assert keyed.utterance_element == "remark_from_the_wire"
+        assert legacy.utterance_element == ""
+
+    def test_utterance_element_renders_as_an_angle_marker_between_system_and_kinds(self):
+        """``<key>`` sits after ``[system]`` and before declaration kinds, verbatim."""
+        message = ConversationMessage(
+            id="m1",
+            speaker_id="npc_1",
+            speaker_name="Guard",
+            message="Bye.",
+            is_system=True,
+            utterance_element="  any.wire_key  ",
+            declarations=[{"kind": "any_kind"}],
+        )
+
+        assert message.render_markers() == "[system] <any.wire_key> [any_kind]"
+
+    def test_an_empty_utterance_element_renders_no_marker(self):
+        message = ConversationMessage(
+            id="m1", speaker_id="npc_1", speaker_name="Guard", message="Hm.", utterance_element=" "
+        )
+
+        assert message.render_markers() == ""
+
     def test_create_composite_observation(self):
         """Should create full composite observation"""
         obs = Observation(

@@ -1904,6 +1904,12 @@ class ConversationMessage(BaseModel):
     "everyone" to an explicit list at commit, so an empty list means the message
     addressed no one (or predates the field), not the whole room. Consumers must
     never read ``[]`` as "everyone"; the order the simulation sent is preserved.
+
+    ``utterance_element`` names the grammar remark the words say, as the
+    simulation recorded it after its own agreement check (NPC-1916). ``""``
+    means none was recorded: free speech, a dropped key, or an older simulation
+    that never sends the field. Like ``declarations`` it is simulation
+    vocabulary, so nothing here may enumerate or branch on remark keys.
     """
 
     speaker_id: str
@@ -1914,14 +1920,21 @@ class ConversationMessage(BaseModel):
     is_system: bool = False
     declarations: list[dict] = Field(default_factory=list)
     addressee_ids: list[str] = Field(default_factory=list)
+    utterance_element: str = ""
 
     def render_markers(self) -> str:
-        """Trailing ``[system] [farewell]``-style markers, or "" when there are none.
+        """Trailing ``[system] <greeting> [farewell]``-style markers, or "" when none.
 
-        Each declaration renders as its ``kind`` key verbatim; there is no kind
-        vocabulary in Python (see the class docstring).
+        The remark key renders in angle brackets, distinct from the square
+        brackets of declarations, on every row that carries one -- the mind's
+        own included, so it sees which remark its own words were recorded as.
+        Each declaration renders as its ``kind`` key verbatim; there is no remark
+        or kind vocabulary in Python (see the class docstring).
         """
         markers = ["[system]"] if self.is_system else []
+        element = self.utterance_element.strip()
+        if element:
+            markers.append(f"<{element}>")
         for declaration in self.declarations:
             if not isinstance(declaration, dict):
                 continue
