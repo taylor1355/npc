@@ -147,6 +147,7 @@ src/mind/
 
 - [cognitive_architecture/overview.md](cognitive_architecture/overview.md) - Detailed pipeline architecture
 - [cognitive_architecture/belief_records.md](cognitive_architecture/belief_records.md) - What a belief record is, and who owns its definition
+- [cognitive_architecture/mcp_experiment.md](cognitive_architecture/mcp_experiment.md) - The on-demand MCP experiment tier: remark-naming validity, the NPC-1929 dataset, the reply-quality judge and cost, from one recorded run
 - [interfaces/mcp.md](interfaces/mcp.md) - MCP protocol and tools
 - [interfaces/simulation_boundary.md](interfaces/simulation_boundary.md) - What the Godot simulation sends, and how to check it arrives
 - [planning/roadmap.md](planning/roadmap.md) - Development roadmap
