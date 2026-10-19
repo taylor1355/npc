@@ -4,10 +4,9 @@ A *remark* is one thing an actor can say, keyed permanently by the simulation's
 phrase grammar (``GrammarSymbol`` there). Each wire remark either declares
 nothing (phatic: a greeting, a plain reply) or declares exactly one
 ``DeclarationKind`` through that kind's own act parameters (``declare_with``).
-The simulation builds the catalogue once from its grammar
-(``remark_catalogue.gd::build``) and sends it in the ``create_mind`` payload,
-because it is stable world vocabulary, not per-cycle state (NPC-1916,
-Decision 1).
+The simulation builds the catalogue once from its grammar and sends it in the
+``create_mind`` payload, because it is stable world vocabulary, not per-cycle
+state.
 
 Nothing in this module -- or anywhere in this repository -- names a remark key,
 a declaration kind or a parameter that declares one. The catalogue is the only
@@ -15,11 +14,10 @@ source of all three, so a remark the simulation adds reaches the prompt and the
 validator with no Python change. ``tests/unit/test_remark_vocabulary.py`` pins
 that rule the way ``ConversationMessage.declarations`` pins it for kinds.
 
-The agreement rule mirrors ``ConversationInteraction._agreed_element``: a phatic
-remark declares nothing; a typed remark declares exactly its own kind. The
-mirror checks *presence* only. A kind's real ``is_declared`` can be stricter, and
-the simulation stays the trust boundary: it drops a disagreeing element and
-keeps the words.
+The agreement rule is the contract's: a phatic remark declares nothing; a typed
+remark declares exactly its own kind. This side checks *presence* only. The
+simulation may judge a declaration more strictly, and it stays the trust
+boundary: it drops a disagreeing element and keeps the words.
 """
 
 from __future__ import annotations
@@ -68,11 +66,10 @@ def is_parameter_set(value: Any) -> bool:
 
 
 class RemarkEntry(BaseModel):
-    """One wire remark, as ``remark_catalogue.gd::build`` emits it.
+    """One wire remark in the catalogue contract.
 
-    ``extra="ignore"`` so the row can grow columns additively (FS10b's stance
-    ``fields`` is the first expected one, NPC-1916 Decision 5) without a
-    contract-version bump.
+    ``extra="ignore"`` so the row can grow columns additively (e.g. a future
+    ``fields`` column) without a contract-version bump.
     """
 
     model_config = ConfigDict(extra="ignore")
