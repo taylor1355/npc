@@ -68,3 +68,46 @@ def get_llm(model: str, temperature: float = 0) -> ChatOpenAI:
         timeout=LLM_REQUEST_TIMEOUT_SECONDS,
         max_retries=LLM_CLIENT_MAX_RETRIES,
     )
+
+
+# A local Ollama server's OpenAI-compatible endpoint. Ollama's own default port.
+OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434/v1"
+
+# A local model's first call loads its weights into VRAM, which alone can take
+# longer than the OpenRouter bound above; this backend is for the on-demand
+# experiment tier, not for the game's 60s decide_action deadline.
+LOCAL_LLM_REQUEST_TIMEOUT_SECONDS = 300.0
+
+
+def get_local_llm(
+    model: str,
+    *,
+    base_url: str = OLLAMA_DEFAULT_BASE_URL,
+    temperature: float = 0,
+    reasoning_effort: str | None = None,
+    timeout: float = LOCAL_LLM_REQUEST_TIMEOUT_SECONDS,
+) -> ChatOpenAI:
+    """A LangChain LLM for a local OpenAI-compatible server (Ollama by default).
+
+    Same client class as ``get_llm``, so ``LLMNode`` -- retries, usage
+    accounting, structured output -- needs no change: only the base URL and the
+    credential differ. No credential is loaded (Ollama ignores the key, but the
+    client requires a non-empty one). ``supports_cache_control`` is False for
+    every local tag, so no cache breakpoint is ever sent.
+
+    ``reasoning_effort="none"`` turns off a hybrid model's thinking through
+    Ollama's OpenAI-compatible endpoint (verified on ``qwen3:8b``, Ollama
+    0.40.5). Leave it None for models without a thinking switch: a
+    thinking-only model answers it by moving its reasoning into ``content``,
+    which breaks JSON parsing.
+    """
+    kwargs = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
+    return ChatOpenAI(
+        model=model,
+        openai_api_key="ollama",
+        openai_api_base=base_url,
+        temperature=temperature,
+        timeout=timeout,
+        max_retries=LLM_CLIENT_MAX_RETRIES,
+        **kwargs,
+    )

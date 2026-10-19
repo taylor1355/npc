@@ -59,6 +59,28 @@ what happens to the persisted ChromaDB collection:
 
 Creates a new mind instance. Takes `mind_id` (PK), `entity_id` (FK), and `MindConfig` as separate arguments. `mind_id` keys the mind and its memory collection; `entity_id` names the simulation entity the mind drives; `MindConfig` holds cognition-only settings (traits, LLM model, memory storage path, optional seed memories). `entity_id` is no longer a `MindConfig` field.
 
+#### `remark_catalogue` (optional)
+
+`MindConfig.remark_catalogue` carries the simulation's wire remarks (NPC-1916): what a conversational turn may say it says. It rides `create_mind` once, not every observation, because it is stable world vocabulary. The simulation builds it with `remark_catalogue.gd::build` and omits it when no grammar is installed.
+
+```json
+{"contract_version": 1,
+ "remarks": [{"key": "...", "gloss": "... {slot} ...", "declares": "<kind or empty>",
+              "declare_with": ["<param>", "..."], "slots": ["<slot kind>"]}]}
+```
+
+- Rows are sorted by key. `declares` is `""` for a phatic remark, which declares nothing; otherwise it is the `DeclarationKind` key, and `declare_with` names the act parameters that declare it.
+- An unknown `contract_version`, or an empty `remarks` list, **degrades** to no catalogue with a warning. Any other malformation refuses `create_mind`. Rows use `extra="ignore"`, so new columns such as FS10b's stance `fields` are additive.
+- The catalogue is kept in the recorded config (`_config_to_record`), so a relinked mind validates against the grammar it was created with.
+
+**What it changes.** While a catalogue is present and the current interaction advertises `utterance_element`, every `act_in_interaction` turn **must** set `utterance_element` to a catalogue key that agrees with what the turn declares:
+
+- a phatic remark sets no `declare_with` parameter of any kind;
+- a typed remark sets all of its kind's `declare_with` parameters;
+- one turn declares at most one kind.
+
+A missing, unknown or disagreeing key fails `Action` validation with a message naming the problem and the valid keys for the declared kind, and the reflection node's existing retry budget re-asks the model. Each failed attempt's error text is recorded in `PipelineState.validation_failures`. With no catalogue the key stays optional. The check is a presence mirror of `ConversationInteraction._agreed_element`, which stays authoritative and drops a disagreeing element while keeping the words. The catalogue is rendered into the prompt's dynamic section ("Remarks You Can Name") only while such a turn is possible. The prompt's static section carries the authored paragraph on what conversations can accomplish, and the naming rule, so the provider cache is unaffected. Measuring how well a model meets the rule is the job of the on-demand experiment tier, described in [cognitive_architecture/mcp_experiment.md](../cognitive_architecture/mcp_experiment.md).
+
 ### decide_action
 
 Processes a structured observation and recent events through the cognitive pipeline and returns an action. Takes `mind_id`, `observation` dict containing entity status, needs, vision, and conversations, and optional `events` list of temporal occurrences since last decision.

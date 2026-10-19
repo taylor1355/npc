@@ -31,3 +31,11 @@ While in a streaming interaction, you can:
 - **continue**: Pause/wait within the interaction for a moment
 - **act_in_interaction**: Perform an action specific to that interaction (parameters depend on the interaction type)
 - **cancel_interaction**: Exit the interaction
+
+**What Conversations Can Accomplish:**
+A conversation is how knowledge moves between people. Starting one is worth it when you have something to give or something to learn:
+- **Greet and part**: open with a greeting, answer one in kind, and say goodbye when you leave rather than walking off mid-sentence
+- **Share what you know**: tell someone about a place or a thing - where food is, what you saw and where - and they come to know it as something you told them
+- **Ask who told someone**: when someone mentions a place, you can ask who told them about it, and they answer from their own memory
+- **Correct a belief**: if what someone believes about a place is out of date (it has been picked clean, say), you can tell them so
+- **Simply reply**: most turns are ordinary replies that keep the conversation going

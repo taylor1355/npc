@@ -13,6 +13,7 @@ from mind.cognitive_architecture.observations import (
     Observation,
 )
 from mind.cognitive_architecture.pipeline import CognitivePipeline
+from mind.cognitive_architecture.remark_catalogue import RemarkCatalogue
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.working_memory import FormedMemory, WorkingMemory
 from mind.interfaces.mcp.models import MindConfig
@@ -42,6 +43,8 @@ class Mind:
     # variant, so this is the requested model, not necessarily the served one.
     llm_model: str
     personality_dimensions: dict[str, float] = field(default_factory=dict)
+    # From the creating config (NPC-1916); copied into every PipelineState.
+    remark_catalogue: RemarkCatalogue | None = None
     # FormedMemory: each entry carries the place and cell it was formed at, so
     # consolidation never has to guess them from whatever observation it runs
     # under (NPC-1476).
@@ -119,6 +122,7 @@ class Mind:
             entity_id=entity_id,
             traits=config.traits,
             personality_dimensions=config.personality_dimensions,
+            remark_catalogue=config.remark_catalogue,
             pipeline=pipeline,
             memory_store=memory_store,
             working_memory=working_memory,
@@ -173,6 +177,7 @@ class Mind:
             entity_id=entity_id,
             traits=config.traits,
             personality_dimensions=config.personality_dimensions,
+            remark_catalogue=config.remark_catalogue,
             pipeline=pipeline,
             memory_store=memory_store,
             working_memory=working_memory,
@@ -332,6 +337,7 @@ class Mind:
             working_memory=self.working_memory,
             personality_traits=self.traits,
             personality_dimensions=self.personality_dimensions,
+            remark_catalogue=self.remark_catalogue,
             conversation_histories={
                 interaction_id: list(messages)
                 for interaction_id, messages in self.conversation_histories.items()

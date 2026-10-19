@@ -1,0 +1,211 @@
+{
+  "contract_version": 1,
+  "remarks": [
+    {
+      "key": "answer_who_told.no_record",
+      "gloss": "I don't know that place.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": []
+    },
+    {
+      "key": "answer_who_told.own_been",
+      "gloss": "Nobody - I've been there myself.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": []
+    },
+    {
+      "key": "answer_who_told.own_created",
+      "gloss": "Nobody - I made that place myself.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": []
+    },
+    {
+      "key": "answer_who_told.own_witnessed",
+      "gloss": "Nobody - I saw it claimed myself.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": []
+    },
+    {
+      "key": "answer_who_told.told",
+      "gloss": "{teller} told me.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": [
+        "teller"
+      ]
+    },
+    {
+      "key": "answer_who_told.told_firsthand",
+      "gloss": "{teller} told me - they'd seen it themselves.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": [
+        "teller"
+      ]
+    },
+    {
+      "key": "answer_who_told.told_firsthand_since",
+      "gloss": "{teller} told me - they'd seen it themselves, and I've been there since.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": [
+        "teller"
+      ]
+    },
+    {
+      "key": "answer_who_told.told_secondhand",
+      "gloss": "{teller} told me - they'd heard it from someone else.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": [
+        "teller"
+      ]
+    },
+    {
+      "key": "answer_who_told.told_secondhand_since",
+      "gloss": "{teller} told me - they'd heard it from someone else, and I've been there since.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": [
+        "teller"
+      ]
+    },
+    {
+      "key": "answer_who_told.told_since",
+      "gloss": "{teller} told me, and I've been there since.",
+      "declares": "answer",
+      "declare_with": [
+        "answer_in_reply_to"
+      ],
+      "slots": [
+        "teller"
+      ]
+    },
+    {
+      "key": "ask_who_told",
+      "gloss": "Who told you about {zone}?",
+      "declares": "ask_who_told",
+      "declare_with": [
+        "ask_who_told_kind",
+        "ask_who_told_subject_id"
+      ],
+      "slots": [
+        "zone"
+      ]
+    },
+    {
+      "key": "correction.firsthand",
+      "gloss": "Don't bother with {zone}, I went and it's picked clean.",
+      "declares": "share_belief",
+      "declare_with": [
+        "share_belief_kind",
+        "share_belief_subject_id"
+      ],
+      "slots": [
+        "zone"
+      ]
+    },
+    {
+      "key": "correction.heard",
+      "gloss": "I heard {zone} has been picked clean.",
+      "declares": "share_belief",
+      "declare_with": [
+        "share_belief_kind",
+        "share_belief_subject_id"
+      ],
+      "slots": [
+        "zone"
+      ]
+    },
+    {
+      "key": "farewell",
+      "gloss": "See you later!",
+      "declares": "farewell",
+      "declare_with": [
+        "is_farewell"
+      ],
+      "slots": []
+    },
+    {
+      "key": "greeting",
+      "gloss": "Hello!",
+      "declares": "",
+      "declare_with": [],
+      "slots": []
+    },
+    {
+      "key": "greeting_response",
+      "gloss": "Hi! How's it going?",
+      "declares": "",
+      "declare_with": [],
+      "slots": []
+    },
+    {
+      "key": "response",
+      "gloss": "I see.",
+      "declares": "",
+      "declare_with": [],
+      "slots": []
+    },
+    {
+      "key": "share_belief.place",
+      "gloss": "There's food over at {zone}, if you're hungry.",
+      "declares": "share_belief",
+      "declare_with": [
+        "share_belief_kind",
+        "share_belief_subject_id"
+      ],
+      "slots": [
+        "zone"
+      ]
+    },
+    {
+      "key": "share_belief.thing",
+      "gloss": "I saw {thing} off to the {direction} of here, if you're hungry.",
+      "declares": "share_belief",
+      "declare_with": [
+        "share_belief_kind",
+        "share_belief_subject_id"
+      ],
+      "slots": [
+        "thing",
+        "direction"
+      ]
+    },
+    {
+      "key": "share_belief.thing_heard",
+      "gloss": "I heard there's {thing} off to the {direction} of here, if you're hungry.",
+      "declares": "share_belief",
+      "declare_with": [
+        "share_belief_kind",
+        "share_belief_subject_id"
+      ],
+      "slots": [
+        "thing",
+        "direction"
+      ]
+    }
+  ]
+}

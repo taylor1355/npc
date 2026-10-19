@@ -181,3 +181,27 @@ class TestFormatConversationHistories:
         assert "Bob: I should go now. [farewell]" in rendered
         assert "System: Message limit reached. [system]" in rendered
         assert len(rendered.splitlines()) == 16
+
+    def test_transcript_shows_the_remark_key_on_every_row_including_the_minds_own(self):
+        messages = [
+            ConversationMessage(
+                speaker_id="npc_alice",
+                speaker_name="Alice",
+                message="Hello!",
+                id="a1",
+                utterance_element="key_one",
+            ),
+            ConversationMessage(
+                speaker_id="npc_bob",
+                speaker_name="Bob",
+                message="Bye.",
+                id="b1",
+                utterance_element="key_two",
+                declarations=[{"kind": "kind_two"}],
+            ),
+        ]
+
+        rendered = format_conversation_histories({"c1": messages}, "npc_alice")
+
+        assert "[YOU] Alice: Hello! <key_one>" in rendered
+        assert "Bob: Bye. <key_two> [kind_two]" in rendered

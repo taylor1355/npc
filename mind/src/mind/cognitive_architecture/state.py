@@ -8,6 +8,7 @@ from .actions import Action, AvailableAction
 from .memory import Memory
 from .observations import ConversationMessage, ConversationPartner, MindEvent, Observation
 from .place_query import PlaceQueryRequest
+from .remark_catalogue import RemarkCatalogue
 from .working_memory import FormedMemory, WorkingMemory
 
 
@@ -86,6 +87,11 @@ class PipelineState(BaseModel):
     personality_traits: list[str] = Field(default_factory=list)
     personality_dimensions: dict[str, float] = Field(default_factory=dict)
 
+    # The mind's remark catalogue from create_mind (NPC-1916). Present: every
+    # conversational act_in_interaction must name an agreeing remark (validated
+    # in Action._validate_act_in_interaction). None: the key is optional.
+    remark_catalogue: RemarkCatalogue | None = None
+
     # Working state
     working_memory: WorkingMemory = Field(default_factory=WorkingMemory)
     memory_queries: list[str] = Field(default_factory=list)
@@ -121,6 +127,12 @@ class PipelineState(BaseModel):
     # Output
     chosen_action: Action | None = None
     query: PlaceQueryRequest | None = None
+
+    # Per LLM step, the validation-error text of every attempt that failed and was
+    # retried (or salvaged), in order. Empty list or absent key: the first attempt
+    # validated. Retries per step are len(...), capped by the node's budget; the
+    # experiment tier (tools/run_mcp_experiment.py) reads it.
+    validation_failures: Annotated[dict[str, list[str]], merge_dicts] = Field(default_factory=dict)
 
     # Metadata for observability (use merge function to accumulate values)
     tokens_used: Annotated[dict[str, StepTokenUsage], merge_dicts] = Field(default_factory=dict)

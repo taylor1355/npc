@@ -2,10 +2,11 @@
 
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from mind.apis.langchain_llm import LangChainModel
 from mind.cognitive_architecture.memory.retrieval import RetrievalWeights
+from mind.cognitive_architecture.remark_catalogue import RemarkCatalogue
 from mind.cognitive_architecture.state import PipelineState, StepTokenUsage
 from mind.cognitive_architecture.working_memory import WorkingMemory
 from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_MEMORY_STORAGE_PATH
@@ -55,6 +56,18 @@ class MindConfig(BaseModel):
     personality_dimensions: dict[str, Annotated[float, Field(ge=0.0, le=1.0)]] = Field(
         default_factory=dict
     )
+
+    # The simulation's wire remarks (NPC-1916). Stable world vocabulary, so it
+    # rides the create_mind payload once rather than every observation. Absent
+    # when the simulation has no grammar installed; then a conversational turn's
+    # utterance_element is optional. An unknown contract_version degrades to
+    # None with a warning (see RemarkCatalogue.parse_or_degrade).
+    remark_catalogue: RemarkCatalogue | None = None
+
+    @field_validator("remark_catalogue", mode="before")
+    @classmethod
+    def _degrade_unknown_catalogue(cls, value):
+        return RemarkCatalogue.parse_or_degrade(value)
 
 
 # === Protocol: Simulation → Mind ===
