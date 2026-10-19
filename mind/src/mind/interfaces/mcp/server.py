@@ -264,7 +264,11 @@ class MCPServer:
         deliberately RETAINED, because a rehydrated mind must be the same character. An
         entry is therefore bounded by whatever personality the client sent, not by a
         constant. (initial_working_memory is unbounded in its own right whatever its
-        declared fields, because WorkingMemory sets extra="allow".)
+        declared fields, because WorkingMemory sets extra="allow".) remark_catalogue is
+        RETAINED for the same reason as traits: a relinked mind must name remarks
+        against the grammar it was created with, or its conversational turns would
+        silently stop being validated (NPC-1916). It is world-sized, not
+        client-prose-sized: one short row per wire remark.
 
         initial_working_memory is different: Mind.reattach DOES read it (the
         `config.initial_working_memory or WorkingMemory()` line in mind.py), and there is

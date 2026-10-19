@@ -150,3 +150,17 @@ class UnknownPlaceHandleError(ActionValidationError):
             f"Action '{action_type}' names place '{reference}', which is not a place "
             f"handle this cycle - {choices}."
         )
+
+
+class RemarkElementError(ActionValidationError):
+    """A conversational turn's ``utterance_element`` is missing or disagrees.
+
+    Raised only while a remark catalogue is present (NPC-1916, Decision 2). The
+    message names the problem and the keys valid for what the turn declared, so
+    the reflection node's retry re-asks with the fix in hand.
+    """
+
+    def __init__(self, problem: str, valid_keys: str):
+        self.problem = problem
+        self.valid_keys = valid_keys
+        super().__init__(f"Remark mismatch: {problem}. {valid_keys}")

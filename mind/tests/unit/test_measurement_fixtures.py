@@ -44,6 +44,7 @@ NON_INPUT_FIELDS = {
     "query",
     "tokens_used",
     "time_ms",
+    "validation_failures",
 }
 
 

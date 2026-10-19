@@ -234,6 +234,11 @@ class LLMNode(Node):
         max_attempts = self.max_retries + 1
         usage = StepTokenUsage()
         start_time = time.time()
+        # One entry per attempt that failed parse or validation, written as the
+        # failures happen so a salvaged or raised step still reports them. An
+        # empty list is a measurement ("first attempt validated"), not an absence.
+        failures: list[str] = []
+        state.validation_failures[self.step_name] = failures
 
         for attempt in range(max_attempts):
             try:
@@ -267,6 +272,7 @@ class LLMNode(Node):
 
             except (json.JSONDecodeError, ValidationError) as e:
                 last_error = e
+                failures.append(str(e))
                 if attempt < max_attempts - 1:
                     # Log retry
                     error_type = (

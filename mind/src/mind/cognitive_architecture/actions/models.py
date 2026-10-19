@@ -138,6 +138,7 @@ class Action(BaseModel):
             self._validate_batch_reject_bids(state)
         elif self.action == ActionType.ACT_IN_INTERACTION:
             self._validate_act_in_interaction(observation)
+            self._validate_remark(observation, getattr(state, "remark_catalogue", None))
         elif self.action == ActionType.MARK_ZONE:
             self._validate_mark_zone()
 
@@ -446,6 +447,23 @@ class Action(BaseModel):
 
         if not any(name in self.parameters for name in advertised):
             raise NoAdvertisedParameterError(list(advertised), self.action)
+
+    def _validate_remark(self, observation, catalogue):
+        """Require a conversational turn to name an agreeing remark (NPC-1916).
+
+        Applies only when the mind holds a remark catalogue AND the current
+        interaction advertises the remark parameter -- whether an interaction
+        speaks in remarks is read off its own schema, so none is named here.
+        Without a catalogue the parameter stays optional, which keeps every
+        caller that runs without a game (tests, tooling) working unchanged.
+        The rule itself lives on the catalogue (``RemarkCatalogue.check_turn``),
+        which owns the vocabulary this module must not name.
+        """
+        if catalogue is None:
+            return
+        if not catalogue.applies_to(observation.status.act_parameter_hints()):
+            return
+        catalogue.check_turn(self.parameters)
 
     def _validate_mark_zone(self):
         """Validate MARK_ZONE names exactly one extent, and names the place.

@@ -331,6 +331,7 @@ ACTION_OFFERING_FUNCTIONS = (
     (observation_models, "_format_parameter_hint"),
     (observation_models, "get_available_actions"),
     (action_models, "_validate_act_in_interaction"),
+    (action_models, "_validate_remark"),
     (formatting_module, "format_interaction_status"),
 )
 
