@@ -63,6 +63,8 @@ PYTHONPATH=$PWD uv run --frozen python tools/mcp_experiment_judge.py runs/qwen3-
 
 `--cases`, `--personas`, `--arms` and `--reps` narrow or widen a run.
 
+The committed floors, `tests/fixtures/mcp_experiment_floors.json`, were derived from the first measured run, and its `source` field names that run. They hold only for the model they name. Re-derive them for a different model rather than reusing them.
+
 ## Reading the numbers
 
 - **Agreement is not truthfulness.** The validator guarantees that a named remark agrees with its declaration. It cannot tell whether the words actually say that remark. The apt rate (named a key the case expects) and the judge pass are where that gets measured.

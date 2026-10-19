@@ -355,3 +355,18 @@ def test_the_runner_dry_run_spends_nothing(capsys):
 
     assert runner.main(["--dry-run", "--reps", "1"]) == 0
     assert f"{len(CASES) * len(PERSONAS) * 2} turns would run" in capsys.readouterr().out
+
+
+def test_the_committed_floors_came_from_a_measured_run():
+    """Floors are derived, never guessed: the sidecar names the run it came from."""
+    from tests.fixtures.mcp_experiment_analysis import FLOOR_METRICS
+
+    floors = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "mcp_experiment_floors.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert "first measured run" in floors["source"] and floors["model"] in floors["source"]
+    assert set(floors["floors"]) <= set(FLOOR_METRICS)
+    assert all(0.0 <= value <= 1.0 for value in floors["floors"].values())
