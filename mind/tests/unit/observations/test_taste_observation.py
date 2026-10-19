@@ -108,10 +108,10 @@ class TestTasteRendering:
             _observation(wire_taste_block([wire_taste_row("likes", "consume", ("s", "Stew"))]))
         )
 
-        text = str(obs)
-
-        assert "Tastes: you like consume (Stew)." in text
-        assert not any(ch.isdigit() for ch in text.split("Tastes:")[1])
+        assert "Tastes: you like consume (Stew)." in str(obs)
+        line = obs.taste.render_summary()
+        assert line == "Tastes: you like consume (Stew)."
+        assert not any(ch.isdigit() for ch in line)
 
     def test_no_tastes_renders_nothing(self):
         """Control arm: an empty block leaves the prompt byte-identical to no block"""
@@ -120,19 +120,19 @@ class TestTasteRendering:
 
         assert str(Observation.model_validate(empty)) == str(Observation.model_validate(base))
 
-    def test_an_unworded_band_is_withheld_and_logged_not_rendered_raw(self, caplog):
-        taste = TasteObservation.model_validate(
-            wire_taste_block(
-                [wire_taste_row("adores", "consume"), wire_taste_row("likes", "sleep")]
-            )
-        )
-
+    def test_an_unworded_band_is_withheld_and_logged_once_not_rendered_raw(self, caplog):
         with caplog.at_level(logging.WARNING):
+            taste = TasteObservation.model_validate(
+                wire_taste_block(
+                    [wire_taste_row("adores", "consume"), wire_taste_row("likes", "sleep")]
+                )
+            )
             text = taste.render_summary()
+            taste.render_summary()
 
         assert text == "Tastes: you like sleep."
         assert "adores" not in text
-        assert any("adores" in r.getMessage() for r in caplog.records)
+        assert sum("adores" in r.getMessage() for r in caplog.records) == 1
 
     def test_only_unworded_bands_render_nothing(self):
         taste = TasteObservation.model_validate(wire_taste_block([wire_taste_row("adores", "x")]))

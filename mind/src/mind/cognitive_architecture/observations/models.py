@@ -1900,12 +1900,10 @@ class TasteRow(BaseModel):
     for the activity itself names no target). Never a number: the learned trace value
     stays simulation-side.
 
-    ``band`` is an open ``str`` that renders only through ``_TASTE_BAND_PHRASES``:
-    a token with no wording here is withheld from the prompt and logged at WARNING
-    rather than refused, because refusing the row would refuse the observation and
-    an NPC that stops acting is a worse outcome than one that loses a taste line.
-    An undeclared row key degrades (logged, dropped) because the wire contract
-    promises rows grow keys under the same ``contract_version``.
+    ``band`` is an open ``str`` that renders only through ``_TASTE_BAND_PHRASES``;
+    a token with no wording is withheld from the prompt and logged once at parse
+    time, never refused. An undeclared row key degrades (logged, dropped): rows
+    grow keys under the same ``contract_version``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1916,6 +1914,19 @@ class TasteRow(BaseModel):
         return shed_undeclared_keys(
             cls, data, level=logging.WARNING, context="additive taste row key(s)"
         )
+
+    @model_validator(mode="after")
+    def _warn_on_unworded_band(self):
+        # At parse time, once per row per observation: render_summary can run more
+        # than once per cycle and must not repeat the warning.
+        if self.band not in _TASTE_BAND_PHRASES:
+            logger.warning(
+                "Taste band %r has no wording here; row for %r withheld from the prompt. "
+                "The simulation is ahead of this mind: pull and restart.",
+                self.band,
+                self.interaction_type,
+            )
+        return self
 
     band: str
     interaction_type: str
@@ -1930,12 +1941,6 @@ class TasteRow(BaseModel):
         """The row as a phrase ("like consume (Stew)"), or "" for an unworded band."""
         phrase = _TASTE_BAND_PHRASES.get(self.band)
         if phrase is None:
-            logger.warning(
-                "Taste band %r has no wording here; row for %r withheld from the prompt. "
-                "The simulation is ahead of this mind: pull and restart.",
-                self.band,
-                self.interaction_type,
-            )
             return ""
         line = f"{phrase} {self.interaction_label}"
         if self.target_label:

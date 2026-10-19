@@ -222,8 +222,8 @@ What still binds the cross-repo ordering:
 - **A new key inside a declared block follows that block's policy.** Where the
   simulation's wire contract promises additive keys under an unchanged
   `contract_version` it degrades (WARNING, dropped): `PlaceDescriptor` ("descriptors
-  grow keys"), `RememberedEntity` and `TasteRow` ("rows grow keys"). Everywhere else a nested
-  forbid still refuses the **whole observation** — the `Goal*` family,
+  grow keys"), `RememberedEntity` and `TasteRow` ("rows grow keys"). Everywhere
+  else a nested forbid still refuses the **whole observation** — the `Goal*` family,
   `InventoryObservation`, and the `place` / `entity_memory` / `taste` block roots
   under a known version — so those need this server deployed first, or a version bump.
   `PlaceDescriptor`'s retired `anchor` key stays refused. `StatusObservation`,
