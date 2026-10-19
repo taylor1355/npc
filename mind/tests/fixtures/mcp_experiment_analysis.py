@@ -113,8 +113,9 @@ def validity_report(records: Iterable[dict], catalogue: RemarkCatalogue) -> dict
                 sum(1 for r in rows if not r.get("validation_failures")), len(rows)
             ),
             "mean_retries": round(statistics.fmean(retries), 4) if retries else None,
-            # Why attempts failed: the remark rule, or anything else (JSON, another
-            # action validator). Only the first is this feature's cost.
+            # Why attempts failed: the remark rule (among the attempt's errors), or
+            # only other errors (JSON, field types, another action validator). One
+            # pydantic error can carry both; it counts once, as a remark failure.
             "remark_failures": sum(
                 1 for r in rows for f in r.get("validation_failures") or [] if REMARK_FAILURE in f
             ),
