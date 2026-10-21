@@ -189,6 +189,49 @@ def _format_bid_details(payload: dict) -> str:
     return f" ({'; '.join(parts)})" if parts else ""
 
 
+def _words_list(value) -> list[str]:
+    """Non-empty string items of an untrusted list; anything else yields []."""
+    if not isinstance(value, list):
+        return []
+    return [str(v) for v in value if v and isinstance(v, (str, int))]
+
+
+def _age_in_words(minutes) -> str:
+    """Band word for how long ago a deed was; never a number."""
+    if isinstance(minutes, bool) or not isinstance(minutes, (int, float)) or minutes < 0:
+        return ""
+    if minutes < 30:
+        return "just now"
+    if minutes < 240:
+        return "a little while ago"
+    if minutes < 1440:
+        return "earlier today"
+    if minutes < 4320:
+        return "a day or two ago"
+    return "a while ago"
+
+
+def _format_deed_perceived(payload: dict) -> str:
+    """Render a DEED_PERCEIVED payload in words. Total: reads defensively.
+
+    Wire keys (``DeedPerceivedObservation.get_data``): ``act``, ``patients``,
+    ``place``, ``role``, ``actor``, ``actor_id``, ``footprint``. ``footprint``
+    is a magnitude the mind does not need spelled out, so it is not rendered.
+    """
+    actor = str(payload.get("actor") or payload.get("actor_id") or "Someone")
+    act = str(payload.get("act") or "did something")
+    patients = _words_list(payload.get("patients"))
+    place = str(payload.get("place") or "").strip()
+    text = f"{actor} did a deed: {act}"
+    if patients:
+        text += f" to {', '.join(patients)}"
+    if place:
+        text += f" at {place}"
+    if payload.get("role") == "patient":
+        text += " (done to you)"
+    return text
+
+
 class MindEventType(StrEnum):
     """Event types matching Godot MindEvent.Type enum"""
 
@@ -203,6 +246,7 @@ class MindEventType(StrEnum):
     MOVEMENT_COMPLETED = "MOVEMENT_COMPLETED"
     ACTION_CHOSEN = "ACTION_CHOSEN"
     ERROR = "ERROR"
+    DEED_PERCEIVED = "DEED_PERCEIVED"
     # OBSERVATION not included - handled separately as main observation field
 
 
@@ -329,6 +373,9 @@ class MindEvent(BaseModel):
                 return f"Chose action: {action_name}({params_str})"
             else:
                 return f"Chose action: {action_name}"
+
+        elif event_type == MindEventType.DEED_PERCEIVED:
+            return _format_deed_perceived(payload)
 
         else:
             # Unreachable while every MindEventType member has an arm above.
@@ -1500,6 +1547,34 @@ class RelationshipState(BaseModel):
     owed: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class RecalledDeed(BaseModel):
+    """One remembered deed (FS10b lane 3), mirroring ``EntityData.Conduct.Notable.to_wire``.
+
+    ``minutes_ago`` is present on a conduct reading and absent on a
+    ``DEED_PERCEIVED`` payload (the deed is fresh by definition).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    act: str = ""
+    patients: list[str] = Field(default_factory=list)
+    place: str | None = None
+    minutes_ago: float | None = Field(default=None, ge=0.0)
+    #: "patient" when the observer was done to, else "perceiver".
+    role: str = "perceiver"
+
+    def render(self) -> str:
+        text = self.act or "a deed"
+        if self.patients:
+            text += f" to {', '.join(self.patients)}"
+        if self.place:
+            text += f" at {self.place}"
+        if self.role == "patient":
+            text += " (done to you)"
+        age = _age_in_words(self.minutes_ago)
+        return f"{text}, {age}" if age else text
+
+
 class ConductState(BaseModel):
     """What the observer has seen one visible NPC do (FS10b lane 0b).
 
@@ -1514,10 +1589,9 @@ class ConductState(BaseModel):
     reputation: float = Field(default=0.0, ge=-1.0, le=1.0)
     #: Total reputation weight watched; 0 means seen acting but never judged.
     evidence: float = Field(default=0.0, ge=0.0)
-    last_act: str | None = None
-    patient: str | None = None
-    place: str | None = None
-    minutes_ago: float | None = Field(default=None, ge=0.0)
+    #: The few deeds the observer remembers most of this NPC, best first; absent
+    #: when it remembers none.
+    notable: list[RecalledDeed] = Field(default_factory=list)
     last_cell: tuple[int, int] | None = None
 
     def render_summary(self) -> str:
@@ -1526,18 +1600,12 @@ class ConductState(BaseModel):
             text = f"reputation {self.reputation:+.2f} (evidence {self.evidence:.1f})"
         else:
             text = "seen acting, not yet judged"
-        if not self.last_act:
-            return text
-        deed = f"last seen: {self.last_act}"
-        if self.patient:
-            deed += f" to {self.patient}"
-        if self.place:
-            deed += f" at {self.place}"
-        if self.minutes_ago is not None:
-            deed += f", {self.minutes_ago:.0f} min ago"
+        parts = [text]
+        if self.notable:
+            parts.append("remembers: " + "; ".join(d.render() for d in self.notable))
         if self.last_cell is not None:
-            deed += f", cell {self.last_cell}"
-        return f"{text}; {deed}"
+            parts.append(f"last seen at cell {self.last_cell}")
+        return "; ".join(parts)
 
 
 class VisibleInteraction(BaseModel):
