@@ -296,6 +296,29 @@ class TestRemarkCatalogueInThePrompt:
         (prefix,) = prefixes
         assert all(sent.startswith(prefix) for _, sent in prefixes_and_sent)
 
+    @pytest.mark.asyncio
+    async def test_message_and_place_handles_live_below_the_cache_marker(self):
+        """NPC-2021: handles are per-cycle content, so they must appear only in
+        the dynamic suffix. A handle above the marker would fragment the cache."""
+        from mind.cognitive_architecture.observations import ConversationMessage
+
+        with_handles = remark_conversation_state()
+        with_handles.conversation_histories = {
+            "conv_1": [
+                ConversationMessage(
+                    id="msg_1", speaker_id="npc_b", speaker_name="Bo", message="Who told you?"
+                )
+            ]
+        }
+        with_handles.available_actions = with_handles.observation.get_available_actions()
+        prefix, sent_with = await self._sent(with_handles)
+        _, sent_without = await self._sent(remark_conversation_state())
+
+        assert sent_with.startswith(prefix) and sent_without.startswith(prefix)
+        assert "[m1]" in sent_with[len(prefix) :], "control: the handle rendered below the prefix"
+        assert "[m1]" not in prefix
+        assert "[mN]" in sent_with[len(prefix) :], "the hint that asks for a handle is dynamic too"
+
     def test_static_prefix_carries_the_conversation_knowledge_and_the_naming_rule(self):
         prefix = ReflectionNode(make_llm()).static_prefix
 

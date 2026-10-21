@@ -18,7 +18,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from mind.cognitive_architecture.observations import Observation, StatusObservation
+from mind.cognitive_architecture.observations import (
+    ConversationMessage,
+    Observation,
+    StatusObservation,
+)
+from mind.cognitive_architecture.observations.models import PlaceObservation
+from mind.cognitive_architecture.references import HandleTable
 from mind.cognitive_architecture.remark_catalogue import RemarkCatalogue
 from mind.cognitive_architecture.state import PipelineState
 
@@ -65,7 +71,13 @@ def wire_remark_conversation_interaction() -> dict:
                 "string", "", "Typed belief-record kind to share"
             ),
             "share_belief_subject_id": wire_property_spec(
-                "string", "", "Stable id of the belief subject"
+                "string",
+                "",
+                "Stable id of the belief subject",
+                refers_to={
+                    "by": "share_belief_kind",
+                    "domains": {"place_knowledge": "place", "entity_knowledge": "entity"},
+                },
             ),
             "ask_who_told_kind": wire_property_spec(
                 "string",
@@ -73,13 +85,14 @@ def wire_remark_conversation_interaction() -> dict:
                 "Belief-record kind asked about (place_knowledge); empty = not asking",
             ),
             "ask_who_told_subject_id": wire_property_spec(
-                "string", "", "Id of the place to ask 'who told you about it?'"
+                "string", "", "Id of the place to ask 'who told you about it?'", refers_to="place"
             ),
             "answer_in_reply_to": wire_property_spec(
                 "string",
                 "",
                 "Message id of the open question addressed to you that this message answers. "
                 "The answer's content comes from your own memory, not from parameters.",
+                refers_to="message",
             ),
         },
         needs_filled=["social"],
@@ -96,6 +109,13 @@ def remark_conversation_observation(entity_id: str = "npc_a") -> Observation:
             current_interaction=wire_remark_conversation_interaction(),
             activity_state={"state_name": "interacting"},
         ),
+        place=PlaceObservation.model_validate(
+            {
+                "contract_version": 5,
+                "known_places": [{"zone_id": "zone_fixture", "name": "the fixture place"}],
+                "known_total": 1,
+            }
+        ),
     )
 
 
@@ -103,4 +123,28 @@ def remark_conversation_state(with_catalogue: bool = True) -> PipelineState:
     return PipelineState(
         observation=remark_conversation_observation(),
         remark_catalogue=catalogue() if with_catalogue else None,
+        conversation_histories={
+            "conv_fixture": [
+                ConversationMessage(
+                    id="msg_fixture", speaker_id="npc_b", speaker_name="Bo", message="Hello!"
+                )
+            ]
+        },
     )
+
+
+def declaring_values(names, state: PipelineState) -> dict:
+    """A value per declaring parameter that the validators accept on ``state``.
+
+    A parameter that refers to a message or a place (NPC-2021) takes the first
+    valid handle of its domain, since the prompt never shows an id; any other
+    parameter takes a placeholder.
+    """
+    references = state.observation.status.act_parameter_references()
+    table = HandleTable(state.observation, state.conversation_histories)
+    values = {}
+    for name in names:
+        domain = references[name].domain if name in references else ""
+        handles = table.handles(domain) if domain else []
+        values[name] = handles[0] if handles else "x"
+    return values

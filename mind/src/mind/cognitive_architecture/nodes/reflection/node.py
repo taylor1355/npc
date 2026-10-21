@@ -31,6 +31,7 @@ from mind.cognitive_architecture.nodes.formatting import (
 )
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.place_query import PlaceQueryRequest
+from mind.cognitive_architecture.references import message_handles
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.working_memory import (
     FormedMemory,
@@ -159,6 +160,9 @@ class ReflectionNode(LLMNode):
                     state.conversation_histories,
                     state.observation.entity_id,
                     state.conversation_partners,
+                    # The handles the validator and the wire translation resolve
+                    # against, derived from the same snapshot (NPC-2021).
+                    message_handles(state.conversation_histories),
                 ),
                 terseness_instruction=terseness_text,
                 # Dynamic suffix only; "" outside a remark-speaking interaction.
@@ -197,11 +201,11 @@ class ReflectionNode(LLMNode):
             timestamp=state.observation.current_simulation_time,
             event_type=MindEventType.ACTION_CHOSEN,
             # memory_parameters, not parameters: this event renders into LATER
-            # prompts, where a place handle would name a different place and a
-            # real zone id would put a UUID in the prompt (NPC-1643).
+            # prompts, where a handle would name a different place or message and
+            # a real id would put a UUID in the prompt (NPC-1643, NPC-2021).
             payload={
                 "action": output.chosen_action.action,
-                "parameters": output.chosen_action.memory_parameters(state.observation),
+                "parameters": output.chosen_action.memory_parameters(state),
             },
         )
         state.recent_events.append(action_event)

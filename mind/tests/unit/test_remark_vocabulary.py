@@ -99,6 +99,10 @@ def test_src_names_no_remark_key_kind_or_declaring_parameter():
         'KEY = " response "\n',
         'KIND = "share_belief"\n',
         'x = f"say {1} answer_who_told.told"\n',
+        # A reference parameter named in src/ would defeat the generic refers_to
+        # reading (NPC-2021): the wire says which parameters refer to something.
+        'REPLY = "answer_in_reply_to"\n',
+        'params.get("share_belief_subject_id")\n',
     ],
 )
 def test_the_scan_catches_a_hardcoded_remark(source):

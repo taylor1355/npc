@@ -77,6 +77,7 @@ def format_conversation_histories(
     histories: dict[str, list[ConversationMessage]],
     entity_id: str,
     partners: dict[str, list[ConversationPartner]] | None = None,
+    handles: dict[str, ConversationMessage] | None = None,
 ) -> str:
     """Render every message in every active, simulation-bounded conversation.
 
@@ -89,9 +90,18 @@ def format_conversation_histories(
     line under a conversation's header per partner whose appearance reads as
     notable. Absent or empty, the output is byte-identical to what it was before
     the perception channel existed.
+
+    ``handles`` (``references.message_handles`` over the same histories) puts each
+    row's ``[mN]`` handle first on the row, so an action parameter that refers to
+    a message can name it without the prompt ever showing the message's id
+    (NPC-2021). Rows are matched to handles by object identity, so the renderer
+    holds no ordering rule of its own: the numbering is the handle function's.
+    Absent, the rows are unannotated.
     """
     if not histories:
         return "No active conversation."
+
+    handle_of = {id(message): handle for handle, message in (handles or {}).items()}
 
     from mind.cognitive_architecture.observations import render_appearance
 
@@ -108,6 +118,8 @@ def format_conversation_histories(
             if message.speaker_id == entity_id:
                 speaker = f"[YOU] {speaker}"
             timestamp = f"[t={message.timestamp}] " if message.timestamp is not None else ""
+            handle = handle_of.get(id(message))
+            timestamp = f"[{handle}] {timestamp}" if handle else timestamp
             markers = message.render_markers()
             suffix = f" {markers}" if markers else ""
             lines.append(f"{timestamp}{speaker}: {message.message}{suffix}")

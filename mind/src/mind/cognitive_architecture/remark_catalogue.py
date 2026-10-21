@@ -27,6 +27,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mind.cognitive_architecture.actions.exceptions import RemarkElementError
+from mind.cognitive_architecture.references import is_parameter_set
 from mind.logging_config import get_logger
 
 logger = get_logger()
@@ -44,25 +45,6 @@ WIRE_KEY_UTTERANCE_ELEMENT = "utterance_element"
 # How many valid keys an error lists before eliding. The full set is in the
 # prompt's catalogue block; the error only has to point the retry at it.
 _MAX_KEYS_IN_ERROR = 24
-
-
-def is_parameter_set(value: Any) -> bool:
-    """Whether an act parameter value counts as *declared* rather than omitted.
-
-    The simulation's kinds pick sentinels outside their own domain (``false``
-    for an affirmative-only flag, ``""`` for an id), so "not set" here is the
-    union of those sentinels: absent, null, false, a blank string, the string
-    ``"false"``, or an empty collection. It is a presence mirror; the kind's own
-    ``is_declared`` in the simulation remains authoritative.
-    """
-    if value is None or value is False:
-        return False
-    if isinstance(value, str):
-        stripped = value.strip()
-        return bool(stripped) and stripped.lower() != "false"
-    if isinstance(value, list | tuple | dict):
-        return len(value) > 0
-    return True
 
 
 class RemarkEntry(BaseModel):

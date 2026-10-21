@@ -152,6 +152,37 @@ class UnknownPlaceHandleError(ActionValidationError):
         )
 
 
+class UnknownReferenceHandleError(ActionValidationError):
+    """An act parameter that names something by a handle this cycle did not issue (NPC-2021).
+
+    The simulation declares which act parameters refer to a message or a place
+    (``refers_to`` on the parameter's spec); the prompt shows each such thing with
+    a per-cycle handle and never its id. A value that is not one of this cycle's
+    handles -- a raw id, a name, a stale or invented handle -- is refused here,
+    loudly and retryably, rather than reaching the simulation as though it were an
+    id it could look up. The message lists the handles that ARE valid, because the
+    refusal is the model's one chance to correct itself before the retry budget
+    runs out.
+    """
+
+    def __init__(
+        self, parameter: str, reference: str, domain: str, action_type: str, available: list[str]
+    ):
+        self.parameter = parameter
+        self.reference = reference
+        self.domain = domain
+        self.action_type = action_type
+        self.available = available
+        if available:
+            choices = f"use one of: {', '.join(available)}"
+        else:
+            choices = f"there is no {domain} to refer to this cycle, so leave '{parameter}' unset"
+        super().__init__(
+            f"Action '{action_type}' sets '{parameter}' to '{reference}', which is not a "
+            f"{domain} handle this cycle - {choices}."
+        )
+
+
 class RemarkElementError(ActionValidationError):
     """A conversational turn's ``utterance_element`` is missing or disagrees.
 

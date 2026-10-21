@@ -33,15 +33,21 @@ from mind.constants import DEFAULT_EMBEDDING_MODEL, DEFAULT_SMALL_MODEL
 from mind.interfaces.mcp.models import MindConfig
 
 
-def wire_property_spec(type_name: str, default, description: str) -> dict:
+def wire_property_spec(
+    type_name: str, default, description: str, refers_to: str | dict | None = None
+) -> dict:
     """One entry of ``act_in_interaction_parameters``, verbatim from the wire.
 
     This IS the Godot ``PropertySpec.to_dict()`` shape — ``{"type", "default",
-    "description"}`` and nothing else. Tests build parameter payloads through
+    "description"}`` plus the optional ``refers_to`` (NPC-2021), emitted only when
+    the spec declares what it refers to. Tests build parameter payloads through
     this helper so a simulation-side shape change breaks in one place rather
     than in every fixture that happened to guess right.
     """
-    return {"type": type_name, "default": default, "description": description}
+    spec = {"type": type_name, "default": default, "description": description}
+    if refers_to is not None:
+        spec["refers_to"] = refers_to
+    return spec
 
 
 def wire_current_interaction(
