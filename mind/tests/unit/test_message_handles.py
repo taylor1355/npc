@@ -71,9 +71,7 @@ class TestRendering:
     def test_every_row_carries_its_handle_and_no_row_carries_an_id(self):
         histories = _histories()
 
-        text = format_conversation_histories(
-            histories, "npc_alice", handles=message_handles(histories)
-        )
+        text = format_conversation_histories(histories, "npc_alice", annotate_handles=True)
 
         for handle, message in message_handles(histories).items():
             assert f"[{handle}] [t={message.timestamp}]" in text
@@ -84,12 +82,22 @@ class TestRendering:
         """What the model READS beside a row is what the validator resolves."""
         histories = _histories()
         handles = message_handles(histories)
-        text = format_conversation_histories(histories, "npc_alice", handles=handles)
+        text = format_conversation_histories(histories, "npc_alice", annotate_handles=True)
 
         for line in text.splitlines():
             match = re.match(r"\[(m\d+)\] \[t=\d+\] \S+: (.*)$", line)
             if match:
                 assert handles[match.group(1)].message == match.group(2)
+
+    def test_a_message_object_shared_by_two_conversations_gets_a_handle_per_row(self):
+        """Rows are matched by position, not object identity (review of #68)."""
+        shared = next(iter(_histories().values()))[0]
+        histories = {"c1": [shared], "c2": [shared]}
+
+        text = format_conversation_histories(histories, "npc_alice", annotate_handles=True)
+
+        assert "[m1]" in text and "[m2]" in text
+        assert list(message_handles(histories)) == ["m1", "m2"]
 
     def test_without_handles_the_rows_are_unannotated(self):
         text = format_conversation_histories(_histories(), "npc_alice")

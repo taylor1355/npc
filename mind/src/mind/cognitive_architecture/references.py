@@ -90,11 +90,26 @@ def message_handles(
     earlier-sorting conversation starts or ends; nothing depends on that, because a
     handle is only ever meaningful within the cycle that showed it.
     """
-    handles: dict[str, ConversationMessage] = {}
+    return {
+        handle: histories[interaction_id][index]
+        for (interaction_id, index), handle in message_handle_positions(histories).items()
+    }
+
+
+def message_handle_positions(
+    histories: Mapping[str, list[ConversationMessage]],
+) -> dict[tuple[str, int], str]:
+    """``{(interaction_id, index): "mN"}``: the numbering ``message_handles`` uses.
+
+    Keyed by where a row sits rather than by the message object, so the renderer
+    can annotate rows without relying on object identity -- a message object
+    shared between two conversations still gets one handle per row.
+    """
+    positions: dict[tuple[str, int], str] = {}
     for interaction_id in sorted(histories):
-        for message in histories[interaction_id]:
-            handles[f"{MESSAGE_HANDLE_PREFIX}{len(handles) + 1}"] = message
-    return handles
+        for index in range(len(histories[interaction_id])):
+            positions[(interaction_id, index)] = f"{MESSAGE_HANDLE_PREFIX}{len(positions) + 1}"
+    return positions
 
 
 @dataclass(frozen=True)

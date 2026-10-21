@@ -339,8 +339,10 @@ class Action(BaseModel):
         determine (an unhandled domain, or a conditional whose selector is unset)
         is left to the simulation.
         """
+        table = None
         for name, domain, reference in self.reference_parameters(state.observation):
-            table = _handle_table(state)
+            if table is None:
+                table = _handle_table(state)
             if table.resolve(domain, reference) is None:
                 raise UnknownReferenceHandleError(
                     name, reference, domain, self.action, table.handles(domain)
@@ -390,8 +392,10 @@ class Action(BaseModel):
             return payload
 
         translated = dict(payload["parameters"])
+        table = None
         for name, domain, reference in self.reference_parameters(observation):
-            table = _handle_table(state)
+            if table is None:
+                table = _handle_table(state)
             real_id = table.resolve(domain, reference)
             if real_id is None:
                 raise UnknownReferenceHandleError(
@@ -422,8 +426,11 @@ class Action(BaseModel):
             params["place"] = descriptor.label() if descriptor is not None else "an unknown place"
             return params
 
+        table = None
         for name, domain, reference in self.reference_parameters(observation):
-            params[name] = _handle_table(state).remembered(domain, reference)
+            if table is None:
+                table = _handle_table(state)
+            params[name] = table.remembered(domain, reference)
         return params
 
     def _validate_respond_to_bid(self, state):

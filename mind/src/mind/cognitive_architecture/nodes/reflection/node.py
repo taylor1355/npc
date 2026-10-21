@@ -31,7 +31,6 @@ from mind.cognitive_architecture.nodes.formatting import (
 )
 from mind.cognitive_architecture.observations import MindEvent, MindEventType
 from mind.cognitive_architecture.place_query import PlaceQueryRequest
-from mind.cognitive_architecture.references import message_handles
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.working_memory import (
     FormedMemory,
@@ -162,7 +161,7 @@ class ReflectionNode(LLMNode):
                     state.conversation_partners,
                     # The handles the validator and the wire translation resolve
                     # against, derived from the same snapshot (NPC-2021).
-                    message_handles(state.conversation_histories),
+                    annotate_handles=True,
                 ),
                 terseness_instruction=terseness_text,
                 # Dynamic suffix only; "" outside a remark-speaking interaction.
