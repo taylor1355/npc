@@ -1,10 +1,10 @@
 {
-  "source": "first measured run 20261019T110616-qwen3_4b-instruct: ollama qwen3:4b-instruct, 12 cases x 2 personas x 1 rep, mind db9a908 (clean), game 4e38abc0f",
+  "source": "first measured run of the NPC-2021 matrix (single transcript, places, refers_to hints): ollama qwen3:4b-instruct, 12 cases x 2 personas x 5 reps, catalogue arm only, mind 2da871d plus the hint wording commit, game 4e38abc0f catalogue + refers_to",
   "floors": {
     "valid_key_rate": 1.0,
     "agreement_rate": 1.0,
-    "apt_rate": 0.8947,
-    "first_try_rate": 0.6667
+    "apt_rate": 0.8333,
+    "first_try_rate": 0.4583
   },
   "model": "qwen3:4b-instruct"
 }
