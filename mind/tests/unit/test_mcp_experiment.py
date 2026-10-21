@@ -59,7 +59,9 @@ class TestMatrix:
     def test_the_matrix_covers_every_kind_and_the_phatic_roots(self):
         kinds = {case.apt_kind for case in CASES}
 
-        assert kinds >= {""} | set(catalogue().declaring_parameters())
+        # Stance remarks (``react``) postdate the experiment's matrix; no case drives them.
+        uncovered = {"react"}
+        assert kinds >= {""} | (set(catalogue().declaring_parameters()) - uncovered)
 
     @pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
     def test_an_apt_act_validates_against_each_case_state(self, case):
@@ -316,7 +318,7 @@ class TestCost:
     def test_catalogue_block_size_is_reported(self, records):
         block = cost_report(records, catalogue())["catalogue_block"]
 
-        assert block["remarks"] == 20
+        assert block["remarks"] == len(catalogue().remarks)
         assert block["block_chars"] == len(catalogue().prompt_block())
 
 

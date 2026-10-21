@@ -187,3 +187,16 @@ def test_an_unknown_role_warns_once_per_distinct_value(caplog):
         RecalledDeed(role="witness")
         RecalledDeed(role="witness")
     assert len(_warnings(caplog)) == 2
+
+
+def test_the_warned_set_is_capped_but_unknown_roles_still_warn(caplog):
+    cap = observation_models._MAX_WARNED_DEED_ROLES
+    with caplog.at_level(logging.WARNING):
+        for i in range(cap + 3):
+            RecalledDeed(role=f"role_{i}")
+    assert len(observation_models._WARNED_DEED_ROLES) == cap
+    assert len(_warnings(caplog)) == cap + 3
+    # Past the cap a role is not remembered, so it warns again.
+    with caplog.at_level(logging.WARNING):
+        RecalledDeed(role=f"role_{cap + 2}")
+    assert len(_warnings(caplog)) == cap + 4

@@ -13,6 +13,7 @@ from mind.cognitive_architecture.actions.exceptions import (
     MovementLockedError,
     MutuallyExclusiveParametersError,
     NoAdvertisedParameterError,
+    RemarkElementError,
     UnexpectedActionParameterError,
     UnknownPlaceHandleError,
 )
@@ -138,7 +139,11 @@ class Action(BaseModel):
             self._validate_batch_reject_bids(state)
         elif self.action == ActionType.ACT_IN_INTERACTION:
             self._validate_act_in_interaction(observation)
-            self._validate_remark(observation, getattr(state, "remark_catalogue", None))
+            self._validate_remark(
+                observation,
+                getattr(state, "remark_catalogue", None),
+                getattr(state, "conversation_histories", None),
+            )
         elif self.action == ActionType.MARK_ZONE:
             self._validate_mark_zone()
 
@@ -448,7 +453,7 @@ class Action(BaseModel):
         if not any(name in self.parameters for name in advertised):
             raise NoAdvertisedParameterError(list(advertised), self.action)
 
-    def _validate_remark(self, observation, catalogue):
+    def _validate_remark(self, observation, catalogue, histories=None):
         """Require a conversational turn to name an agreeing remark (NPC-1916).
 
         Applies only when the mind holds a remark catalogue AND the current
@@ -464,6 +469,36 @@ class Action(BaseModel):
         if not catalogue.applies_to(observation.status.act_parameter_hints()):
             return
         catalogue.check_turn(self.parameters)
+        self._address_the_replied_to_speaker(observation, catalogue, histories)
+
+    def _address_the_replied_to_speaker(self, observation, catalogue, histories):
+        """Address a reply remark to the author of the message it replies to, alone.
+
+        The mind names the reacted-to message in ``in_reply_to``; who wrote it is
+        the conversation's fact, not the model's, so ``addressee_ids`` is set from
+        the history rather than trusted from the model.
+        """
+        from mind.cognitive_architecture.remark_catalogue import (
+            WIRE_KEY_ADDRESSEE_IDS,
+            WIRE_KEY_UTTERANCE_ELEMENT,
+        )
+
+        remark = catalogue.get(str(self.parameters.get(WIRE_KEY_UTTERANCE_ELEMENT, "")).strip())
+        reply_parameter = catalogue.reply_parameter(remark) if remark is not None else None
+        if reply_parameter is None:
+            return
+        target_id = str(self.parameters.get(reply_parameter, "")).strip()
+        messages = [m for history in (histories or {}).values() for m in history]
+        for conversation in getattr(observation, "conversations", None) or []:
+            messages.extend(conversation.conversation_history)
+        speaker = next((m.speaker_id for m in messages if m.id == target_id), None)
+        if speaker is None:
+            raise RemarkElementError(
+                f"'{reply_parameter}' names '{target_id}', which is not a message in "
+                "this conversation",
+                "Name the id of a message shown in the conversation",
+            )
+        self.parameters[WIRE_KEY_ADDRESSEE_IDS] = [speaker]
 
     def _validate_mark_zone(self):
         """Validate MARK_ZONE names exactly one extent, and names the place.

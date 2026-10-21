@@ -45,7 +45,7 @@ def wire_remark_conversation_interaction() -> dict:
     ``conversation_interaction.gd::_init`` declares ``message``,
     ``utterance_element``, ``addressee_ids`` and the message-level ``in_reply_to``, then
     ``DeclarationRegistry.contribute_parameter_specs`` adds each kind's specs in
-    registry order (farewell, share_belief, ask_who_told, answer).
+    registry order (farewell, share_belief, ask_who_told, answer, react).
     """
     return wire_current_interaction(
         name="conversation",
@@ -87,6 +87,15 @@ def wire_remark_conversation_interaction() -> dict:
                 "Whether this message answers the open question addressed to you that it names "
                 "in in_reply_to. The answer's content comes from your own memory, not from "
                 "parameters.",
+            ),
+            "react_stance": wire_property_spec(
+                "string",
+                "",
+                "Stance this message takes toward the message it replies to (in_reply_to, "
+                "another participant's message; the message must then be addressed to that "
+                "message's speaker alone): one of acknowledge, agree, disagree, doubt, ask_more, "
+                "delight, surprise, sympathize, thank"
+                "; empty = not reacting",
             ),
         },
         needs_filled=["social"],

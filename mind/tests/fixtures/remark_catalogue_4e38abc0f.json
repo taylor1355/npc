@@ -9,7 +9,8 @@
         "is_answer",
         "in_reply_to"
       ],
-      "slots": []
+      "slots": [],
+      "fields": {}
     },
     {
       "key": "answer_who_told.own_been",
@@ -19,7 +20,8 @@
         "is_answer",
         "in_reply_to"
       ],
-      "slots": []
+      "slots": [],
+      "fields": {}
     },
     {
       "key": "answer_who_told.own_created",
@@ -29,7 +31,8 @@
         "is_answer",
         "in_reply_to"
       ],
-      "slots": []
+      "slots": [],
+      "fields": {}
     },
     {
       "key": "answer_who_told.own_witnessed",
@@ -39,7 +42,8 @@
         "is_answer",
         "in_reply_to"
       ],
-      "slots": []
+      "slots": [],
+      "fields": {}
     },
     {
       "key": "answer_who_told.told",
@@ -51,7 +55,8 @@
       ],
       "slots": [
         "teller"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "answer_who_told.told_firsthand",
@@ -63,7 +68,8 @@
       ],
       "slots": [
         "teller"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "answer_who_told.told_firsthand_since",
@@ -75,7 +81,8 @@
       ],
       "slots": [
         "teller"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "answer_who_told.told_secondhand",
@@ -87,7 +94,8 @@
       ],
       "slots": [
         "teller"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "answer_who_told.told_secondhand_since",
@@ -99,7 +107,8 @@
       ],
       "slots": [
         "teller"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "answer_who_told.told_since",
@@ -111,7 +120,8 @@
       ],
       "slots": [
         "teller"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "ask_who_told",
@@ -123,7 +133,8 @@
       ],
       "slots": [
         "zone"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "correction.firsthand",
@@ -135,7 +146,8 @@
       ],
       "slots": [
         "zone"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "correction.heard",
@@ -147,7 +159,8 @@
       ],
       "slots": [
         "zone"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "farewell",
@@ -156,28 +169,149 @@
       "declare_with": [
         "is_farewell"
       ],
-      "slots": []
+      "slots": [],
+      "fields": {}
     },
     {
       "key": "greeting",
       "gloss": "Hello!",
       "declares": "",
       "declare_with": [],
-      "slots": []
+      "slots": [],
+      "fields": {}
     },
     {
       "key": "greeting_response",
       "gloss": "Hi! How's it going?",
       "declares": "",
       "declare_with": [],
-      "slots": []
+      "slots": [],
+      "fields": {}
+    },
+    {
+      "key": "react_acknowledge",
+      "gloss": "I understand.",
+      "declares": "react",
+      "declare_with": [
+        "react_stance",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {
+        "react_stance": "acknowledge"
+      }
+    },
+    {
+      "key": "react_agree",
+      "gloss": "I agree.",
+      "declares": "react",
+      "declare_with": [
+        "react_stance",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {
+        "react_stance": "agree"
+      }
+    },
+    {
+      "key": "react_ask_more",
+      "gloss": "Can you tell me more?",
+      "declares": "react",
+      "declare_with": [
+        "react_stance",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {
+        "react_stance": "ask_more"
+      }
+    },
+    {
+      "key": "react_delight",
+      "gloss": "That's great!",
+      "declares": "react",
+      "declare_with": [
+        "react_stance",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {
+        "react_stance": "delight"
+      }
+    },
+    {
+      "key": "react_disagree",
+      "gloss": "I don't think so.",
+      "declares": "react",
+      "declare_with": [
+        "react_stance",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {
+        "react_stance": "disagree"
+      }
+    },
+    {
+      "key": "react_doubt",
+      "gloss": "I'm not convinced.",
+      "declares": "react",
+      "declare_with": [
+        "react_stance",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {
+        "react_stance": "doubt"
+      }
+    },
+    {
+      "key": "react_surprise",
+      "gloss": "No way!",
+      "declares": "react",
+      "declare_with": [
+        "react_stance",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {
+        "react_stance": "surprise"
+      }
+    },
+    {
+      "key": "react_sympathize",
+      "gloss": "I'm sorry to hear that.",
+      "declares": "react",
+      "declare_with": [
+        "react_stance",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {
+        "react_stance": "sympathize"
+      }
+    },
+    {
+      "key": "react_thank",
+      "gloss": "Thanks, I owe you one.",
+      "declares": "react",
+      "declare_with": [
+        "react_stance",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {
+        "react_stance": "thank"
+      }
     },
     {
       "key": "response",
       "gloss": "I see.",
       "declares": "",
       "declare_with": [],
-      "slots": []
+      "slots": [],
+      "fields": {}
     },
     {
       "key": "share_belief.place",
@@ -189,7 +323,8 @@
       ],
       "slots": [
         "zone"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "share_belief.thing",
@@ -202,7 +337,8 @@
       "slots": [
         "thing",
         "direction"
-      ]
+      ],
+      "fields": {}
     },
     {
       "key": "share_belief.thing_heard",
@@ -215,7 +351,8 @@
       "slots": [
         "thing",
         "direction"
-      ]
+      ],
+      "fields": {}
     }
   ]
 }
