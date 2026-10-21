@@ -189,14 +189,14 @@ def _format_bid_details(payload: dict) -> str:
     return f" ({'; '.join(parts)})" if parts else ""
 
 
-def _words_list(value) -> list[str]:
+def _words_list(value: object) -> list[str]:
     """Non-empty string items of an untrusted list; anything else yields []."""
     if not isinstance(value, list):
         return []
-    return [str(v) for v in value if v and isinstance(v, (str, int))]
+    return [v for v in value if isinstance(v, str) and v]
 
 
-def _age_in_words(minutes) -> str:
+def _age_in_words(minutes: object) -> str:
     """Band word for how long ago a deed was; never a number."""
     if isinstance(minutes, bool) or not isinstance(minutes, (int, float)) or minutes < 0:
         return ""
@@ -211,7 +211,19 @@ def _age_in_words(minutes) -> str:
     return "a while ago"
 
 
-def _format_deed_perceived(payload: dict) -> str:
+def _deed_clause(act: str, patients: list[str], place: str, role: str) -> str:
+    """``act to X, Y at Place (done to you)``: the one clause both deed renderers share."""
+    text = act or "an unnamed deed"
+    if patients:
+        text += f" to {', '.join(patients)}"
+    if place:
+        text += f" at {place}"
+    if role == "patient":
+        text += " (done to you)"
+    return text
+
+
+def _format_deed_perceived(payload: dict[str, Any]) -> str:
     """Render a DEED_PERCEIVED payload in words. Total: reads defensively.
 
     Wire keys (``DeedPerceivedObservation.get_data``): ``act``, ``patients``,
@@ -219,17 +231,14 @@ def _format_deed_perceived(payload: dict) -> str:
     is a magnitude the mind does not need spelled out, so it is not rendered.
     """
     actor = str(payload.get("actor") or payload.get("actor_id") or "Someone")
-    act = str(payload.get("act") or "did something")
-    patients = _words_list(payload.get("patients"))
-    place = str(payload.get("place") or "").strip()
-    text = f"{actor} did a deed: {act}"
-    if patients:
-        text += f" to {', '.join(patients)}"
-    if place:
-        text += f" at {place}"
-    if payload.get("role") == "patient":
-        text += " (done to you)"
-    return text
+    act = payload.get("act")
+    clause = _deed_clause(
+        act if isinstance(act, str) else "",
+        _words_list(payload.get("patients")),
+        str(payload.get("place") or "").strip(),
+        str(payload.get("role") or ""),
+    )
+    return f"{actor} did a deed: {clause}"
 
 
 class MindEventType(StrEnum):
@@ -1561,16 +1570,10 @@ class RecalledDeed(BaseModel):
     place: str | None = None
     minutes_ago: float | None = Field(default=None, ge=0.0)
     #: "patient" when the observer was done to, else "perceiver".
-    role: str = "perceiver"
+    role: Literal["patient", "perceiver"] = "perceiver"
 
     def render(self) -> str:
-        text = self.act or "a deed"
-        if self.patients:
-            text += f" to {', '.join(self.patients)}"
-        if self.place:
-            text += f" at {self.place}"
-        if self.role == "patient":
-            text += " (done to you)"
+        text = _deed_clause(self.act, self.patients, self.place or "", self.role)
         age = _age_in_words(self.minutes_ago)
         return f"{text}, {age}" if age else text
 

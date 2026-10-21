@@ -57,7 +57,6 @@ __all__ = [
     "WIRE_KEY_PARAM_TYPE",
     "ArousalBand",
     "ConductState",
-    "RecalledDeed",
     "ConversationMessage",
     "ConversationObservation",
     "ConversationPartner",

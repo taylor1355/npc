@@ -2,7 +2,8 @@
 
 import pytest
 
-from mind.cognitive_architecture.observations import MindEvent, MindEventType
+from mind.cognitive_architecture.observations import MindEvent, MindEventType, RecalledDeed
+from mind.cognitive_architecture.observations.models import _age_in_words
 from mind.constants import DEFAULT_RECENCY_DECAY_PER_GAME_HOUR
 from mind.interfaces.mcp.server import MCPServer
 
@@ -50,11 +51,10 @@ def test_str_is_total_over_malformed_payloads():
     )
 
 
-@pytest.mark.asyncio
 async def test_decide_action_accepts_deed_perceived_event():
     from mind.cognitive_architecture.actions import Action, ActionType
     from mind.cognitive_architecture.state import PipelineState
-    from tests.unit.test_mcp_server import parse_response  # noqa: F401
+    from tests.unit.test_mcp_server import parse_response
 
     server = MCPServer()
     await server.mcp.call_tool(
@@ -91,3 +91,49 @@ async def test_decide_action_accepts_deed_perceived_event():
     )
     response = parse_response(result)
     assert response["status"] == "success", response
+
+
+def test_non_string_patients_never_render():
+    event = MindEvent(
+        timestamp=1,
+        event_type=MindEventType.DEED_PERCEIVED,
+        payload={"act": "gift", "patients": [True, 0, "Bob"]},
+    )
+    assert str(event) == "Someone did a deed: gift to Bob"
+
+
+def test_event_and_conduct_render_the_same_clause():
+    fields = {"act": "gift", "patients": ["Bob", "Cy"], "place": "Market", "role": "patient"}
+    clause = RecalledDeed.model_validate(fields).render()
+    event = MindEvent(timestamp=1, event_type=MindEventType.DEED_PERCEIVED, payload=fields)
+    assert str(event) == f"Someone did a deed: {clause}"
+    empty = RecalledDeed().render()
+    assert str(MindEvent(timestamp=1, event_type="DEED_PERCEIVED", payload={})) == (
+        f"Someone did a deed: {empty}"
+    )
+
+
+def test_role_is_closed_to_the_two_wire_values():
+    with pytest.raises(ValueError):
+        RecalledDeed(role="bystander")
+
+
+@pytest.mark.parametrize(
+    ("minutes", "band"),
+    [
+        (0, "just now"),
+        (29.9, "just now"),
+        (30, "a little while ago"),
+        (239.9, "a little while ago"),
+        (240, "earlier today"),
+        (1439.9, "earlier today"),
+        (1440, "a day or two ago"),
+        (4319.9, "a day or two ago"),
+        (4320, "a while ago"),
+        (-1, ""),
+        (None, ""),
+        (True, ""),
+    ],
+)
+def test_age_bands_at_their_boundaries(minutes, band):
+    assert _age_in_words(minutes) == band
