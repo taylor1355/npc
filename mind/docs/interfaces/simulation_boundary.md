@@ -44,6 +44,7 @@ extends the base `entity_controller.gd::get_current_state_observation`.
 | `mood` | `substrate_component.gd::create_mood_observation` | `mood` |
 | `inventory` | `inventory_component.gd::create_observation` | `inventory` |
 | `entity_memory` | `substrate_component.gd::create_entity_memory_observation` | `entity_memory` |
+| `taste` | `substrate_component.gd::create_taste_observation` | `taste` |
 
 The observation types themselves are the simulation's `src/minds/observations/`
 directory — read them there rather than from a list here.
@@ -164,6 +165,10 @@ first.
   They arrive as dictionary *keys*, so a rename there fails silently, not loudly.
 - **Mood bands** — mirror `substrate_state.gd::valence_band` and `::arousal_band`.
   Branch on the band, never on the free-text `label`.
+- **Taste bands** — the tokens `taste_observation.gd` sends (`likes`, `leans_toward`,
+  `leans_away`, `avoids`, from `preference_traces.gd::BAND_*`). The simulation sends
+  tokens and never a number; `models.py::_TASTE_BAND_PHRASES` is the only place the
+  words for them live, and an unworded token is withheld and logged, not rendered.
 - **Event names** — `MindEventType` mirrors `mind_event.gd::Type` with two
   deliberate differences: `OBSERVATION` is absent here (it is the observation
   argument, not an event), and `ACTION_CHOSEN` exists only here.
@@ -217,10 +222,10 @@ What still binds the cross-repo ordering:
 - **A new key inside a declared block follows that block's policy.** Where the
   simulation's wire contract promises additive keys under an unchanged
   `contract_version` it degrades (WARNING, dropped): `PlaceDescriptor` ("descriptors
-  grow keys") and `RememberedEntity` ("rows grow keys"). Everywhere else a nested
-  forbid still refuses the **whole observation** — the `Goal*` family,
-  `InventoryObservation`, and the `place` / `entity_memory` block roots under a
-  known version — so those need this server deployed first, or a version bump.
+  grow keys"), `RememberedEntity` and `TasteRow` ("rows grow keys"). Everywhere
+  else a nested forbid still refuses the **whole observation** — the `Goal*` family,
+  `InventoryObservation`, and the `place` / `entity_memory` / `taste` block roots
+  under a known version — so those need this server deployed first, or a version bump.
   `PlaceDescriptor`'s retired `anchor` key stays refused. `StatusObservation`,
   `NeedsObservation`, `VisionObservation`, `MoodObservation`, `EntityData` and
   `VisibleInteraction` keep pydantic's default `ignore`, which drops silently.
