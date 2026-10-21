@@ -176,7 +176,11 @@ class UnknownReferenceHandleError(ActionValidationError):
         if available:
             choices = f"use one of: {', '.join(available)}"
         else:
-            choices = f"there is no {domain} to refer to this cycle, so leave '{parameter}' unset"
+            choices = (
+                f"there is no {domain} to refer to this cycle, so this turn cannot declare one: "
+                f"leave '{parameter}' unset and its sibling declaring parameters unset too, "
+                "and name a remark that declares nothing"
+            )
         super().__init__(
             f"Action '{action_type}' sets '{parameter}' to '{reference}', which is not a "
             f"{domain} handle this cycle - {choices}."
