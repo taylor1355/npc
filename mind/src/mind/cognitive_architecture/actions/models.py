@@ -13,11 +13,91 @@ from mind.cognitive_architecture.actions.exceptions import (
     MovementLockedError,
     MutuallyExclusiveParametersError,
     NoAdvertisedParameterError,
+    RemarkElementError,
     UnexpectedActionParameterError,
     UnknownPlaceHandleError,
     UnknownReferenceHandleError,
 )
-from mind.cognitive_architecture.references import HandleTable, is_parameter_set
+from mind.cognitive_architecture.references import (
+    DOMAIN_MESSAGE,
+    HandleTable,
+    is_parameter_set,
+)
+
+
+def _wire_keys() -> tuple[str, str]:
+    """(addressee key, utterance-element key) from the catalogue module.
+
+    Imported here, not at module top: remark_catalogue imports ``actions.exceptions``,
+    which loads this package, so a top-level import is circular.
+    """
+    from mind.cognitive_architecture.remark_catalogue import (
+        WIRE_KEY_ADDRESSEE_IDS,
+        WIRE_KEY_UTTERANCE_ELEMENT,
+    )
+
+    return WIRE_KEY_ADDRESSEE_IDS, WIRE_KEY_UTTERANCE_ELEMENT
+
+
+def _reply_speaker(state, catalogue, parameters: dict) -> str | None:
+    """Who wrote the message a fixed-field reply remark replies to, or None.
+
+    None when the turn is not such a reply (no catalogue, not a remark turn, a
+    remark that fixes no field). Raises ``RemarkElementError`` when it is one but
+    names a message the conversation does not hold.
+    """
+    addressee_key, element_key = _wire_keys()
+    if catalogue is None or state.observation is None or state.observation.status is None:
+        return None
+    if not catalogue.applies_to(state.observation.status.act_parameter_hints()):
+        return None
+    remark = catalogue.get(str(parameters.get(element_key, "")).strip())
+    reply_parameter = catalogue.reply_parameter(remark) if remark is not None else None
+    if reply_parameter is None:
+        return None
+    table = _handle_table(state)
+    message_id = table.resolve(DOMAIN_MESSAGE, str(parameters.get(reply_parameter, "")))
+    speaker = next(
+        (
+            m.speaker_id
+            for history in (state.conversation_histories or {}).values()
+            for m in history
+            if m.id == message_id
+        ),
+        None,
+    )
+    if speaker is None:
+        raise RemarkElementError(
+            f"'{reply_parameter}' names '{parameters.get(reply_parameter)}', which is not a "
+            "message in this conversation",
+            f"Valid handles: {', '.join(table.handles(DOMAIN_MESSAGE)) or 'none'}",
+        )
+    return speaker
+
+
+def normalize_remark_reply(chosen_action: object, state) -> object:
+    """Fill an omitted ``addressee_ids`` on a reply remark; return a new action dict.
+
+    The explicit normalization step run on the model's raw action before it is
+    validated (validation itself never mutates). Anything it cannot place --
+    not an act, no catalogue, an unknown message id, an addressee the model did
+    supply -- is returned unchanged for validation to judge.
+    """
+    if not isinstance(chosen_action, dict):
+        return chosen_action
+    parameters = chosen_action.get("parameters")
+    addressee_key = _wire_keys()[0]
+    if not isinstance(parameters, dict) or parameters.get(addressee_key):
+        return chosen_action
+    if chosen_action.get("action") != ActionType.ACT_IN_INTERACTION.value:
+        return chosen_action
+    try:
+        speaker = _reply_speaker(state, getattr(state, "remark_catalogue", None), parameters)
+    except RemarkElementError:
+        return chosen_action
+    if speaker is None:
+        return chosen_action
+    return {**chosen_action, "parameters": {**parameters, addressee_key: [speaker]}}
 
 
 class ActionType(str, Enum):
@@ -145,7 +225,7 @@ class Action(BaseModel):
             self._validate_batch_reject_bids(state)
         elif self.action == ActionType.ACT_IN_INTERACTION:
             self._validate_act_in_interaction(observation)
-            self._validate_remark(observation, getattr(state, "remark_catalogue", None))
+            self._validate_remark(state, observation, getattr(state, "remark_catalogue", None))
             self._validate_references(state)
         elif self.action == ActionType.MARK_ZONE:
             self._validate_mark_zone()
@@ -521,7 +601,7 @@ class Action(BaseModel):
         if not any(name in self.parameters for name in advertised):
             raise NoAdvertisedParameterError(list(advertised), self.action)
 
-    def _validate_remark(self, observation, catalogue):
+    def _validate_remark(self, state, observation, catalogue):
         """Require a conversational turn to name an agreeing remark (NPC-1916).
 
         Applies only when the mind holds a remark catalogue AND the current
@@ -537,6 +617,26 @@ class Action(BaseModel):
         if not catalogue.applies_to(observation.status.act_parameter_hints()):
             return
         catalogue.check_turn(self.parameters)
+        self._check_reply_addressee(state, catalogue)
+
+    def _check_reply_addressee(self, state, catalogue):
+        """A reply remark must be addressed to the replied-to message's speaker, alone.
+
+        Pure: it only checks. An omitted ``addressee_ids`` is filled beforehand by
+        ``normalize_remark_reply``, which the caller runs before validation, so a
+        wrong addressee here is the model's own and is refused with the id to use.
+        """
+        speaker = _reply_speaker(state, catalogue, self.parameters)
+        if speaker is None:
+            return
+        addressee_key = _wire_keys()[0]
+        given = self.parameters.get(addressee_key)
+        if given != [speaker]:
+            raise RemarkElementError(
+                f"a reply must be addressed to the speaker of the message it replies to, "
+                f"alone: set {addressee_key} to [{speaker!r}] (got {given!r})",
+                "Address the reply to that one participant",
+            )
 
     def _validate_mark_zone(self):
         """Validate MARK_ZONE names exactly one extent, and names the place.

@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from mind.cognitive_architecture.observations import (
     ConductState,
     EntityData,
+    RecalledDeed,
     RelationshipState,
     VisionObservation,
 )
@@ -39,28 +40,39 @@ class TestOwedParsing:
 
 class TestConductParsing:
     def test_full_wire_shape_parses(self):
+        # Shape of EntityData.Conduct.to_wire: notable replaced last_act/patient/place/minutes_ago.
         c = ConductState.model_validate(
             {
                 "reputation": 0.4,
                 "evidence": 2.0,
-                "last_act": "gift",
-                "patient": "Bob",
-                "place": "Market",
-                "minutes_ago": 12.0,
+                "notable": [
+                    {
+                        "act": "gift",
+                        "patients": ["Bob"],
+                        "place": "Market",
+                        "minutes_ago": 12.0,
+                        "role": "patient",
+                    },
+                    {"act": "tip", "patients": [], "minutes_ago": 900.0, "role": "perceiver"},
+                ],
                 "last_cell": [3, 4],
             }
         )
-        assert c.last_act == "gift"
-        assert c.patient == "Bob"
-        assert c.place == "Market"
-        assert c.minutes_ago == 12.0
+        assert [d.act for d in c.notable] == ["gift", "tip"]
+        assert c.notable[0] == RecalledDeed(
+            act="gift", patients=["Bob"], place="Market", minutes_ago=12.0, role="patient"
+        )
+        assert c.notable[1].place is None
         assert c.last_cell == (3, 4)
 
     def test_minimal_wire_shape_parses_with_parts_absent(self):
         c = ConductState.model_validate({"reputation": -0.2, "evidence": 0.0})
-        assert c.last_act is None
-        assert c.minutes_ago is None
+        assert c.notable == []
         assert c.last_cell is None
+
+    def test_retired_deed_fields_are_gone(self):
+        assert not hasattr(ConductState(), "last_act")
+        assert "minutes_ago" not in ConductState.model_fields
 
     def test_unknown_keys_are_ignored(self):
         assert ConductState.model_validate({"reputation": 0.0, "future": 1}).reputation == 0.0
@@ -111,17 +123,24 @@ class TestRendering:
                 conduct=ConductState(
                     reputation=0.4,
                     evidence=2.0,
-                    last_act="gift",
-                    patient="Bob",
-                    place="Market",
-                    minutes_ago=12.0,
+                    notable=[
+                        RecalledDeed(
+                            act="gift",
+                            patients=["Bob"],
+                            place="Market",
+                            minutes_ago=12.0,
+                            role="patient",
+                        ),
+                        RecalledDeed(act="tip", minutes_ago=900.0),
+                    ],
                     last_cell=(3, 4),
                 )
             )
         )
         assert (
-            "Conduct: reputation +0.40 (evidence 2.0); last seen: gift to Bob at Market, "
-            "12 min ago, cell (3, 4)" in text
+            "Conduct: reputation +0.40 (evidence 2.0); remembers: "
+            "gift to Bob at Market (done to you), just now; tip, earlier today; "
+            "last seen at cell (3, 4)" in text
         )
 
     def test_conduct_unjudged_without_deed(self):

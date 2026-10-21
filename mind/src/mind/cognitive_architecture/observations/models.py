@@ -1,6 +1,7 @@
 """Observation models for the cognitive architecture"""
 
 import logging
+import math
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -195,6 +196,87 @@ def _format_bid_details(payload: dict) -> str:
     return f" ({'; '.join(parts)})" if parts else ""
 
 
+def _words_list(value: object) -> list[str]:
+    """Non-empty string items of an untrusted list; anything else yields []."""
+    if not isinstance(value, list):
+        return []
+    return [v for v in value if isinstance(v, str) and v]
+
+
+def _age_in_words(minutes: object) -> str:
+    """Band word for how long ago a deed was; never a number."""
+    if isinstance(minutes, bool) or not isinstance(minutes, (int, float)):
+        return ""
+    if not math.isfinite(minutes) or minutes < 0:
+        return ""
+    if minutes < 30:
+        return "just now"
+    if minutes < 240:
+        return "a little while ago"
+    if minutes < 1440:
+        return "earlier today"
+    if minutes < 4320:
+        return "a day or two ago"
+    return "a while ago"
+
+
+_DEED_ROLES = ("patient", "perceiver")
+# Roles already warned about: a persistent new role would otherwise log once per
+# NPC per tick. Process-lifetime on purpose; tests reset it. Capped so a stream of
+# distinct garbage roles cannot grow it without bound: past the cap an unknown role
+# still warns, it is just no longer remembered.
+_WARNED_DEED_ROLES: set[str] = set()
+_MAX_WARNED_DEED_ROLES = 32
+
+
+def _note_unknown_role(role: object) -> None:
+    """Warn once per distinct unknown deed role; never raise.
+
+    The value is kept as sent and only ``"patient"`` renders as "(done to you)", so a new
+    simulation role degrades to the perceiver reading instead of failing the observation.
+    """
+    if role in _DEED_ROLES:
+        return
+    key = repr(role)
+    if key in _WARNED_DEED_ROLES:
+        return
+    if len(_WARNED_DEED_ROLES) < _MAX_WARNED_DEED_ROLES:
+        _WARNED_DEED_ROLES.add(key)
+    logger.warning(f"Unknown deed role {role!r}; rendering as a perceiver")
+
+
+def _deed_clause(act: str, patients: list[str], place: str, role: str) -> str:
+    """``act to X, Y at Place (done to you)``: the one clause both deed renderers share."""
+    text = act or "an unnamed deed"
+    if patients:
+        text += f" to {', '.join(patients)}"
+    if place:
+        text += f" at {place}"
+    if role == "patient":
+        text += " (done to you)"
+    return text
+
+
+def _format_deed_perceived(payload: dict[str, Any]) -> str:
+    """Render a DEED_PERCEIVED payload in words. Total: reads defensively.
+
+    Wire keys (``DeedPerceivedObservation.get_data``): ``act``, ``patients``,
+    ``place``, ``role``, ``actor``, ``actor_id``, ``footprint``. ``footprint``
+    is a magnitude the mind does not need spelled out, so it is not rendered.
+    """
+    actor = str(payload.get("actor") or payload.get("actor_id") or "Someone")
+    role = payload.get("role", "perceiver")
+    _note_unknown_role(role)
+    act = payload.get("act")
+    clause = _deed_clause(
+        act if isinstance(act, str) else "",
+        _words_list(payload.get("patients")),
+        str(payload.get("place") or "").strip(),
+        role if isinstance(role, str) else "",
+    )
+    return f"{actor} did a deed: {clause}"
+
+
 class MindEventType(StrEnum):
     """Event types matching Godot MindEvent.Type enum"""
 
@@ -209,6 +291,7 @@ class MindEventType(StrEnum):
     MOVEMENT_COMPLETED = "MOVEMENT_COMPLETED"
     ACTION_CHOSEN = "ACTION_CHOSEN"
     ERROR = "ERROR"
+    DEED_PERCEIVED = "DEED_PERCEIVED"
     # OBSERVATION not included - handled separately as main observation field
 
 
@@ -335,6 +418,9 @@ class MindEvent(BaseModel):
                 return f"Chose action: {action_name}({params_str})"
             else:
                 return f"Chose action: {action_name}"
+
+        elif event_type == MindEventType.DEED_PERCEIVED:
+            return _format_deed_perceived(payload)
 
         else:
             # Unreachable while every MindEventType member has an arm above.
@@ -1531,6 +1617,34 @@ class RelationshipState(BaseModel):
     owed: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class RecalledDeed(BaseModel):
+    """One remembered deed (FS10b lane 3), mirroring ``EntityData.Conduct.Notable.to_wire``.
+
+    ``minutes_ago`` is present on a conduct reading and absent on a
+    ``DEED_PERCEIVED`` payload (the deed is fresh by definition).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    act: str = ""
+    patients: list[str] = Field(default_factory=list)
+    place: str | None = None
+    minutes_ago: float | None = Field(default=None, ge=0.0)
+    #: "patient" when the observer was done to, else "perceiver".
+    role: str = "perceiver"
+
+    @field_validator("role")
+    @classmethod
+    def _warn_on_unknown_role(cls, value: str) -> str:
+        _note_unknown_role(value)
+        return value
+
+    def render(self) -> str:
+        text = _deed_clause(self.act, self.patients, self.place or "", self.role)
+        age = _age_in_words(self.minutes_ago)
+        return f"{text}, {age}" if age else text
+
+
 class ConductState(BaseModel):
     """What the observer has seen one visible NPC do (FS10b lane 0b).
 
@@ -1545,10 +1659,9 @@ class ConductState(BaseModel):
     reputation: float = Field(default=0.0, ge=-1.0, le=1.0)
     #: Total reputation weight watched; 0 means seen acting but never judged.
     evidence: float = Field(default=0.0, ge=0.0)
-    last_act: str | None = None
-    patient: str | None = None
-    place: str | None = None
-    minutes_ago: float | None = Field(default=None, ge=0.0)
+    #: The few deeds the observer remembers most of this NPC, best first; absent
+    #: when it remembers none.
+    notable: list[RecalledDeed] = Field(default_factory=list)
     last_cell: tuple[int, int] | None = None
 
     def render_summary(self) -> str:
@@ -1557,18 +1670,12 @@ class ConductState(BaseModel):
             text = f"reputation {self.reputation:+.2f} (evidence {self.evidence:.1f})"
         else:
             text = "seen acting, not yet judged"
-        if not self.last_act:
-            return text
-        deed = f"last seen: {self.last_act}"
-        if self.patient:
-            deed += f" to {self.patient}"
-        if self.place:
-            deed += f" at {self.place}"
-        if self.minutes_ago is not None:
-            deed += f", {self.minutes_ago:.0f} min ago"
+        parts = [text]
+        if self.notable:
+            parts.append("remembers: " + "; ".join(d.render() for d in self.notable))
         if self.last_cell is not None:
-            deed += f", cell {self.last_cell}"
-        return f"{text}; {deed}"
+            parts.append(f"last seen at cell {self.last_cell}")
+        return "; ".join(parts)
 
 
 class VisibleInteraction(BaseModel):

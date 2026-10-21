@@ -42,16 +42,25 @@ REMARK_CATALOGUE_CONTRACT_VERSION = 1
 # like ``ConversationMessage.utterance_element``; never a remark or kind.
 WIRE_KEY_UTTERANCE_ELEMENT = "utterance_element"
 
+# The act parameter that says who a message is spoken TO. A wire contract name
+# (``ActInInteractionAction.PARAM_ADDRESSEE_IDS`` in the simulation); the reply
+# parameter is deliberately not named here -- see ``message_level_parameters``.
+WIRE_KEY_ADDRESSEE_IDS = "addressee_ids"
+
 # How many valid keys an error lists before eliding. The full set is in the
 # prompt's catalogue block; the error only has to point the retry at it.
 _MAX_KEYS_IN_ERROR = 24
 
 
+def _same_value(actual: Any, expected: str) -> bool:
+    return isinstance(actual, str) and actual.strip() == expected
+
+
 class RemarkEntry(BaseModel):
     """One wire remark in the catalogue contract.
 
-    ``extra="ignore"`` so the row can grow columns additively (e.g. a future
-    ``fields`` column) without a contract-version bump.
+    ``extra="ignore"`` so the row can grow columns additively (as ``fields``
+    did) without a contract-version bump.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -66,6 +75,9 @@ class RemarkEntry(BaseModel):
     declare_with: list[str] = Field(default_factory=list)
     # Slot kinds the remark's wording may read. Prompt content only.
     slots: list[str] = Field(default_factory=list)
+    # Act parameters this remark fixes to one exact value (a stance remark sets
+    # its stance parameter). Every key is one of ``declare_with``.
+    fields: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("key", "declares")
     @classmethod
@@ -86,6 +98,12 @@ class RemarkEntry(BaseModel):
                 f"remark '{self.key}' is phatic but names declare_with parameters "
                 f"{self.declare_with}"
             )
+        stray = [name for name in self.fields if name not in self.declare_with]
+        if stray:
+            raise ValueError(
+                f"remark '{self.key}' sets fields {stray} that are not in its "
+                f"declare_with {self.declare_with}"
+            )
         return self
 
     @property
@@ -97,6 +115,8 @@ class RemarkEntry(BaseModel):
         line = f'{self.key}: "{self.gloss}"' if self.gloss else self.key
         if self.declares:
             line += f" [declares {self.declares} via {', '.join(self.declare_with)}]"
+        if self.fields:
+            line += f" [sets {', '.join(f'{k}={v}' for k, v in self.fields.items())}]"
         if self.slots:
             line += f" [slots {', '.join(self.slots)}]"
         return line
@@ -152,6 +172,30 @@ class RemarkCatalogue(BaseModel):
     def keys(self) -> list[str]:
         return [remark.key for remark in self.remarks]
 
+    def message_level_parameters(self) -> set[str]:
+        """``declare_with`` parameters shared by more than one kind.
+
+        A parameter two kinds both list belongs to the message, not to either
+        kind (the reply target is one): its presence says nothing about which
+        kind a turn declares. Derived from the rows, so no parameter is named.
+        """
+        owners: dict[str, set[str]] = {}
+        for remark in self.remarks:
+            for name in remark.declare_with:
+                owners.setdefault(name, set()).add(remark.declares)
+        return {name for name, kinds in owners.items() if len(kinds) > 1}
+
+    def reply_parameter(self, remark: RemarkEntry) -> str | None:
+        """The message-level parameter naming the message a fixed-field remark replies to.
+
+        A remark that fixes a field and lists a message-level parameter is spoken
+        in reply to the message that parameter names. None for any other remark.
+        """
+        if not remark.fields:
+            return None
+        shared = self.message_level_parameters()
+        return next((name for name in remark.declare_with if name in shared), None)
+
     def declaring_parameters(self) -> dict[str, list[str]]:
         """Each declared kind -> the union of its remarks' ``declare_with``, in order."""
         out: dict[str, list[str]] = {}
@@ -170,10 +214,11 @@ class RemarkCatalogue(BaseModel):
 
     def declared_kinds(self, parameters: dict) -> list[str]:
         """The kinds an act's parameters declare, by presence of their parameters."""
+        shared = self.message_level_parameters()
         return [
             kind
             for kind, names in self.declaring_parameters().items()
-            if any(is_parameter_set(parameters.get(name)) for name in names)
+            if any(is_parameter_set(parameters.get(n)) for n in names if n not in shared)
         ]
 
     def prompt_block(self) -> str:
@@ -240,6 +285,17 @@ class RemarkCatalogue(BaseModel):
                     f"'{key}' says '{remark.declares}' and must set "
                     f"{', '.join(remark.declare_with)}, but the turn {what}"
                     + (f" (unset: {', '.join(missing)})" if missing else ""),
+                    self._keys_text(declared_kind),
+                )
+            wrong = {
+                name: value
+                for name, value in remark.fields.items()
+                if not _same_value(parameters.get(name), value)
+            }
+            if wrong:
+                needed = ", ".join(f"{k}={v}" for k, v in wrong.items())
+                raise RemarkElementError(
+                    f"'{key}' fixes {needed}; the turn must set exactly that",
                     self._keys_text(declared_kind),
                 )
 

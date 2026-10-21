@@ -14,7 +14,9 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from mind.cognitive_architecture.actions import Action
+from mind.cognitive_architecture.actions.models import normalize_remark_reply
 from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
+from mind.cognitive_architecture.references import HandleTable
 from tests.fixtures.mcp_experiment import (
     ARM_CATALOGUE,
     ARM_RED,
@@ -69,9 +71,17 @@ class TestMatrix:
             state = case.state(persona, with_catalogue=True)
             params = {"message": "Words.", "utterance_element": entry.key}
             params.update(declaring_values(entry.declare_with, state))
-            Action.model_validate(
-                {"action": "act_in_interaction", "parameters": params}, context={"state": state}
+            params.update(entry.fields)
+            reply_parameter = catalogue().reply_parameter(entry)
+            if reply_parameter is not None:
+                # A reply names the partner's last line, by its handle.
+                table = HandleTable(state.observation, state.conversation_histories)
+                params[reply_parameter] = table.handles("message")[-1]
+            # The node normalizes a reply's omitted addressee before validating.
+            action = normalize_remark_reply(
+                {"action": "act_in_interaction", "parameters": params}, state
             )
+            Action.model_validate(action, context={"state": state})
 
     @pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
     def test_the_red_arm_state_carries_no_catalogue_and_requires_no_key(self, case):
@@ -316,7 +326,7 @@ class TestCost:
     def test_catalogue_block_size_is_reported(self, records):
         block = cost_report(records, catalogue())["catalogue_block"]
 
-        assert block["remarks"] == 20
+        assert block["remarks"] == len(catalogue().remarks)
         assert block["block_chars"] == len(catalogue().prompt_block())
 
 
@@ -431,8 +441,13 @@ async def test_no_prompt_of_the_matrix_carries_a_real_id(case):
 async def test_run_turn_records_the_reference_translation_and_the_refused_attempt():
     case = next(c for c in CASES if c.id == "asked_who_told_told")
     key = "answer_who_told.told"
-    fabricated = {"message": "Tobin.", "utterance_element": key, "answer_in_reply_to": "msg-123"}
-    valid = {**fabricated, "answer_in_reply_to": "m3"}
+    fabricated = {
+        "message": "Tobin.",
+        "utterance_element": key,
+        "is_answer": True,
+        "in_reply_to": "msg-123",
+    }
+    valid = {**fabricated, "in_reply_to": "m3"}
     recorder = RecordingLLM(_Scripted(_reflection(fabricated), _reflection(valid)))
 
     record = await run_turn(
@@ -449,11 +464,11 @@ async def test_run_turn_records_the_reference_translation_and_the_refused_attemp
 
     assert record["retries"] == 1
     assert "handle this cycle" in record["validation_failures"][0]
-    assert record["parameters"]["answer_in_reply_to"] == "m3", "what the model wrote"
-    assert record["wire_parameters"]["answer_in_reply_to"] == case.message_id(2)
+    assert record["parameters"]["in_reply_to"] == "m3", "what the model wrote"
+    assert record["wire_parameters"]["in_reply_to"] == case.message_id(2)
     assert record["references"] == [
         {
-            "parameter": "answer_in_reply_to",
+            "parameter": "in_reply_to",
             "domain": "message",
             "written": "m3",
             "wire_value": case.message_id(2),
