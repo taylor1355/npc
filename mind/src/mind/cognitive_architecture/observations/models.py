@@ -1,6 +1,7 @@
 """Observation models for the cognitive architecture"""
 
 import logging
+import math
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -198,7 +199,9 @@ def _words_list(value: object) -> list[str]:
 
 def _age_in_words(minutes: object) -> str:
     """Band word for how long ago a deed was; never a number."""
-    if isinstance(minutes, bool) or not isinstance(minutes, (int, float)) or minutes < 0:
+    if isinstance(minutes, bool) or not isinstance(minutes, (int, float)):
+        return ""
+    if not math.isfinite(minutes) or minutes < 0:
         return ""
     if minutes < 30:
         return "just now"
@@ -209,6 +212,19 @@ def _age_in_words(minutes: object) -> str:
     if minutes < 4320:
         return "a day or two ago"
     return "a while ago"
+
+
+_DEED_ROLES = ("patient", "perceiver")
+
+
+def _note_unknown_role(role: object) -> None:
+    """Warn, never raise, when the simulation sends a deed role this package does not know.
+
+    The value is kept as sent and only ``"patient"`` renders as "(done to you)", so a new
+    simulation role degrades to the perceiver reading instead of failing the observation.
+    """
+    if role not in _DEED_ROLES:
+        logger.warning(f"Unknown deed role {role!r}; rendering as a perceiver")
 
 
 def _deed_clause(act: str, patients: list[str], place: str, role: str) -> str:
@@ -231,12 +247,14 @@ def _format_deed_perceived(payload: dict[str, Any]) -> str:
     is a magnitude the mind does not need spelled out, so it is not rendered.
     """
     actor = str(payload.get("actor") or payload.get("actor_id") or "Someone")
+    role = payload.get("role", "perceiver")
+    _note_unknown_role(role)
     act = payload.get("act")
     clause = _deed_clause(
         act if isinstance(act, str) else "",
         _words_list(payload.get("patients")),
         str(payload.get("place") or "").strip(),
-        str(payload.get("role") or ""),
+        role if isinstance(role, str) else "",
     )
     return f"{actor} did a deed: {clause}"
 
@@ -1570,7 +1588,13 @@ class RecalledDeed(BaseModel):
     place: str | None = None
     minutes_ago: float | None = Field(default=None, ge=0.0)
     #: "patient" when the observer was done to, else "perceiver".
-    role: Literal["patient", "perceiver"] = "perceiver"
+    role: str = "perceiver"
+
+    @field_validator("role")
+    @classmethod
+    def _warn_on_unknown_role(cls, value: str) -> str:
+        _note_unknown_role(value)
+        return value
 
     def render(self) -> str:
         text = _deed_clause(self.act, self.patients, self.place or "", self.role)

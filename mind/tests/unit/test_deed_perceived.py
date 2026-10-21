@@ -1,11 +1,16 @@
 """FS10b lane 3 (M1/M3): the DEED_PERCEIVED mind event and its shared constants."""
 
+import logging
+
 import pytest
 
+from mind.cognitive_architecture.actions import Action, ActionType
 from mind.cognitive_architecture.observations import MindEvent, MindEventType, RecalledDeed
 from mind.cognitive_architecture.observations.models import _age_in_words
+from mind.cognitive_architecture.state import PipelineState
 from mind.constants import DEFAULT_RECENCY_DECAY_PER_GAME_HOUR
 from mind.interfaces.mcp.server import MCPServer
+from tests.unit.test_mcp_server import parse_response
 
 # Shape of DeedPerceivedObservation.get_data in the simulation.
 WIRE_EVENT = {
@@ -52,10 +57,6 @@ def test_str_is_total_over_malformed_payloads():
 
 
 async def test_decide_action_accepts_deed_perceived_event():
-    from mind.cognitive_architecture.actions import Action, ActionType
-    from mind.cognitive_architecture.state import PipelineState
-    from tests.unit.test_mcp_server import parse_response
-
     server = MCPServer()
     await server.mcp.call_tool(
         "create_mind",
@@ -113,9 +114,36 @@ def test_event_and_conduct_render_the_same_clause():
     )
 
 
-def test_role_is_closed_to_the_two_wire_values():
-    with pytest.raises(ValueError):
-        RecalledDeed(role="bystander")
+def _warnings(caplog):
+    return [r for r in caplog.records if "Unknown deed role" in r.getMessage()]
+
+
+def test_unknown_conduct_role_warns_and_renders_as_a_perceiver(caplog):
+    with caplog.at_level(logging.WARNING):
+        deed = RecalledDeed(act="gift", role="bystander")
+    assert deed.role == "bystander"
+    assert len(_warnings(caplog)) == 1
+    assert "done to you" not in deed.render()
+
+
+def test_unknown_event_role_warns_and_renders_as_a_perceiver(caplog):
+    event = MindEvent(
+        timestamp=1,
+        event_type=MindEventType.DEED_PERCEIVED,
+        payload={"act": "gift", "role": "bystander"},
+    )
+    with caplog.at_level(logging.WARNING):
+        text = str(event)
+    assert len(_warnings(caplog)) == 1
+    assert text == "Someone did a deed: gift"
+
+
+def test_known_roles_do_not_warn(caplog):
+    with caplog.at_level(logging.WARNING):
+        RecalledDeed(role="patient")
+        RecalledDeed(role="perceiver")
+        str(MindEvent.model_validate(WIRE_EVENT))
+    assert not _warnings(caplog)
 
 
 @pytest.mark.parametrize(
@@ -131,6 +159,9 @@ def test_role_is_closed_to_the_two_wire_values():
         (4319.9, "a day or two ago"),
         (4320, "a while ago"),
         (-1, ""),
+        (float("nan"), ""),
+        (float("inf"), ""),
+        (float("-inf"), ""),
         (None, ""),
         (True, ""),
     ],
