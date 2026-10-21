@@ -6,6 +6,7 @@ import pytest
 
 from mind.cognitive_architecture.actions import Action, ActionType
 from mind.cognitive_architecture.observations import MindEvent, MindEventType, RecalledDeed
+from mind.cognitive_architecture.observations import models as observation_models
 from mind.cognitive_architecture.observations.models import _age_in_words
 from mind.cognitive_architecture.state import PipelineState
 from mind.constants import DEFAULT_RECENCY_DECAY_PER_GAME_HOUR
@@ -114,6 +115,13 @@ def test_event_and_conduct_render_the_same_clause():
     )
 
 
+@pytest.fixture(autouse=True)
+def _reset_warned_roles():
+    observation_models._WARNED_DEED_ROLES.clear()
+    yield
+    observation_models._WARNED_DEED_ROLES.clear()
+
+
 def _warnings(caplog):
     return [r for r in caplog.records if "Unknown deed role" in r.getMessage()]
 
@@ -168,3 +176,14 @@ def test_known_roles_do_not_warn(caplog):
 )
 def test_age_bands_at_their_boundaries(minutes, band):
     assert _age_in_words(minutes) == band
+
+
+def test_an_unknown_role_warns_once_per_distinct_value(caplog):
+    with caplog.at_level(logging.WARNING):
+        RecalledDeed(role="bystander")
+        RecalledDeed(role="bystander")
+        str(MindEvent(timestamp=1, event_type="DEED_PERCEIVED", payload={"role": "bystander"}))
+        assert len(_warnings(caplog)) == 1
+        RecalledDeed(role="witness")
+        RecalledDeed(role="witness")
+    assert len(_warnings(caplog)) == 2

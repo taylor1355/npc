@@ -215,16 +215,24 @@ def _age_in_words(minutes: object) -> str:
 
 
 _DEED_ROLES = ("patient", "perceiver")
+# Roles already warned about: a persistent new role would otherwise log once per
+# NPC per tick. Process-lifetime on purpose; tests reset it.
+_WARNED_DEED_ROLES: set[str] = set()
 
 
 def _note_unknown_role(role: object) -> None:
-    """Warn, never raise, when the simulation sends a deed role this package does not know.
+    """Warn once per distinct role, never raise, when the simulation sends a deed role this package does not know.
 
     The value is kept as sent and only ``"patient"`` renders as "(done to you)", so a new
     simulation role degrades to the perceiver reading instead of failing the observation.
     """
-    if role not in _DEED_ROLES:
-        logger.warning(f"Unknown deed role {role!r}; rendering as a perceiver")
+    if role in _DEED_ROLES:
+        return
+    key = repr(role)
+    if key in _WARNED_DEED_ROLES:
+        return
+    _WARNED_DEED_ROLES.add(key)
+    logger.warning(f"Unknown deed role {role!r}; rendering as a perceiver")
 
 
 def _deed_clause(act: str, patients: list[str], place: str, role: str) -> str:
