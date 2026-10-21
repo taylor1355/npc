@@ -335,6 +335,19 @@ CASES: tuple[ExperimentCase, ...] = (
         situation="Wren mentioned Crow Ridge. I have never heard of it and want to know who told them.",
         goals=("Find out who told Wren about Crow Ridge",),
     ),
+    ExperimentCase(
+        id="partner_shares_good_news",
+        why="The partner shares a plan I think is right; apt: agree with their line.",
+        lines=(
+            Line("Hello!", element="greeting"),
+            Line("Hi Wren.", me=True, element="greeting_response"),
+            Line("I'm going to plant the orchard's apple seeds this week.", element="response"),
+        ),
+        apt_keys=("react_agree",),
+        apt_kind="react",
+        situation="Wren plans to plant apple seeds at the orchard, which I think is a good idea.",
+        memories=("Apple trees did well in the orchard last year.",),
+    ),
 )
 
 

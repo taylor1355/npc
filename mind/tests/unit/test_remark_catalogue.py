@@ -15,6 +15,7 @@ from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action
+from mind.cognitive_architecture.actions.models import normalize_remark_reply
 from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from mind.cognitive_architecture.observations import ConversationMessage
 from mind.cognitive_architecture.remark_catalogue import (
@@ -243,10 +244,17 @@ def _stance():
     return remark, parsed.reply_parameter(remark)
 
 
-def _stance_params(remark, reply_parameter, reply_id="m1") -> dict:
+def _stance_params(remark, reply_parameter, reply_id="m1", addressees=("npc_b",)) -> dict:
     params = {"utterance_element": remark.key, **_declaring(remark), **remark.fields}
     params[reply_parameter] = reply_id
+    if addressees is not None:
+        params["addressee_ids"] = list(addressees)
     return params
+
+
+def _normalized(parameters: dict, state) -> dict:
+    action = {"action": "act_in_interaction", "parameters": {"message": "Words.", **parameters}}
+    return normalize_remark_reply(action, state)
 
 
 def _state_with_message(speaker_id="npc_b"):
@@ -280,15 +288,43 @@ class TestFixedFieldRemarks:
         assert reply in catalogue().message_level_parameters()
         assert catalogue().declared_kinds({reply: "m1"}) == []
 
-    def test_the_reply_is_addressed_to_the_speaker_alone(self):
+    def test_a_wrong_addressee_is_refused_not_overwritten(self):
         remark, reply = _stance()
-        params = _stance_params(remark, reply)
-        params["addressee_ids"] = ["npc_c", "npc_d"]
+        params = _stance_params(remark, reply, addressees=("npc_c", "npc_d"))
 
-        action = _act(params, _state_with_message("npc_b"))
+        with pytest.raises(ValidationError, match="npc_b"):
+            _act(params, _state_with_message("npc_b"))
 
-        assert action.parameters[reply] == "m1"
-        assert action.parameters["addressee_ids"] == ["npc_b"]
+    def test_an_omitted_addressee_is_filled_by_normalization(self):
+        remark, reply = _stance()
+        params = _stance_params(remark, reply, addressees=None)
+        state = _state_with_message("npc_b")
+
+        normalized = _normalized(params, state)
+
+        assert normalized["parameters"]["addressee_ids"] == ["npc_b"]
+        assert "addressee_ids" not in params, "normalization returns a new dict"
+        Action.model_validate(normalized, context={"state": state})
+
+    def test_validating_twice_is_idempotent(self):
+        remark, reply = _stance()
+        state = _state_with_message("npc_b")
+        normalized = _normalized(_stance_params(remark, reply, addressees=None), state)
+
+        first = Action.model_validate(normalized, context={"state": state})
+        second = Action.model_validate(first.model_dump(), context={"state": state})
+
+        assert first.parameters == second.parameters
+        assert second.parameters["addressee_ids"] == ["npc_b"]
+
+    def test_normalization_leaves_what_it_cannot_place_for_validation(self):
+        remark, reply = _stance()
+        state = _state_with_message("npc_b")
+        unknown = _stance_params(remark, reply, "nope", addressees=None)
+
+        assert "addressee_ids" not in _normalized(unknown, state)["parameters"]
+        wrong = _stance_params(remark, reply, addressees=("npc_c",))
+        assert _normalized(wrong, state)["parameters"]["addressee_ids"] == ["npc_c"]
 
     def test_a_reply_to_an_unknown_message_is_refused(self):
         remark, reply = _stance()
@@ -296,7 +332,7 @@ class TestFixedFieldRemarks:
         with pytest.raises(ValidationError, match="not a message in this conversation"):
             _act(_stance_params(remark, reply, "nope"), _state_with_message())
 
-    def test_a_remark_without_fields_is_not_addressed_for_the_model(self):
+    def test_a_remark_without_fields_keeps_the_models_addressees(self):
         remark = _typed()
         params = {"utterance_element": remark.key, **_declaring(remark)}
         params["addressee_ids"] = ["npc_c"]

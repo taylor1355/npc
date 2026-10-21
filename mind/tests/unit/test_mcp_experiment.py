@@ -14,6 +14,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from mind.cognitive_architecture.actions import Action
+from mind.cognitive_architecture.actions.models import normalize_remark_reply
 from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from tests.fixtures.mcp_experiment import (
     ARM_CATALOGUE,
@@ -59,9 +60,7 @@ class TestMatrix:
     def test_the_matrix_covers_every_kind_and_the_phatic_roots(self):
         kinds = {case.apt_kind for case in CASES}
 
-        # Stance remarks (``react``) postdate the experiment's matrix; no case drives them.
-        uncovered = {"react"}
-        assert kinds >= {""} | (set(catalogue().declaring_parameters()) - uncovered)
+        assert kinds >= {""} | set(catalogue().declaring_parameters())
 
     @pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
     def test_an_apt_act_validates_against_each_case_state(self, case):
@@ -69,11 +68,18 @@ class TestMatrix:
         entry = catalogue().get(case.apt_keys[0])
         params = {"message": "Words.", "utterance_element": entry.key}
         params.update(dict.fromkeys(entry.declare_with, "x"))
+        params.update(entry.fields)
+        reply_parameter = catalogue().reply_parameter(entry)
+        if reply_parameter is not None:
+            # A reply names a real message: the partner's last line.
+            params[reply_parameter] = f"{case.id}_m{len(case.lines) - 1}"
         for persona in PERSONAS:
             state = case.state(persona, with_catalogue=True)
-            Action.model_validate(
-                {"action": "act_in_interaction", "parameters": params}, context={"state": state}
+            # The node normalizes a reply's omitted addressee before validating.
+            action = normalize_remark_reply(
+                {"action": "act_in_interaction", "parameters": params}, state
             )
+            Action.model_validate(action, context={"state": state})
 
     @pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
     def test_the_red_arm_state_carries_no_catalogue_and_requires_no_key(self, case):
