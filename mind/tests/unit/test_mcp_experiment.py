@@ -357,6 +357,19 @@ def test_the_runner_dry_run_spends_nothing(capsys):
     assert f"{len(CASES) * len(PERSONAS) * 2} turns would run" in capsys.readouterr().out
 
 
+def test_the_runner_refuses_reps_that_would_replay_identical_samples(capsys):
+    import tools.run_mcp_experiment as runner
+
+    with pytest.raises(SystemExit) as refused:
+        runner.main(["--dry-run", "--reps", "5"])
+
+    assert refused.value.code == 2
+    assert "identical samples" in capsys.readouterr().err
+    # The control: the same reps at a sampling temperature, and the default, run.
+    assert runner.main(["--dry-run", "--reps", "5", "--temperature", "0.7"]) == 0
+    assert runner.main(["--dry-run"]) == 0
+
+
 def test_the_committed_floors_came_from_a_measured_run():
     """Floors are derived, never guessed: the sidecar names the run it came from."""
     from tests.fixtures.mcp_experiment_analysis import FLOOR_METRICS
