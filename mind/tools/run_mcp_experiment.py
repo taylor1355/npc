@@ -210,7 +210,15 @@ def parse_args(argv=None):
     parser.add_argument("--personas", nargs="*", help="persona ids (default: all)")
     parser.add_argument("--out", default="runs/mcp_experiment.jsonl")
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.reps > 1 and args.temperature == 0:
+        # At temperature 0 every rep replays the same turns, so --reps would
+        # multiply the record count without adding a single sample.
+        parser.error(
+            f"--reps {args.reps} with --temperature 0 would replay identical samples; "
+            "raise --temperature (for example 0.7) or use --reps 1"
+        )
+    return args
 
 
 def main(argv=None) -> int:

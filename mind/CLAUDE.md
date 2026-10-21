@@ -24,6 +24,7 @@ src/mind/
 │   ├── pipeline.py                  # StateGraph orchestration
 │   ├── state.py                     # PipelineState model
 │   ├── working_memory.py            # WorkingMemory, NewMemory (shared models)
+│   ├── references.py                # Per-cycle [mN]/[pN] handles for reference parameters
 │   ├── nodes/                       # Processing nodes
 │   │   ├── base.py                  # Node & LLMNode base classes (caching, retry, salvage hook)
 │   │   ├── memory_query/            # Generate semantic search queries

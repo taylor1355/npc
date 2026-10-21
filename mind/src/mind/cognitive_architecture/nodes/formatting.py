@@ -77,6 +77,7 @@ def format_conversation_histories(
     histories: dict[str, list[ConversationMessage]],
     entity_id: str,
     partners: dict[str, list[ConversationPartner]] | None = None,
+    annotate_handles: bool = False,
 ) -> str:
     """Render every message in every active, simulation-bounded conversation.
 
@@ -89,9 +90,20 @@ def format_conversation_histories(
     line under a conversation's header per partner whose appearance reads as
     notable. Absent or empty, the output is byte-identical to what it was before
     the perception channel existed.
+
+    ``annotate_handles`` puts each row's ``[mN]`` handle first on the row, so an
+    action parameter that refers to a message can name it without the prompt ever
+    showing the message's id (NPC-2021). Rows are looked up by position in
+    ``references.message_handle_positions``, so the renderer holds no ordering rule
+    of its own: the numbering is the handle function's. Off, the rows are
+    unannotated.
     """
     if not histories:
         return "No active conversation."
+
+    from mind.cognitive_architecture.references import message_handle_positions
+
+    handle_at = message_handle_positions(histories) if annotate_handles else {}
 
     from mind.cognitive_architecture.observations import render_appearance
 
@@ -103,11 +115,13 @@ def format_conversation_histories(
             if appears:
                 name = partner.display_name.strip() or partner.entity_id
                 lines.append(f"  {name} appears {appears}.")
-        for message in histories[interaction_id]:
+        for index, message in enumerate(histories[interaction_id]):
             speaker = message.speaker_name.strip() or message.speaker_id or "Unknown speaker"
             if message.speaker_id == entity_id:
                 speaker = f"[YOU] {speaker}"
             timestamp = f"[t={message.timestamp}] " if message.timestamp is not None else ""
+            handle = handle_at.get((interaction_id, index))
+            timestamp = f"[{handle}] {timestamp}" if handle else timestamp
             markers = message.render_markers()
             suffix = f" {markers}" if markers else ""
             lines.append(f"{timestamp}{speaker}: {message.message}{suffix}")

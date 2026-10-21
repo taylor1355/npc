@@ -14,6 +14,7 @@ from pydantic import (
     model_validator,
 )
 
+from mind.cognitive_architecture.references import WIRE_KEY_REFERS_TO, ParameterReference
 from mind.logging_config import get_logger
 
 logger = get_logger()
@@ -132,6 +133,11 @@ def _format_parameter_hint(param_name: str, spec: dict) -> str:
     # Membership, not truthiness: ``false`` and ``0`` are legitimate defaults.
     if WIRE_KEY_PARAM_DEFAULT in spec:
         qualifiers.append(f"default: {spec[WIRE_KEY_PARAM_DEFAULT]!r}")
+    # What the parameter refers to (NPC-2021), in the same words the validator
+    # enforces: the model is told to give a handle because an id is never shown.
+    reference = ParameterReference.from_wire(spec.get(WIRE_KEY_REFERS_TO), parameter=param_name)
+    if reference is not None and reference.hint():
+        qualifiers.append(reference.hint())
 
     return f"{text} ({', '.join(qualifiers)})" if qualifiers else text
 
@@ -565,6 +571,31 @@ class StatusObservation(BaseModel):
             hints[str(param_name)] = _format_parameter_hint(str(param_name), spec)
 
         return hints
+
+    def act_parameter_references(self) -> dict[str, ParameterReference]:
+        """Which advertised act parameters name something by handle (NPC-2021).
+
+        Read from each spec's optional ``refers_to`` key, so a parameter the
+        simulation declares as a reference is validated and translated with no
+        Python change here; nothing in this module may name a parameter. Parameters
+        without the key (an older simulation, or a plain parameter) are absent.
+
+        Same degradation contract as ``act_parameter_hints``: never raises, a
+        malformed entry is skipped with a log.
+        """
+        raw: Any = self.current_interaction.get(WIRE_KEY_ACT_PARAMETERS)
+        if not self.current_interaction or not isinstance(raw, dict):
+            return {}
+        references: dict[str, ParameterReference] = {}
+        for param_name, spec in raw.items():
+            if not isinstance(spec, dict):
+                continue
+            reference = ParameterReference.from_wire(
+                spec.get(WIRE_KEY_REFERS_TO), parameter=str(param_name)
+            )
+            if reference is not None:
+                references[str(param_name)] = reference
+        return references
 
 
 class NeedsObservation(BaseModel):

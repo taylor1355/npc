@@ -100,20 +100,25 @@ class TestHandleResolution:
         assert action.parameters["zone_id"] == "p2", (
             "the action stays in handle-space; only the wire payload carries the id"
         )
-        assert action.wire_payload(observation)["parameters"]["zone_id"] == ZONE_POND
+        assert (
+            action.wire_payload(PipelineState(observation=observation))["parameters"]["zone_id"]
+            == ZONE_POND
+        )
 
     @pytest.mark.parametrize("spelling", ["p2", "[p2]", "P2", " [P2] "])
     def test_the_bracketed_and_upper_case_spellings_resolve(self, spelling):
         """The simulation never sees a handle, so leniency here cannot make the
         two tiers disagree about what was supplied."""
         observation = _observation()
-        payload = _validate({"zone_id": spelling}, observation).wire_payload(observation)
+        payload = _validate({"zone_id": spelling}, observation).wire_payload(
+            PipelineState(observation=observation)
+        )
         assert payload["parameters"]["zone_id"] == ZONE_POND
 
     def test_a_coordinate_move_passes_through_the_wire_untouched(self):
         observation = _observation()
         action = _validate({"destination": [3, 4]}, observation)
-        assert action.wire_payload(observation) == action.model_dump()
+        assert action.wire_payload(PipelineState(observation=observation)) == action.model_dump()
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +169,7 @@ class TestUnknownReferencesAreRefused:
             ),
         )
         with pytest.raises(UnknownPlaceHandleError):
-            action.wire_payload(next_cycle)
+            action.wire_payload(PipelineState(observation=next_cycle))
 
     def test_a_memory_from_another_cycle_names_no_place_rather_than_a_guess(self):
         """``memory_parameters``' sibling of the case above. A handle the
@@ -179,7 +184,7 @@ class TestUnknownReferencesAreRefused:
                 {"known_places": [{"zone_id": ZONE_POND, "name": "the pond bend"}]}
             ),
         )
-        remembered = action.memory_parameters(next_cycle)
+        remembered = action.memory_parameters(PipelineState(observation=next_cycle))
         assert remembered["place"] == "an unknown place"
         assert "zone_id" not in remembered
 
@@ -291,9 +296,9 @@ class TestNoUuidReachesThePrompt:
         for zone_id in ALL_ZONE_IDS:
             assert zone_id not in prompt
 
-        assert state.chosen_action.wire_payload(observation)["parameters"]["zone_id"] == (
-            ZONE_BERRY
-        ), "and the simulation still receives the real id"
+        assert state.chosen_action.wire_payload(PipelineState(observation=observation))[
+            "parameters"
+        ]["zone_id"] == (ZONE_BERRY), "and the simulation still receives the real id"
 
     async def test_the_next_cycle_remembers_the_place_by_name_not_by_handle_or_id(self):
         """``ACTION_CHOSEN`` renders into LATER prompts. The id would be a UUID in

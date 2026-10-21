@@ -36,6 +36,11 @@ HEADLINE = (
     "first_try_rate",
     "mean_retries",
     "remark_failures",
+    "reference_failures",
+    "reference_values",
+    "reference_resolved_rate",
+    "reference_apt_rate",
+    "fabricated_reference_count",
     "other_failures",
     "salvage_rate",
 )

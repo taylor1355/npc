@@ -23,16 +23,17 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+from mind.cognitive_architecture.actions.exceptions import UnknownReferenceHandleError
 from mind.cognitive_architecture.memory.models import Memory
 from mind.cognitive_architecture.observations import (
     ConversationMessage,
-    ConversationObservation,
     EntityData,
     NeedsObservation,
     Observation,
     StatusObservation,
     VisionObservation,
 )
+from mind.cognitive_architecture.observations.models import PlaceObservation
 from mind.cognitive_architecture.state import PipelineState
 from mind.cognitive_architecture.working_memory import WorkingMemory
 
@@ -92,12 +93,35 @@ class ExperimentCase:
     goals: tuple[str, ...] = ()
     memories: tuple[str, ...] = ()
     needs: dict[str, float] = field(default_factory=dict)
+    # Places this NPC knows, ``(zone_id, name)``. The zone ids are the REAL ids the
+    # simulation would mint; the prompt shows each place by handle and never the
+    # id, which is exactly what the reference metrics measure (NPC-2021).
+    places: tuple[tuple[str, str], ...] = ()
+    # What an apt reference points at: the transcript lines (by index) that are
+    # the open question this turn answers, and the zone ids of the places it may
+    # name. Empty means the case has no apt referent of that kind, so a turn that
+    # nonetheless sets one is a reference to something real but beside the point.
+    expect_message_lines: tuple[int, ...] = ()
+    expect_zone_ids: tuple[str, ...] = ()
+
+    def message_id(self, index: int) -> str:
+        """The real id the simulation would have minted for transcript line ``index``."""
+        return f"{self.id}_m{index}"
+
+    def known_message_ids(self) -> list[str]:
+        return [self.message_id(i) for i in range(len(self.lines))]
+
+    def known_zone_ids(self) -> list[str]:
+        return [zone_id for zone_id, _ in self.places]
+
+    def expect_message_ids(self) -> list[str]:
+        return [self.message_id(i) for i in self.expect_message_lines]
 
     def state(self, persona: Persona, *, with_catalogue: bool) -> PipelineState:
         """The pipeline state one turn of this case runs on."""
         messages = [
             ConversationMessage(
-                id=f"{self.id}_m{index}",
+                id=self.message_id(index),
                 speaker_id=persona.entity_id if line.me else PARTNER_ID,
                 speaker_name=persona.name if line.me else PARTNER_NAME,
                 message=line.text,
@@ -131,15 +155,18 @@ class ExperimentCase:
                     EntityData(entity_id=PARTNER_ID, display_name=PARTNER_NAME, position=(10, 11))
                 ]
             ),
-            conversations=[
-                ConversationObservation(
-                    interaction_id=INTERACTION_ID,
-                    interaction_name="conversation",
-                    participants=[persona.entity_id, PARTNER_ID],
-                    initiator_id=PARTNER_ID,
-                    conversation_history=messages,
-                )
-            ],
+            place=PlaceObservation.model_validate(
+                {
+                    "contract_version": 5,
+                    "known_places": [
+                        {"zone_id": zone_id, "name": name, "distance": 6 + 3 * i}
+                        for i, (zone_id, name) in enumerate(self.places)
+                    ],
+                    "known_total": len(self.places),
+                }
+            )
+            if self.places
+            else None,
         )
         return PipelineState(
             observation=observation,
@@ -157,6 +184,11 @@ class ExperimentCase:
             conversation_histories={INTERACTION_ID: messages},
             remark_catalogue=catalogue() if with_catalogue else None,
         )
+
+
+ZONE_OLD_ORCHARD = "zone_141767cd-68f4-4be2-abff-539a917106a6"
+ZONE_MILL_POND = "zone_d7ecbf9e-2be7-406a-9d4f-d41a7fedb45a"
+ZONE_CROW_RIDGE = "zone_71140def-17a9-4a01-a148-7cd7b3703c19"
 
 
 def _ask_who_told(subject: str) -> dict:
@@ -253,13 +285,15 @@ CASES: tuple[ExperimentCase, ...] = (
             Line(
                 "Who told you about the Old Orchard?",
                 element="ask_who_told",
-                declarations=(_ask_who_told("zone_old_orchard"),),
+                declarations=(_ask_who_told(ZONE_OLD_ORCHARD),),
             ),
         ),
         apt_keys=_WHO_TOLD_ANSWERS,
         apt_kind="answer",
         situation="Wren asked me who told me about the Old Orchard.",
         memories=("Tobin told me about the Old Orchard yesterday; I have never been there.",),
+        places=((ZONE_OLD_ORCHARD, "the Old Orchard"),),
+        expect_message_lines=(2,),
     ),
     ExperimentCase(
         id="asked_who_told_own",
@@ -270,13 +304,15 @@ CASES: tuple[ExperimentCase, ...] = (
             Line(
                 "Who told you about Mill Pond?",
                 element="ask_who_told",
-                declarations=(_ask_who_told("zone_mill_pond"),),
+                declarations=(_ask_who_told(ZONE_MILL_POND),),
             ),
         ),
         apt_keys=("answer_who_told.own_been",),
         apt_kind="answer",
         situation="Wren asked me who told me about Mill Pond.",
         memories=("I walked to Mill Pond myself last week and sat by the water.",),
+        places=((ZONE_MILL_POND, "Mill Pond"),),
+        expect_message_lines=(2,),
     ),
     ExperimentCase(
         id="partner_hungry_share_place",
@@ -293,6 +329,8 @@ CASES: tuple[ExperimentCase, ...] = (
         apt_kind="share_belief",
         situation="Wren is hungry and does not know where food is. I know the Old Orchard has plenty.",
         memories=("The Old Orchard, east of the village, is full of ripe apples.",),
+        places=((ZONE_OLD_ORCHARD, "the Old Orchard"), (ZONE_MILL_POND, "Mill Pond")),
+        expect_zone_ids=(ZONE_OLD_ORCHARD,),
     ),
     ExperimentCase(
         id="partner_hungry_share_thing",
@@ -321,6 +359,8 @@ CASES: tuple[ExperimentCase, ...] = (
         apt_kind="share_belief",
         situation="Wren plans to go to the Old Orchard, but I was there this morning and it was picked clean.",
         memories=("I went to the Old Orchard this morning; every tree was picked clean.",),
+        places=((ZONE_OLD_ORCHARD, "the Old Orchard"), (ZONE_MILL_POND, "Mill Pond")),
+        expect_zone_ids=(ZONE_OLD_ORCHARD,),
     ),
     ExperimentCase(
         id="ask_who_told_them",
@@ -332,8 +372,10 @@ CASES: tuple[ExperimentCase, ...] = (
         ),
         apt_keys=("ask_who_told",),
         apt_kind="ask_who_told",
-        situation="Wren mentioned Crow Ridge. I have never heard of it and want to know who told them.",
+        situation="Wren mentioned Crow Ridge, a place I know only by name, and I want to know who told them.",
         goals=("Find out who told Wren about Crow Ridge",),
+        places=((ZONE_CROW_RIDGE, "Crow Ridge"), (ZONE_MILL_POND, "Mill Pond")),
+        expect_zone_ids=(ZONE_CROW_RIDGE,),
     ),
     ExperimentCase(
         id="partner_shares_good_news",
@@ -409,6 +451,27 @@ class RecordingLLM:
         return response
 
 
+def _wire_references(action, state) -> tuple[dict, list[dict], str | None]:
+    """The turn's parameters as the simulation would get them, and its reference rows.
+
+    One row per reference parameter the turn set: the handle the model wrote, the
+    domain, and the real id the wire carries for it. A handle that no longer
+    resolves is a recorded ``wire_error``, never a crash: the analysis counts it as
+    a fabricated reference.
+    """
+    if action is None:
+        return {}, [], None
+    try:
+        wire = action.wire_payload(state)["parameters"]
+    except UnknownReferenceHandleError as exc:
+        return dict(action.parameters), [], f"{type(exc).__name__}: {exc}"
+    rows = [
+        {"parameter": name, "domain": domain, "written": reference, "wire_value": wire.get(name)}
+        for name, domain, reference in action.reference_parameters(state.observation)
+    ]
+    return wire, rows, None
+
+
 async def run_turn(
     node,
     recorder: RecordingLLM,
@@ -438,6 +501,7 @@ async def run_turn(
 
     action = result.chosen_action
     parameters = dict(action.parameters) if action is not None else {}
+    wire_parameters, references, wire_error = _wire_references(action, result)
     failures = list(result.validation_failures.get(node.step_name, []))
     max_attempts = node.max_retries + 1
     usage = result.tokens_used.get(node.step_name)
@@ -455,6 +519,16 @@ async def run_turn(
         "attempts": [dict(call) for call in recorder.calls],
         "action": str(action.action) if action is not None else None,
         "parameters": parameters,
+        # What the simulation would receive, and how each reference parameter the
+        # turn set fared against the real ids of the case (NPC-2021). ``parameters``
+        # stays what the model wrote -- handles included.
+        "wire_parameters": wire_parameters,
+        "wire_error": wire_error,
+        "references": references,
+        "known_message_ids": case.known_message_ids(),
+        "known_zone_ids": case.known_zone_ids(),
+        "expect_message_ids": case.expect_message_ids(),
+        "expect_zone_ids": list(case.expect_zone_ids),
         "words": str(parameters.get("message", "") or ""),
         "remark_named": str(parameters.get("utterance_element", "") or ""),
         "validation_failures": failures,

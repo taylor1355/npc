@@ -123,6 +123,18 @@ id); `Action.wire_payload` swaps the handle for the id as the action leaves
 `decide_action`; and the `ACTION_CHOSEN` event records the place's *name*, so a
 later prompt carries neither a UUID nor a handle from another cycle.
 
+The same scheme names a **message** and a place in `act_in_interaction`
+parameters (NPC-2021). Which parameters refer to one is declared by the
+simulation (`refers_to` on the act-parameter spec; see `docs/interfaces/mcp.md`),
+not named here. Every transcript row is prefixed `[mN]`, numbered across the
+active conversations in the order they print (`references.message_handles`, a
+pure function of the conversation histories). A set reference parameter must be
+one of this cycle's handles; `Action.wire_payload(state)` translates each to its
+real id at the wire, and `memory_parameters(state)` records the referent as prose
+(a place by name, a message by speaker and a clipped quotation) so a later prompt
+carries no handle from another cycle. Handles are cycle-scoped and nothing depends
+on them across cycles.
+
 **Delivery order:** this server must deploy strictly after the simulation that
 understands `zone_id`. An older simulation refuses `{zone_id}` as a malformed
 `MOVE_TO`, at ERROR, every cycle a mind names a place.

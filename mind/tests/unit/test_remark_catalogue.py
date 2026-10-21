@@ -18,10 +18,10 @@ from mind.cognitive_architecture.actions import Action
 from mind.cognitive_architecture.actions.models import normalize_remark_reply
 from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
 from mind.cognitive_architecture.observations import ConversationMessage
+from mind.cognitive_architecture.references import is_parameter_set
 from mind.cognitive_architecture.remark_catalogue import (
     REMARK_CATALOGUE_CONTRACT_VERSION,
     RemarkCatalogue,
-    is_parameter_set,
 )
 from mind.cognitive_architecture.working_memory import WorkingMemory
 from mind.interfaces.mcp.mind import Mind
@@ -30,6 +30,7 @@ from mind.interfaces.mcp.server import MCPServer
 from tests.fixtures.remark_catalogue import (
     GAME_SHA,
     catalogue,
+    declaring_values,
     remark_conversation_observation,
     remark_conversation_state,
     wire_catalogue,
@@ -227,7 +228,7 @@ def _typed(kind_index: int = 0):
 
 def _declaring(remark) -> dict:
     """Parameters that declare ``remark``'s kind, every declare_with set."""
-    return dict.fromkeys(remark.declare_with, "x")
+    return declaring_values(remark.declare_with, remark_conversation_state())
 
 
 def _act(parameters: dict, state) -> Action:
