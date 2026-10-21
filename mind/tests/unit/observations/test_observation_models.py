@@ -1322,6 +1322,7 @@ class TestObservationRootDegrade:
         assert obs.inventory is not None
         assert obs.place is not None
         assert obs.entity_memory is not None
+        assert obs.taste is not None
 
     def test_model_dump_round_trips(self):
         """Should re-validate its own dump -- integration tests rely on this"""

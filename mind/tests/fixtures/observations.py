@@ -222,6 +222,38 @@ def wire_entity_memory_block(
     }
 
 
+def wire_taste_row(
+    band: str,
+    interaction_type: str,
+    target: tuple[str, str] | None = None,
+) -> dict:
+    """One ``taste.tastes`` row, verbatim from the wire.
+
+    This IS the Godot ``TasteObservation.get_data()`` row contract
+    (``src/minds/observations/taste_observation.gd``, NPC-1308): ``band`` (a
+    token, never a number), ``interaction_type`` and ``interaction_label`` (the
+    type with underscores spaced), plus ``target_id`` and ``target_label``
+    TOGETHER only when the taste is about a partner or provider.
+    """
+    row = {
+        "band": band,
+        "interaction_type": interaction_type,
+        "interaction_label": interaction_type.lower().replace("_", " "),
+    }
+    if target is not None:
+        row["target_id"], row["target_label"] = target
+    return row
+
+
+def wire_taste_block(tastes: list[dict] | None = None) -> dict:
+    """An ``Observation``'s ``taste`` value, verbatim from the wire.
+
+    Exactly ``contract_version`` (1) and ``tastes``; an NPC with no settled
+    tastes still sends the block, with an empty list.
+    """
+    return {"contract_version": 1, "tastes": tastes or []}
+
+
 def wire_full_root_payload(simulation_time: int = 100) -> dict:
     """Every root key the simulation can put on the ``decide_action`` wire.
 
@@ -229,13 +261,13 @@ def wire_full_root_payload(simulation_time: int = 100) -> dict:
     current_simulation_time}`` plus one key per ``Observation.get_type()`` of
     every observation added in ``entity_controller.gd`` /
     ``npc_controller.gd::get_current_state_observation``. That resolves to
-    exactly the eleven keys below after simulator PR #794 (the generalized
+    exactly the twelve keys below after simulator PR #794 (the generalized
     query transport): ``entity_id``, ``current_simulation_time``, ``needs``,
     ``vision``, ``inventory``, ``status``, ``place``, ``entity_memory``,
-    ``query_result``, ``goal``, ``mood``. ``place`` and ``entity_memory`` are
+    ``query_result``, ``goal``, ``mood``, ``taste``. ``place`` and ``entity_memory`` are
     attached only for an NPC with a ``SubstrateComponent``; ``query_result``
     appears only on an answered cycle and ``mood`` only under observation
-    enrichment. Thus a production NPC can carry all eleven.
+    enrichment. Thus a production NPC can carry all twelve.
 
     This fixture drifted once already: it stopped at eight keys while the
     simulation grew ``place`` (NPC-1299) and ``entity_memory`` (NPC-1504, sim
@@ -307,6 +339,12 @@ def wire_full_root_payload(simulation_time: int = 100) -> dict:
             "options": [],
             "option_total": 0,
         },
+        "taste": wire_taste_block(
+            [
+                wire_taste_row("likes", "consume", ("stew_001", "Stew")),
+                wire_taste_row("avoids", "tend_plant"),
+            ]
+        ),
         "mood": {
             "valence": -0.42,
             "arousal": 0.81,

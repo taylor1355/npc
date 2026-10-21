@@ -1905,6 +1905,114 @@ class EntityMemoryObservation(BaseModel):
         )
 
 
+# Taste-block wire versions this model set knows how to read. Unknown versions
+# degrade exactly as the entity-memory block's do -- see the validator on
+# ``TasteObservation``.
+KNOWN_TASTE_CONTRACT_VERSIONS = frozenset({1})
+
+# How each taste band token reads in a prompt, second person.
+_TASTE_BAND_PHRASES: dict[str, str] = {
+    "likes": "like",
+    "leans_toward": "lean toward",
+    "leans_away": "lean away from",
+    "avoids": "avoid",
+}
+
+
+class TasteRow(BaseModel):
+    """One settled taste this NPC holds, as a band token and what it is about.
+
+    ``target_id`` and ``target_label`` arrive together or not at all; a taste for
+    the activity itself names no target. A row never carries a number.
+
+    ``band`` is an open ``str`` that renders only through ``_TASTE_BAND_PHRASES``;
+    a token with no wording is withheld from the prompt and logged once at parse
+    time, never refused. An undeclared row key degrades (logged, dropped): rows
+    grow keys under the same ``contract_version``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_on_additive_keys(cls, data):
+        return shed_undeclared_keys(
+            cls, data, level=logging.WARNING, context="additive taste row key(s)"
+        )
+
+    @model_validator(mode="after")
+    def _warn_on_unworded_band(self):
+        # At parse time, once per row per observation: render_summary can run more
+        # than once per cycle and must not repeat the warning.
+        if self.band not in _TASTE_BAND_PHRASES:
+            logger.warning(
+                "Taste band %r has no wording here; row for %r withheld from the prompt. "
+                "The simulation is ahead of this mind: pull and restart.",
+                self.band,
+                self.interaction_type,
+            )
+        return self
+
+    band: str
+    interaction_type: str
+    #: The type for prose, underscores spaced ("tend plant").
+    interaction_label: str
+    #: The partner or provider the taste is about, with its display name. Both or
+    #: neither on the wire; ``target_label`` is a snapshot, prose only.
+    target_id: str | None = None
+    target_label: str | None = None
+
+    def render_summary(self) -> str:
+        """The row as a phrase ("like consume (Stew)"), or "" for an unworded band."""
+        phrase = _TASTE_BAND_PHRASES.get(self.band)
+        if phrase is None:
+            return ""
+        line = f"{phrase} {self.interaction_label}"
+        if self.target_label:
+            line += f" ({self.target_label})"
+        return line
+
+
+class TasteObservation(BaseModel):
+    """What this NPC has come to like and dislike, as band tokens.
+
+    ``tastes == []`` means no settled tastes yet; an absent block means an older
+    simulation. Likes come first, then dislikes, already capped. The root stays
+    strict under a known version; only rows grow keys.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: int = 1
+    tastes: list[TasteRow] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_on_unknown_contract_version(cls, data):
+        """Unknown versions degrade, never raise; see ``EntityMemoryObservation``."""
+        if not isinstance(data, dict):
+            return data
+        version = data.get("contract_version", 1)
+        if version in KNOWN_TASTE_CONTRACT_VERSIONS:
+            return data
+        logger.warning(
+            "Taste block carries unknown contract_version %s (known: %s); "
+            "parsing best-effort under the newest known contract.",
+            version,
+            sorted(KNOWN_TASTE_CONTRACT_VERSIONS),
+        )
+        return shed_undeclared_keys(
+            cls, data, level=logging.WARNING, context=f"unknown contract_version {version}"
+        )
+
+    def render_summary(self) -> str:
+        """One "Tastes: you like ..., avoid ...." line, or "" when none can be worded."""
+        rendered = [text for text in (row.render_summary() for row in self.tastes) if text]
+        if not rendered:
+            return ""
+        return f"Tastes: you {', '.join(rendered)}."
+
+
 class ConversationMessage(BaseModel):
     """Single conversation message.
 
@@ -2081,6 +2189,9 @@ class Observation(BaseModel):
     # stores it yet.
     entity_memory: EntityMemoryObservation | None = None
     mood: MoodObservation | None = None
+    # Optional for the same reason ``place`` is: absence means a producer that
+    # predates the block, while ``tastes == []`` means an NPC with none yet.
+    taste: TasteObservation | None = None
     inventory: InventoryObservation | None = None
     vision: VisionObservation | None = None
     conversations: list[ConversationObservation] = Field(default_factory=list)
@@ -2223,6 +2334,14 @@ class Observation(BaseModel):
                 f"{self.mood.valence_baseline:+.2f}; arousal {self.mood.arousal:.2f} "
                 f"against a resting {self.mood.arousal_baseline:.2f})"
             )
+
+        # Learned tastes, words only. Rendered only when carrying a line, so an
+        # observation with no settled tastes is byte-identical to the pre-taste
+        # rendering and every existing fixture stands as a control arm.
+        if self.taste:
+            taste_text = self.taste.render_summary()
+            if taste_text:
+                parts.append(taste_text)
 
         # Rendered only when actually carrying something: an absent line means
         # an empty bag, and every existing fixture without an inventory must
