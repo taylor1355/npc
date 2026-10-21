@@ -35,6 +35,17 @@ ACT = "act_in_interaction"
 
 # The prefix RemarkElementError puts on every message it raises.
 REMARK_FAILURE = "Remark mismatch"
+# The phrase every reference-handle refusal carries ("... is not a place handle this
+# cycle - use one of: ..."): UnknownReferenceHandleError and UnknownPlaceHandleError.
+# Pinned against both exceptions by tests/unit/test_mcp_experiment.py.
+REFERENCE_FAILURE = "handle this cycle"
+
+# Per reference domain, the record's keys holding every real id of the case and the
+# ids an apt turn would name (NPC-2021).
+_REFERENCE_ID_SETS = {
+    "message": ("known_message_ids", "expect_message_ids"),
+    "place": ("known_zone_ids", "expect_zone_ids"),
+}
 
 
 def load_artifact(path: str | Path) -> list[dict]:
@@ -87,6 +98,31 @@ def judge_remark(record: dict, catalogue: RemarkCatalogue) -> dict:
     }
 
 
+def judge_references(record: dict) -> list[dict]:
+    """How each reference parameter the turn set fared against the case's real ids.
+
+    ``resolved``: the id the wire carries is one of the case's real ids of that
+    domain. ``apt``: it is one of the ids an apt turn would name, or None when the
+    case defines none (so an unexpected-but-real reference is not scored either
+    way). A row whose domain this scorer has no id set for is unscorable and is
+    dropped rather than counted as a pass or a fabrication.
+    """
+    rows = []
+    for ref in record.get("references") or []:
+        sets = _REFERENCE_ID_SETS.get(ref.get("domain"))
+        if sets is None:
+            continue
+        known, expected = (set(record.get(key) or []) for key in sets)
+        wire_value = ref.get("wire_value")
+        rows.append(
+            {
+                "resolved": wire_value in known,
+                "apt": (wire_value in expected) if expected else None,
+            }
+        )
+    return rows
+
+
 # --- (a) validity -------------------------------------------------------------
 
 
@@ -101,6 +137,8 @@ def validity_report(records: Iterable[dict], catalogue: RemarkCatalogue) -> dict
         judged = [judge_remark(r, catalogue) for r in rows]
         acts = [j for j in judged if j["is_act"]]
         retries = [r.get("retries", 0) for r in rows]
+        references = [ref for r in rows for ref in judge_references(r)]
+        scored_apt = [ref["apt"] for ref in references if ref["apt"] is not None]
         report[arm] = {
             "turns": len(rows),
             "errors": sum(1 for r in rows if r.get("error")),
@@ -119,12 +157,29 @@ def validity_report(records: Iterable[dict], catalogue: RemarkCatalogue) -> dict
             "remark_failures": sum(
                 1 for r in rows for f in r.get("validation_failures") or [] if REMARK_FAILURE in f
             ),
+            # A refused handle (NPC-2021), counted apart from remark failures. A
+            # failure that is a remark failure counts as that, once.
+            "reference_failures": sum(
+                1
+                for r in rows
+                for f in r.get("validation_failures") or []
+                if REMARK_FAILURE not in f and REFERENCE_FAILURE in f
+            ),
             "other_failures": sum(
                 1
                 for r in rows
                 for f in r.get("validation_failures") or []
-                if REMARK_FAILURE not in f
+                if REMARK_FAILURE not in f and REFERENCE_FAILURE not in f
             ),
+            # Of the reference values the FINAL actions set: the share the wire
+            # carries as a real id of the case. A value that is not one is a
+            # fabrication the game would drop.
+            "reference_values": len(references),
+            "reference_resolved_rate": _rate(
+                sum(ref["resolved"] for ref in references), len(references)
+            ),
+            "fabricated_reference_count": sum(1 for ref in references if not ref["resolved"]),
+            "reference_apt_rate": _rate(sum(scored_apt), len(scored_apt)),
             "max_retries": max(retries) if retries else None,
             "salvage_rate": _rate(sum(1 for r in rows if r.get("salvaged")), len(rows)),
             "by_case": _by_case(rows, judged),
