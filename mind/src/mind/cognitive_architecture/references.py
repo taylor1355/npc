@@ -61,8 +61,8 @@ HANDLED_DOMAINS = (DOMAIN_MESSAGE, DOMAIN_PLACE)
 
 #: The prompt's wording for what a handle of each domain names.
 _DOMAIN_PHRASES: Mapping[str, str] = {
-    DOMAIN_MESSAGE: "this message answers an open question: then the [mN] handle of that question's row, never an id",
-    DOMAIN_PLACE: "you are naming a place you know: then its [pN] handle from the place list, never a name or an id",
+    DOMAIN_MESSAGE: "this reply answers an open question: then the [mN] of that question's row, never an id",
+    DOMAIN_PLACE: "naming a place from your place list: then its [pN] handle, never a name or an id; a thing you saw is not a place",
 }
 
 MESSAGE_HANDLE_PREFIX = "m"
@@ -168,9 +168,9 @@ class ParameterReference:
             ]
             if not clauses:
                 return ""
-            return "leave empty unless declaring; then " + "; ".join(clauses)
+            return "omit unless declaring; then " + "; ".join(clauses)
         phrase = _DOMAIN_PHRASES.get(self.domain)
-        return f"leave empty unless {phrase}" if phrase else ""
+        return f"omit unless {phrase}; otherwise omit it" if phrase else ""
 
 
 def is_parameter_set(value: Any) -> bool:
