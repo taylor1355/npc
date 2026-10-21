@@ -33,7 +33,7 @@ from tests.fixtures.mcp_experiment_analysis import (
     parse_score,
     validity_report,
 )
-from tests.fixtures.remark_catalogue import catalogue
+from tests.fixtures.remark_catalogue import catalogue, declaring_values
 
 ARTIFACT = Path(__file__).parents[1] / "fixtures" / "mcp_experiment_artifact.jsonl"
 
@@ -65,10 +65,10 @@ class TestMatrix:
     def test_an_apt_act_validates_against_each_case_state(self, case):
         """The states are well-formed remark turns: an apt answer passes validation."""
         entry = catalogue().get(case.apt_keys[0])
-        params = {"message": "Words.", "utterance_element": entry.key}
-        params.update(dict.fromkeys(entry.declare_with, "x"))
         for persona in PERSONAS:
             state = case.state(persona, with_catalogue=True)
+            params = {"message": "Words.", "utterance_element": entry.key}
+            params.update(declaring_values(entry.declare_with, state))
             Action.model_validate(
                 {"action": "act_in_interaction", "parameters": params}, context={"state": state}
             )
@@ -357,6 +357,19 @@ def test_the_runner_dry_run_spends_nothing(capsys):
     assert f"{len(CASES) * len(PERSONAS) * 2} turns would run" in capsys.readouterr().out
 
 
+def test_the_runner_refuses_reps_that_would_replay_identical_samples(capsys):
+    import tools.run_mcp_experiment as runner
+
+    with pytest.raises(SystemExit) as refused:
+        runner.main(["--dry-run", "--reps", "5"])
+
+    assert refused.value.code == 2
+    assert "identical samples" in capsys.readouterr().err
+    # The control: the same reps at a sampling temperature, and the default, run.
+    assert runner.main(["--dry-run", "--reps", "5", "--temperature", "0.7"]) == 0
+    assert runner.main(["--dry-run"]) == 0
+
+
 def test_the_committed_floors_came_from_a_measured_run():
     """Floors are derived, never guessed: the sidecar names the run it came from."""
     from tests.fixtures.mcp_experiment_analysis import FLOOR_METRICS
@@ -370,3 +383,166 @@ def test_the_committed_floors_came_from_a_measured_run():
     assert "first measured run" in floors["source"] and floors["model"] in floors["source"]
     assert set(floors["floors"]) <= set(FLOOR_METRICS)
     assert all(0.0 <= value <= 1.0 for value in floors["floors"].values())
+
+
+# --- Reference handles (NPC-2021) ------------------------------------------------
+
+
+class TestReferenceMatrix:
+    @pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
+    def test_every_expected_id_is_a_real_id_of_the_case(self, case):
+        assert set(case.expect_message_ids()) <= set(case.known_message_ids())
+        assert set(case.expect_zone_ids) <= set(case.known_zone_ids())
+
+    def test_the_cases_that_declare_a_reference_expect_one(self):
+        expecting = {c.id for c in CASES if c.expect_message_ids() or c.expect_zone_ids}
+        assert {
+            "asked_who_told_told",
+            "partner_hungry_share_place",
+            "ask_who_told_them",
+        } <= expecting
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
+async def test_no_prompt_of_the_matrix_carries_a_real_id(case):
+    """The experiment only measures handles if the prompt cannot leak an id."""
+    recorder = RecordingLLM(_Scripted(_reflection({"message": "Hi"})))
+
+    record = await run_turn(
+        ReflectionNode(recorder),
+        recorder,
+        case,
+        PERSONAS[0],
+        ARM_CATALOGUE,
+        rep=0,
+        run_id="r",
+        backend="fake",
+        model="fake",
+    )
+
+    sent = record["attempts"][0]["sent"]
+    assert "[m1]" in sent, "control: the transcript was annotated"
+    for real_id in case.known_message_ids() + case.known_zone_ids():
+        assert real_id not in sent
+
+
+@pytest.mark.asyncio
+async def test_run_turn_records_the_reference_translation_and_the_refused_attempt():
+    case = next(c for c in CASES if c.id == "asked_who_told_told")
+    key = "answer_who_told.told"
+    fabricated = {"message": "Tobin.", "utterance_element": key, "answer_in_reply_to": "msg-123"}
+    valid = {**fabricated, "answer_in_reply_to": "m3"}
+    recorder = RecordingLLM(_Scripted(_reflection(fabricated), _reflection(valid)))
+
+    record = await run_turn(
+        ReflectionNode(recorder),
+        recorder,
+        case,
+        PERSONAS[0],
+        ARM_CATALOGUE,
+        rep=0,
+        run_id="r",
+        backend="fake",
+        model="fake",
+    )
+
+    assert record["retries"] == 1
+    assert "handle this cycle" in record["validation_failures"][0]
+    assert record["parameters"]["answer_in_reply_to"] == "m3", "what the model wrote"
+    assert record["wire_parameters"]["answer_in_reply_to"] == case.message_id(2)
+    assert record["references"] == [
+        {
+            "parameter": "answer_in_reply_to",
+            "domain": "message",
+            "written": "m3",
+            "wire_value": case.message_id(2),
+        }
+    ]
+    for attempt in record["attempts"]:
+        assert case.message_id(2) not in attempt["sent"], "the prompt never carries an id"
+    assert "[m3]" in record["attempts"][0]["sent"]
+
+
+class TestReferenceMetrics:
+    def _record(self, **overrides):
+        base = {
+            "arm": ARM_CATALOGUE,
+            "case_id": "c",
+            "action": "act_in_interaction",
+            "parameters": {},
+            "remark_named": "",
+            "apt_keys": [],
+            "apt_kind": "",
+            "known_message_ids": ["id1", "id2"],
+            "known_zone_ids": ["zone1"],
+            "expect_message_ids": ["id2"],
+            "expect_zone_ids": [],
+            "validation_failures": [],
+            "retries": 0,
+            "references": [],
+        }
+        return {**base, **overrides}
+
+    def _report(self, records):
+        return validity_report(records, catalogue())[ARM_CATALOGUE]
+
+    def test_a_real_expected_id_resolves_and_is_apt(self):
+        row = {"parameter": "p", "domain": "message", "written": "m2", "wire_value": "id2"}
+
+        report = self._report([self._record(references=[row])])
+
+        assert report["reference_resolved_rate"] == 1.0
+        assert report["reference_apt_rate"] == 1.0
+        assert report["fabricated_reference_count"] == 0
+
+    def test_a_real_but_unexpected_id_resolves_without_being_apt(self):
+        row = {"parameter": "p", "domain": "message", "written": "m1", "wire_value": "id1"}
+
+        report = self._report([self._record(references=[row])])
+
+        assert report["reference_resolved_rate"] == 1.0 and report["reference_apt_rate"] == 0.0
+
+    def test_an_invented_id_is_a_fabrication(self):
+        rows = [
+            {"parameter": "p", "domain": "message", "written": "x", "wire_value": "invented"},
+            {"parameter": "q", "domain": "place", "written": "p1", "wire_value": "zone1"},
+        ]
+
+        report = self._report([self._record(references=rows)])
+
+        assert report["reference_resolved_rate"] == 0.5
+        assert report["fabricated_reference_count"] == 1
+        assert report["reference_apt_rate"] == 0.0, "only the message row defines an expectation"
+
+    def test_a_case_with_no_expectation_scores_no_aptness(self):
+        row = {"parameter": "q", "domain": "place", "written": "p1", "wire_value": "zone1"}
+
+        report = self._report([self._record(references=[row])])
+
+        assert report["reference_apt_rate"] is None, "nothing measured is None, never 0"
+
+    def test_no_references_measures_nothing(self):
+        report = self._report([self._record()])
+
+        assert report["reference_resolved_rate"] is None
+        assert report["fabricated_reference_count"] == 0 and report["reference_values"] == 0
+
+    def test_reference_failures_are_counted_apart_from_the_others(self):
+        refused = "Action 'a' sets 'p' to 'x', which is not a message handle this cycle - use m1."
+        failures = [refused, "Remark mismatch: x. keys", "something else"]
+
+        report = self._report([self._record(validation_failures=failures, retries=2)])
+
+        assert (report["reference_failures"], report["remark_failures"]) == (1, 1)
+        assert report["other_failures"] == 1
+
+    def test_the_failure_phrase_matches_what_both_exceptions_say(self):
+        from mind.cognitive_architecture.actions.exceptions import (
+            UnknownPlaceHandleError,
+            UnknownReferenceHandleError,
+        )
+        from tests.fixtures.mcp_experiment_analysis import REFERENCE_FAILURE
+
+        assert REFERENCE_FAILURE in str(UnknownReferenceHandleError("p", "x", "message", "a", []))
+        assert REFERENCE_FAILURE in str(UnknownPlaceHandleError("x", "a", ["p1"]))

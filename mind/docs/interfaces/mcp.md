@@ -73,6 +73,21 @@ Creates a new mind instance. Takes `mind_id` (PK), `entity_id` (FK), and `MindCo
 - An unknown `contract_version`, or an empty `remarks` list, **degrades** to no catalogue with a warning. Any other malformation refuses `create_mind`. Rows use `extra="ignore"`, so new columns such as FS10b's stance `fields` are additive.
 - The catalogue is kept in the recorded config (`_config_to_record`), so a relinked mind validates against the grammar it was created with.
 
+#### `refers_to` on act-parameter specs (optional)
+
+An act parameter that names something by id (a message, a place) says so on its own spec in `act_in_interaction_parameters`, with an optional key beside `type` / `default` / `description` (NPC-2021):
+
+```json
+{"type": "string", "default": "", "description": "...", "refers_to": "message"}
+{"type": "string", "default": "", "description": "...",
+ "refers_to": {"by": "<sibling parameter>", "domains": {"<its value>": "<domain>", "<other>": ""}}}
+```
+
+- `refers_to` rides every observation with the spec (the catalogue cannot carry it: it is per parameter, and a parameter's referent can depend on a sibling's value). The mind reads it with `StatusObservation.act_parameter_references()`; no parameter is named in `mind/src`.
+- The domains the mind turns into handles are `message` and `place`. Any other domain, an unusable value, or an absent key leaves the parameter a plain string, exactly as before, so an older simulation or a newer one is safe in both directions.
+- For a set reference parameter the mind validates that the value is one of this cycle's handles (`[mN]` beside a transcript row, `[pN]` beside a place), re-asks through the reflection node's existing retry loop when it is not, and `Action.wire_payload` swaps the handle for the real id as the action leaves `decide_action`. The simulation therefore receives real ids and the prompt never carries one.
+- A conditional form's `domains` value of `""`, or a selector that is unset or unlisted, means undetermined: the value passes through to the simulation, which remains the authority.
+
 **What it changes.** While a catalogue is present and the current interaction advertises `utterance_element`, every `act_in_interaction` turn **must** set `utterance_element` to a catalogue key that agrees with what the turn declares:
 
 - a phatic remark sets no `declare_with` parameter of any kind;

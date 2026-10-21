@@ -15,7 +15,9 @@ from mind.cognitive_architecture.actions.exceptions import (
     NoAdvertisedParameterError,
     UnexpectedActionParameterError,
     UnknownPlaceHandleError,
+    UnknownReferenceHandleError,
 )
+from mind.cognitive_architecture.references import HandleTable, is_parameter_set
 
 
 class ActionType(str, Enum):
@@ -65,6 +67,11 @@ MARK_ZONE_EXTENT_PARAMS = ["cells", "radius"]
 # refusal wording ("name exactly one of destination, zone_id"), which
 # MutuallyExclusiveParametersError reproduces verbatim.
 MOVE_TO_TARGET_PARAMS = ["destination", "zone_id"]
+
+
+def _handle_table(state) -> HandleTable:
+    """The cycle's handle table over a pipeline state's snapshot."""
+    return HandleTable(state.observation, state.conversation_histories)
 
 
 class Action(BaseModel):
@@ -139,6 +146,7 @@ class Action(BaseModel):
         elif self.action == ActionType.ACT_IN_INTERACTION:
             self._validate_act_in_interaction(observation)
             self._validate_remark(observation, getattr(state, "remark_catalogue", None))
+            self._validate_references(state)
         elif self.action == ActionType.MARK_ZONE:
             self._validate_mark_zone()
 
@@ -317,47 +325,112 @@ class Action(BaseModel):
             if observation is None or observation.resolve_place_handle(str(zone_id)) is None:
                 raise UnknownPlaceHandleError(str(zone_id), self.action, handles)
 
-    def wire_payload(self, observation) -> dict:
-        """This action as the simulation receives it: ``model_dump()`` with a
-        place handle translated to its real zone id (NPC-1643).
+    def _validate_references(self, state):
+        """Require every reference parameter an act sets to carry one of THIS cycle's handles.
+
+        Which parameters are references is read off the interaction's own
+        advertised specs (``StatusObservation.act_parameter_references``), so no
+        parameter is named here and a new one the simulation declares is validated
+        with no Python change. A set value must resolve against the cycle's handle
+        table -- a raw id, a name or a stale handle is refused, because the prompt
+        never showed an id and an id in the action means it came from somewhere it
+        should not have. An unset (empty) parameter is the legitimate "not
+        referring to anything", and a parameter whose referent this mind cannot
+        determine (an unhandled domain, or a conditional whose selector is unset)
+        is left to the simulation.
+        """
+        table = None
+        for name, domain, reference in self.reference_parameters(state.observation):
+            if table is None:
+                table = _handle_table(state)
+            if table.resolve(domain, reference) is None:
+                raise UnknownReferenceHandleError(
+                    name, reference, domain, self.action, table.handles(domain)
+                )
+
+    def reference_parameters(self, observation):
+        """``(parameter, domain, value)`` for each reference parameter this act sets."""
+        if self.action != ActionType.ACT_IN_INTERACTION or observation is None:
+            return
+        if observation.status is None:
+            return
+        for name, spec in observation.status.act_parameter_references().items():
+            value = self.parameters.get(name)
+            if not is_parameter_set(value):
+                continue
+            domain = spec.domain_for(self.parameters)
+            if domain:
+                yield name, domain, str(value)
+
+    def wire_payload(self, state) -> dict:
+        """This action as the simulation receives it: ``model_dump()`` with every
+        handle translated to the real id it names (NPC-1643, NPC-2021).
 
         THE ONE PLACE a handle becomes an id, and it runs as the action leaves
-        the server, against the observation of the cycle that showed the handle.
-        A handle that no longer resolves raises rather than being sent through as
-        a zone id -- the validator should have made that impossible, so reaching
-        it means the action and the observation came from different cycles.
+        the server, against the state of the cycle that showed the handle: a
+        MOVE_TO's place handle, and every reference parameter of an
+        ACT_IN_INTERACTION. A handle that no longer resolves raises rather than
+        being sent through as an id -- the validator should have made that
+        impossible, so reaching it means the action and the state came from
+        different cycles.
         """
         payload = self.model_dump()
-        if self.action != ActionType.MOVE_TO:
+        observation = state.observation
+        if self.action == ActionType.MOVE_TO:
+            reference = self.parameters.get("zone_id")
+            if reference is None or str(reference) == "":
+                return payload
+            descriptor = (
+                observation.resolve_place_handle(str(reference))
+                if observation is not None
+                else None
+            )
+            if descriptor is None:
+                handles = list(observation.place_handles()) if observation is not None else []
+                raise UnknownPlaceHandleError(str(reference), self.action, handles)
+            payload["parameters"] = {**payload["parameters"], "zone_id": descriptor.zone_id}
             return payload
-        reference = self.parameters.get("zone_id")
-        if reference is None or str(reference) == "":
-            return payload
-        descriptor = (
-            observation.resolve_place_handle(str(reference)) if observation is not None else None
-        )
-        if descriptor is None:
-            handles = list(observation.place_handles()) if observation is not None else []
-            raise UnknownPlaceHandleError(str(reference), self.action, handles)
-        payload["parameters"] = {**payload["parameters"], "zone_id": descriptor.zone_id}
+
+        translated = dict(payload["parameters"])
+        table = None
+        for name, domain, reference in self.reference_parameters(observation):
+            if table is None:
+                table = _handle_table(state)
+            real_id = table.resolve(domain, reference)
+            if real_id is None:
+                raise UnknownReferenceHandleError(
+                    name, reference, domain, self.action, table.handles(domain)
+                )
+            translated[name] = real_id
+        payload["parameters"] = translated
         return payload
 
-    def memory_parameters(self, observation) -> dict:
-        """The parameters as the NPC should REMEMBER them: a place by its name.
+    def memory_parameters(self, state) -> dict:
+        """The parameters as the NPC should REMEMBER them: a referent as prose.
 
         Feeds the ``ACTION_CHOSEN`` event, which renders into later prompts.
-        Neither alternative is safe there: the real zone id would put a UUID in
-        the prompt, and the handle would outlive its cycle -- next cycle ``p2``
-        may be a different place, and "I chose p2" would then be a false memory.
+        Neither alternative is safe there: the real id would put a UUID in the
+        prompt, and the handle would outlive its cycle -- next cycle ``p2`` may be
+        a different place and ``m3`` a different message, so "I chose p2" would
+        then be a false memory.
         """
+        observation = state.observation
         params = dict(self.parameters)
-        if self.action != ActionType.MOVE_TO or not params.get("zone_id"):
+        if self.action == ActionType.MOVE_TO:
+            if not params.get("zone_id"):
+                return params
+            descriptor = (
+                observation.resolve_place_handle(str(params["zone_id"])) if observation else None
+            )
+            del params["zone_id"]
+            params["place"] = descriptor.label() if descriptor is not None else "an unknown place"
             return params
-        descriptor = (
-            observation.resolve_place_handle(str(params["zone_id"])) if observation else None
-        )
-        del params["zone_id"]
-        params["place"] = descriptor.label() if descriptor is not None else "an unknown place"
+
+        table = None
+        for name, domain, reference in self.reference_parameters(observation):
+            if table is None:
+                table = _handle_table(state)
+            params[name] = table.remembered(domain, reference)
         return params
 
     def _validate_respond_to_bid(self, state):
