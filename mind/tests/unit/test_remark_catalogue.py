@@ -333,6 +333,20 @@ class TestFixedFieldRemarks:
         with pytest.raises(ValidationError, match="not a message in this conversation"):
             _act(_stance_params(remark, reply, "nope"), _state_with_message())
 
+    def test_an_unresolved_handle_goes_straight_to_the_error_listing_valid_handles(self):
+        remark, reply = _stance()
+
+        with pytest.raises(ValidationError, match="Valid handles: m1"):
+            _act(_stance_params(remark, reply, "m99"), _state_with_message())
+
+    def test_a_resolved_handle_whose_message_is_missing_from_histories_is_refused(self):
+        remark, reply = _stance()
+        state = _state_with_message()
+        state.conversation_histories = {}
+
+        with pytest.raises(ValidationError, match="not a message in this conversation"):
+            _act(_stance_params(remark, reply), state)
+
     def test_a_remark_without_fields_keeps_the_models_addressees(self):
         remark = _typed()
         params = {"utterance_element": remark.key, **_declaring(remark)}

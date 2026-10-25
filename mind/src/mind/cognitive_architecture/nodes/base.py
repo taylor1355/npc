@@ -184,7 +184,7 @@ class LLMNode(Node):
             f"IMPORTANT: Output ONLY raw JSON. Do NOT wrap in markdown code fences like ```json."
         )
 
-    def prepare_output(self, data, state):
+    def prepare_output(self, data: object, state: PipelineState) -> object:
         """Normalize the model's parsed output before validation; default: unchanged.
 
         The explicit, non-validating place for fixes a node owns. Must return a

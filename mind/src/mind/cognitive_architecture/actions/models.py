@@ -1,6 +1,7 @@
 """Action models for the cognitive architecture"""
 
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, ValidationInfo, model_validator
 
@@ -24,6 +25,10 @@ from mind.cognitive_architecture.references import (
     is_parameter_set,
 )
 
+if TYPE_CHECKING:
+    # state.py imports the remark catalogue, which imports this package: runtime cycle.
+    from mind.cognitive_architecture.state import PipelineState
+
 
 def _wire_keys() -> tuple[str, str]:
     """(addressee key, utterance-element key) from the catalogue module.
@@ -39,7 +44,7 @@ def _wire_keys() -> tuple[str, str]:
     return WIRE_KEY_ADDRESSEE_IDS, WIRE_KEY_UTTERANCE_ELEMENT
 
 
-def _reply_speaker(state, catalogue, parameters: dict) -> str | None:
+def _reply_speaker(state: "PipelineState", catalogue, parameters: dict) -> str | None:
     """Who wrote the message a fixed-field reply remark replies to, or None.
 
     None when the turn is not such a reply (no catalogue, not a remark turn, a
@@ -57,15 +62,18 @@ def _reply_speaker(state, catalogue, parameters: dict) -> str | None:
         return None
     table = _handle_table(state)
     message_id = table.resolve(DOMAIN_MESSAGE, str(parameters.get(reply_parameter, "")))
-    speaker = next(
-        (
-            m.speaker_id
-            for history in (state.conversation_histories or {}).values()
-            for m in history
-            if m.id == message_id
-        ),
-        None,
-    )
+    speaker = None
+    if message_id is not None:
+        # An unresolved handle skips the lookup and goes straight to the error below.
+        speaker = next(
+            (
+                m.speaker_id
+                for history in (state.conversation_histories or {}).values()
+                for m in history
+                if m.id == message_id
+            ),
+            None,
+        )
     if speaker is None:
         raise RemarkElementError(
             f"'{reply_parameter}' names '{parameters.get(reply_parameter)}', which is not a "
@@ -75,7 +83,7 @@ def _reply_speaker(state, catalogue, parameters: dict) -> str | None:
     return speaker
 
 
-def normalize_remark_reply(chosen_action: object, state) -> object:
+def normalize_remark_reply(chosen_action: object, state: "PipelineState") -> object:
     """Fill an omitted ``addressee_ids`` on a reply remark; return a new action dict.
 
     The explicit normalization step run on the model's raw action before it is
