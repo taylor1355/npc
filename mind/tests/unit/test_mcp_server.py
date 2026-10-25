@@ -1591,13 +1591,13 @@ class TestDecideActionTelemetry:
         success = await self._decide_with_usage(
             server, {"memory_query": StepTokenUsage(total_tokens=5, model_calls=1)}
         )
-        assert success["protocol_version"] == 3
+        assert success["protocol_version"] == 4
 
         error_result = await MCPServer().mcp.call_tool(
             "decide_action",
             {"mind_id": "does_not_exist", "observation": self.OBSERVATION},
         )
-        assert parse_response(error_result)["protocol_version"] == 3
+        assert parse_response(error_result)["protocol_version"] == 4
 
 
 class TestSelectionOutputWireFormat:
@@ -1689,7 +1689,7 @@ class TestSelectionOutputWireFormat:
         )
 
         assert response["action"]["action"] == "wait"
-        assert response["protocol_version"] == 3
+        assert response["protocol_version"] == 4
         assert response["query"] == {
             "kind": "place",
             "payload": {"afford": "hunger", "max_distance": 40, "limit": 2},

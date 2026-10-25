@@ -37,7 +37,7 @@ logger = get_logger()
 ## a client can distinguish "this server is older than telemetry" from "this
 ## server ran and reported nothing" -- two facts that would otherwise collapse
 ## into the same absent field.
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 
 
 def _error_response(request_id: str, error_message: str, details: str = None) -> dict:
