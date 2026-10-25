@@ -32,8 +32,10 @@ from .models import (
 logger = get_logger()
 
 
-## Wire-format version for decide_action responses. Bumped when the response
-## shape changes in a way a client must know about. Emitted on BOTH branches so
+## Wire-contract version for decide_action. Bumped when the wire contract changes in a
+## way a client must know about: a new response shape, a new accepted event type, or a
+## changed payload shape. v4 accepts the `DEED_PERCEIVED` event, the message-level
+## `in_reply_to`, and the notable-deed conduct shape. Emitted on BOTH branches so
 ## a client can distinguish "this server is older than telemetry" from "this
 ## server ran and reported nothing" -- two facts that would otherwise collapse
 ## into the same absent field.
