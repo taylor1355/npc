@@ -113,8 +113,8 @@ Processes a structured observation and recent events through the cognitive pipel
 5. Returns action dict or error
 
 **Response fields:** every response carries `status`, `request_id` and
-`protocol_version` (an int; currently `3`, bumped when the response shape changes
-in a way a client must know about). A **success** response also carries `action`,
+`protocol_version` (an int; currently `4`, bumped when the wire contract changes
+in a way a client must know about: a response shape, or an accepted event type). A **success** response also carries `action`,
 an optional top-level `query`, and a `telemetry` object. A query is a sibling of
 `action`, not an action parameter: asking where to attend does not replace or
 delay execution of the chosen action. The strict request union currently has one
