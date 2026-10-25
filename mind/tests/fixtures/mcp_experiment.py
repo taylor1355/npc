@@ -377,6 +377,19 @@ CASES: tuple[ExperimentCase, ...] = (
         places=((ZONE_CROW_RIDGE, "Crow Ridge"), (ZONE_MILL_POND, "Mill Pond")),
         expect_zone_ids=(ZONE_CROW_RIDGE,),
     ),
+    ExperimentCase(
+        id="partner_shares_good_news",
+        why="The partner shares a plan I think is right; apt: agree with their line.",
+        lines=(
+            Line("Hello!", element="greeting"),
+            Line("Hi Wren.", me=True, element="greeting_response"),
+            Line("I'm going to plant the orchard's apple seeds this week.", element="response"),
+        ),
+        apt_keys=("react_agree",),
+        apt_kind="react",
+        situation="Wren plans to plant apple seeds at the orchard, which I think is a good idea.",
+        memories=("Apple trees did well in the orchard last year.",),
+    ),
 )
 
 

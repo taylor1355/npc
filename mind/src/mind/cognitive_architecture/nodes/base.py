@@ -184,6 +184,14 @@ class LLMNode(Node):
             f"IMPORTANT: Output ONLY raw JSON. Do NOT wrap in markdown code fences like ```json."
         )
 
+    def prepare_output(self, data: object, state: PipelineState) -> object:
+        """Normalize the model's parsed output before validation; default: unchanged.
+
+        The explicit, non-validating place for fixes a node owns. Must return a
+        new object rather than mutate ``data``.
+        """
+        return data
+
     async def call_llm(
         self,
         state: PipelineState,
@@ -255,6 +263,8 @@ class LLMNode(Node):
 
                 # Parse JSON (json_repair handles common formatting issues)
                 data = json_repair_loads(response.content)
+
+                data = self.prepare_output(data, state)
 
                 # Validate with state context
                 validated = self.parser.pydantic_object.model_validate(

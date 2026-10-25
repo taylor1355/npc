@@ -35,7 +35,7 @@ ZONE_POND = "zone_d7ecbf9e-2be7-406a-9d4f-d41a7fedb45a"
 MSG_GREETING = "msg_7a1c0d9e-1111-4222-8333-444455556661"
 MSG_QUESTION = "msg_7a1c0d9e-1111-4222-8333-444455556662"
 
-REPLY = "answer_in_reply_to"
+REPLY = "in_reply_to"
 SUBJECT = "share_belief_subject_id"
 KIND = "share_belief_kind"
 ASK_SUBJECT = "ask_who_told_subject_id"
@@ -185,7 +185,7 @@ class TestValidation:
     def test_with_nothing_to_refer_to_the_error_says_to_leave_it_unset(self):
         state = _state()
         state.conversation_histories = {}
-        with pytest.raises(ValidationError, match="leave 'answer_in_reply_to' unset"):
+        with pytest.raises(ValidationError, match="leave 'in_reply_to' unset"):
             _act({REPLY: "m1"}, state)
 
 

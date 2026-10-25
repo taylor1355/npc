@@ -17,6 +17,7 @@ from langchain_core.prompts import PromptTemplate
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action, ActionType
+from mind.cognitive_architecture.actions.models import normalize_remark_reply
 from mind.cognitive_architecture.nodes.base import LLMNode, entity_tag
 from mind.cognitive_architecture.nodes.formatting import (
     format_conversation_histories,
@@ -116,6 +117,12 @@ class ReflectionNode(LLMNode):
             format_instructions=self.get_format_instructions(),
         )
         self.cache_control = True
+
+    def prepare_output(self, data, state):
+        """Fill an omitted reply addressee before validation (validation is pure)."""
+        if not isinstance(data, dict) or "chosen_action" not in data:
+            return data
+        return {**data, "chosen_action": normalize_remark_reply(data["chosen_action"], state)}
 
     async def process(self, state: PipelineState) -> PipelineState:
         """Reflect once: update working memory, form memories, choose an action"""
@@ -267,7 +274,8 @@ class ReflectionNode(LLMNode):
         salvaged_action: Action | None = None
         try:
             salvaged_action = Action.model_validate(
-                data.get("chosen_action"), context={"state": state}
+                normalize_remark_reply(data.get("chosen_action"), state),
+                context={"state": state},
             )
         except ValidationError:
             pass

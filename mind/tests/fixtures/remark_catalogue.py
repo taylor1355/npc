@@ -49,9 +49,9 @@ def wire_remark_conversation_interaction() -> dict:
     """The conversation interaction at ``GAME_SHA``, every act parameter it advertises.
 
     ``conversation_interaction.gd::_init`` declares ``message``,
-    ``utterance_element`` and ``addressee_ids`` inline, then
+    ``utterance_element``, ``addressee_ids`` and the message-level ``in_reply_to``, then
     ``DeclarationRegistry.contribute_parameter_specs`` adds each kind's specs in
-    registry order (farewell, share_belief, ask_who_told, answer).
+    registry order (farewell, share_belief, ask_who_told, answer, react).
     """
     return wire_current_interaction(
         name="conversation",
@@ -63,6 +63,13 @@ def wire_remark_conversation_interaction() -> dict:
             ),
             "addressee_ids": wire_property_spec(
                 "array", [], "Optional: ids of the participants this message is spoken TO."
+            ),
+            "in_reply_to": wire_property_spec(
+                "string",
+                "",
+                "Optional: id of the message in this conversation that this message replies to. "
+                "An answer must name the question it answers here.",
+                refers_to="message",
             ),
             "is_farewell": wire_property_spec(
                 "bool", False, "Whether the speaker intends this message to end the conversation"
@@ -87,12 +94,21 @@ def wire_remark_conversation_interaction() -> dict:
             "ask_who_told_subject_id": wire_property_spec(
                 "string", "", "Id of the place to ask 'who told you about it?'", refers_to="place"
             ),
-            "answer_in_reply_to": wire_property_spec(
+            "is_answer": wire_property_spec(
+                "bool",
+                False,
+                "Whether this message answers the open question addressed to you that it names "
+                "in in_reply_to. The answer's content comes from your own memory, not from "
+                "parameters.",
+            ),
+            "react_stance": wire_property_spec(
                 "string",
                 "",
-                "Message id of the open question addressed to you that this message answers. "
-                "The answer's content comes from your own memory, not from parameters.",
-                refers_to="message",
+                "Stance this message takes toward the message it replies to (in_reply_to, "
+                "another participant's message; the message must then be addressed to that "
+                "message's speaker alone): one of acknowledge, agree, disagree, doubt, ask_more, "
+                "delight, surprise, sympathize, thank"
+                "; empty = not reacting",
             ),
         },
         needs_filled=["social"],

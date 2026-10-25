@@ -15,7 +15,9 @@ from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import Action
+from mind.cognitive_architecture.actions.models import normalize_remark_reply
 from mind.cognitive_architecture.nodes.reflection.node import ReflectionNode
+from mind.cognitive_architecture.observations import ConversationMessage
 from mind.cognitive_architecture.references import is_parameter_set
 from mind.cognitive_architecture.remark_catalogue import (
     REMARK_CATALOGUE_CONTRACT_VERSION,
@@ -51,16 +53,19 @@ class TestCatalogueContractLiteral:
 
     def test_every_row_has_exactly_the_contract_columns_all_strings(self):
         for row in wire_catalogue()["remarks"]:
-            assert set(row) == {"key", "gloss", "declares", "declare_with", "slots"}, row
+            assert set(row) == {"key", "gloss", "declares", "declare_with", "slots", "fields"}, row
             assert isinstance(row["key"], str) and row["key"]
             assert isinstance(row["gloss"], str) and row["gloss"]
             assert isinstance(row["declares"], str)
             assert all(isinstance(v, str) for v in row["declare_with"] + row["slots"])
+            assert isinstance(row["fields"], dict)
+            assert all(isinstance(k, str) and isinstance(v, str) for k, v in row["fields"].items())
+            assert set(row["fields"]) <= set(row["declare_with"]), row
 
-    def test_twenty_wire_remarks_sorted_by_key(self):
+    def test_wire_remarks_sorted_by_key_and_unique(self):
         keys = [row["key"] for row in wire_catalogue()["remarks"]]
 
-        assert len(keys) == 20
+        assert len(keys) == 29
         assert keys == sorted(keys)
         assert len(set(keys)) == len(keys)
 
@@ -86,9 +91,9 @@ def _config(**extra) -> dict:
 
 class TestRemarkCatalogueModel:
     def test_extra_columns_on_a_row_are_ignored(self):
-        """Rows grow columns additively (stance ``fields`` is the first expected)."""
+        """Rows grow columns additively; an unknown one is ignored."""
         wire = wire_catalogue()
-        wire["remarks"][0]["fields"] = {"anything": "goes"}
+        wire["remarks"][0]["future_column"] = {"anything": "goes"}
 
         parsed = RemarkCatalogue.model_validate(wire)
 
@@ -116,6 +121,21 @@ class TestRemarkCatalogueModel:
 
         with pytest.raises(ValidationError, match="phatic"):
             RemarkCatalogue.model_validate(wire)
+
+    def test_fields_must_be_declare_with_parameters(self):
+        wire = wire_catalogue()
+        typed = next(r for r in wire["remarks"] if r["declares"])
+        typed["fields"] = {"not_a_parameter": "x"}
+
+        with pytest.raises(ValidationError, match="not in its declare_with"):
+            RemarkCatalogue.model_validate(wire)
+
+    def test_prompt_line_shows_the_fields_a_remark_sets(self):
+        parsed = catalogue()
+        stance = next(r for r in parsed.remarks if r.fields)
+        name, value = next(iter(stance.fields.items()))
+
+        assert f"[sets {name}={value}]" in stance.prompt_line()
 
     def test_prompt_line_format(self):
         parsed = catalogue()
@@ -216,6 +236,125 @@ def _act(parameters: dict, state) -> Action:
         {"action": "act_in_interaction", "parameters": {"message": "Words.", **parameters}},
         context={"state": state},
     )
+
+
+def _stance():
+    """A remark that fixes a field and names the message it replies to."""
+    parsed = catalogue()
+    remark = next(r for r in parsed.remarks if r.fields)
+    return remark, parsed.reply_parameter(remark)
+
+
+def _stance_params(remark, reply_parameter, reply_id="m1", addressees=("npc_b",)) -> dict:
+    params = {"utterance_element": remark.key, **_declaring(remark), **remark.fields}
+    params[reply_parameter] = reply_id
+    if addressees is not None:
+        params["addressee_ids"] = list(addressees)
+    return params
+
+
+def _normalized(parameters: dict, state) -> dict:
+    action = {"action": "act_in_interaction", "parameters": {"message": "Words.", **parameters}}
+    return normalize_remark_reply(action, state)
+
+
+def _state_with_message(speaker_id="npc_b"):
+    state = remark_conversation_state()
+    state.conversation_histories = {
+        "c1": [
+            ConversationMessage(speaker_id=speaker_id, speaker_name="Bea", message="Hi", id="m1")
+        ]
+    }
+    return state
+
+
+class TestFixedFieldRemarks:
+    def test_a_turn_must_set_each_field_to_exactly_the_remarks_value(self):
+        remark, reply = _stance()
+        name = next(iter(remark.fields))
+        params = _stance_params(remark, reply)
+        params[name] = "something_else"
+
+        with pytest.raises(ValidationError, match="fixes"):
+            _act(params, _state_with_message())
+
+    def test_the_exact_value_passes(self):
+        remark, reply = _stance()
+
+        _act(_stance_params(remark, reply), _state_with_message())
+
+    def test_the_reply_parameter_is_message_level_not_declarative(self):
+        remark, reply = _stance()
+
+        assert reply in catalogue().message_level_parameters()
+        assert catalogue().declared_kinds({reply: "m1"}) == []
+
+    def test_a_wrong_addressee_is_refused_not_overwritten(self):
+        remark, reply = _stance()
+        params = _stance_params(remark, reply, addressees=("npc_c", "npc_d"))
+
+        with pytest.raises(ValidationError, match="npc_b"):
+            _act(params, _state_with_message("npc_b"))
+
+    def test_an_omitted_addressee_is_filled_by_normalization(self):
+        remark, reply = _stance()
+        params = _stance_params(remark, reply, addressees=None)
+        state = _state_with_message("npc_b")
+
+        normalized = _normalized(params, state)
+
+        assert normalized["parameters"]["addressee_ids"] == ["npc_b"]
+        assert "addressee_ids" not in params, "normalization returns a new dict"
+        Action.model_validate(normalized, context={"state": state})
+
+    def test_validating_twice_is_idempotent(self):
+        remark, reply = _stance()
+        state = _state_with_message("npc_b")
+        normalized = _normalized(_stance_params(remark, reply, addressees=None), state)
+
+        first = Action.model_validate(normalized, context={"state": state})
+        second = Action.model_validate(first.model_dump(), context={"state": state})
+
+        assert first.parameters == second.parameters
+        assert second.parameters["addressee_ids"] == ["npc_b"]
+
+    def test_normalization_leaves_what_it_cannot_place_for_validation(self):
+        remark, reply = _stance()
+        state = _state_with_message("npc_b")
+        unknown = _stance_params(remark, reply, "nope", addressees=None)
+
+        assert "addressee_ids" not in _normalized(unknown, state)["parameters"]
+        wrong = _stance_params(remark, reply, addressees=("npc_c",))
+        assert _normalized(wrong, state)["parameters"]["addressee_ids"] == ["npc_c"]
+
+    def test_a_reply_to_an_unknown_message_is_refused(self):
+        remark, reply = _stance()
+
+        with pytest.raises(ValidationError, match="not a message in this conversation"):
+            _act(_stance_params(remark, reply, "nope"), _state_with_message())
+
+    def test_an_unresolved_handle_goes_straight_to_the_error_listing_valid_handles(self):
+        remark, reply = _stance()
+
+        with pytest.raises(ValidationError, match="Valid handles: m1"):
+            _act(_stance_params(remark, reply, "m99"), _state_with_message())
+
+    def test_a_resolved_handle_whose_message_is_missing_from_histories_is_refused(self):
+        remark, reply = _stance()
+        state = _state_with_message()
+        state.conversation_histories = {}
+
+        with pytest.raises(ValidationError, match="not a message in this conversation"):
+            _act(_stance_params(remark, reply), state)
+
+    def test_a_remark_without_fields_keeps_the_models_addressees(self):
+        remark = _typed()
+        params = {"utterance_element": remark.key, **_declaring(remark)}
+        params["addressee_ids"] = ["npc_c"]
+
+        action = _act(params, _state_with_message())
+
+        assert action.parameters["addressee_ids"] == ["npc_c"]
 
 
 class TestRequiredRemarkKey:
