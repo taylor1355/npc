@@ -34,7 +34,7 @@ ORCHESTRATOR ENTRY POINT. From the ``mind`` project root:
         --backend ollama --model qwen3:8b --reasoning-effort none \\
         --out runs/qwen3-8b.jsonl
 
-    # Reference backend (needs OPENROUTER_API_KEY in credentials/api_keys.cfg):
+    # Reference backend (needs OPENROUTER_API_KEY in $MIND_HOME/credentials/api_keys.cfg):
     PYTHONPATH=$PWD uv run --frozen python tools/run_mcp_experiment.py \\
         --backend openrouter --model google/gemini-2.5-flash-lite --out runs/flash-lite.jsonl
 

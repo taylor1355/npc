@@ -37,9 +37,10 @@
 # tests/integration/test_mcp_server.py - path-qualified because
 # tests/unit/test_mcp_server.py (mocked) shares the basename and DOES run here.
 #
-# mind/src/mind/project_config.py reads credentials/api_keys.cfg (repo root) AT
-# IMPORT TIME, and the import chain reaches it from unit tests - hence the stub
-# step before pytest. Only the two keys indexed at import need to exist.
+# mind/src/mind/project_config.py reads api_keys.cfg from $MIND_HOME (else the user
+# config dir) AT IMPORT TIME, and the import chain reaches it from unit tests.
+# tests/conftest.py points MIND_HOME at a throwaway directory with dummy keys, so
+# CI needs no credentials step.
 name: CI
 
 on:
@@ -111,11 +112,6 @@ jobs:
 
       - name: Ruff format
         run: uv run --frozen ruff format --check src tests
-
-      - name: Stub credentials file (read at import time by project_config.py)
-        run: |
-          mkdir -p ../credentials
-          printf "OPENROUTER_API_KEY: 'ci-dummy'\nPERPLEXITY_API_KEY: 'ci-dummy'\n" > ../credentials/api_keys.cfg
 
       - name: Tests (scope matches the pytest-unit pre-commit hook)
         run: uv run --frozen pytest tests/unit tests/integration/test_http_endpoints.py tests/integration/test_memory_retrieval.py -q

@@ -24,7 +24,8 @@ with patch("config.Config", side_effect=FileNotFoundError("missing test config")
         try:
             get_llm("unrecognized-model")
         except FileNotFoundError as error:
-            assert str(error) == "missing test config"
+            assert "missing test config" in str(error)
+            assert "MIND_HOME" in str(error)
         else:
             raise AssertionError("real LLM construction bypassed missing configuration")
         loader.assert_called_once()
@@ -61,7 +62,8 @@ with patch("config.Config", side_effect=FileNotFoundError("missing test config")
         try:
             main()
         except FileNotFoundError as error:
-            assert str(error) == "missing test config"
+            assert "missing test config" in str(error)
+            assert "MIND_HOME" in str(error)
         else:
             raise AssertionError("real server startup bypassed missing configuration")
         loader.assert_called_once()

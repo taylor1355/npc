@@ -36,7 +36,7 @@ Each turn becomes one JSONL record holding:
 
 ## Backends
 
-The backend and the model are parameters. `--backend ollama` (the default) uses `mind.apis.langchain_llm.get_local_llm`, the same `ChatOpenAI` client pointed at Ollama's OpenAI-compatible endpoint, so `LLMNode` needs no change. `--backend openrouter` uses `get_llm` and needs `OPENROUTER_API_KEY` in `credentials/api_keys.cfg`.
+The backend and the model are parameters. `--backend ollama` (the default) uses `mind.apis.langchain_llm.get_local_llm`, the same `ChatOpenAI` client pointed at Ollama's OpenAI-compatible endpoint, so `LLMNode` needs no change. `--backend openrouter` uses `get_llm` and needs `OPENROUTER_API_KEY` in `credentials/api_keys.cfg` under `$MIND_HOME` (default: the user config directory).
 
 For a hybrid thinking model such as `qwen3:8b`, pass `--reasoning-effort none` to turn its thinking off. Do not pass it to a thinking-only model: that model then writes its reasoning into `content`, which breaks JSON parsing.
 

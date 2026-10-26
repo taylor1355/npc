@@ -16,13 +16,29 @@ tests/unit/memory/test_embedding_model_migration.py::TestRealDefaultModel).
 A test that patches SentenceTransformer itself is unaffected: its patch wraps this one.
 """
 
+import atexit
 import os
+import shutil
+import tempfile
+from pathlib import Path
 
 import pytest
 from sentence_transformers import SentenceTransformer as RealSentenceTransformer
 
-import mind.cognitive_architecture.memory.vector_db_memory as vector_db_memory
-from mind.constants import DEFAULT_EMBEDDING_MODEL
+# project_config reads credentials/api_keys.cfg AT IMPORT TIME and the import chain
+# reaches it from unit tests. Point it at a throwaway MIND_HOME holding dummy keys so
+# the suite never needs, reads or writes the developer's real credentials and cache.
+# Set before any mind import below: this line is load-bearing.
+_TEST_MIND_HOME = Path(tempfile.mkdtemp(prefix="mind-test-home-"))
+(_TEST_MIND_HOME / "credentials").mkdir()
+(_TEST_MIND_HOME / "credentials" / "api_keys.cfg").write_text(
+    "OPENROUTER_API_KEY: 'test-dummy'\nPERPLEXITY_API_KEY: 'test-dummy'\n"
+)
+os.environ["MIND_HOME"] = str(_TEST_MIND_HOME)
+atexit.register(shutil.rmtree, _TEST_MIND_HOME, ignore_errors=True)
+
+import mind.cognitive_architecture.memory.vector_db_memory as vector_db_memory  # noqa: E402
+from mind.constants import DEFAULT_EMBEDDING_MODEL  # noqa: E402
 
 STAND_IN_MODEL = "all-MiniLM-L6-v2"
 
