@@ -98,6 +98,8 @@ def test_missing_keys_fail_at_import_naming_the_path_and_the_override(tmp_path):
     assert "FileNotFoundError" in result.stderr
     assert str(home / "credentials" / "api_keys.cfg") in result.stderr
     assert "MIND_HOME" in result.stderr
+    assert not (home / "credentials").exists()
+    assert not (home / "cache").exists()
 
 
 def test_partial_keys_file_fails_at_import_naming_the_path(tmp_path):

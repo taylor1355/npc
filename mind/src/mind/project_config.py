@@ -9,9 +9,6 @@ from mind.mind_home import MIND_HOME_ENV, resolve_mind_home
 MIND_HOME = resolve_mind_home()
 CACHE_DIR = os.path.join(MIND_HOME, "cache")
 CREDENTIALS_DIR = os.path.join(MIND_HOME, "credentials")
-for dir in [CACHE_DIR, CREDENTIALS_DIR]:
-    os.makedirs(dir, exist_ok=True)
-
 API_KEYS_PATH = os.path.join(CREDENTIALS_DIR, "api_keys.cfg")
 
 
@@ -30,6 +27,10 @@ def _load_api_keys(path):
 
 
 API_KEYS, PERPLEXITY_API_KEY, OPENROUTER_API_KEY = _load_api_keys(API_KEYS_PATH)
+
+# Created only once the keys loaded: a failed import on a fresh machine must not
+# leave empty directories behind. credentials/ exists by then (the file was in it).
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 GMAIL_CREDENTIALS_PATH = os.path.join(CREDENTIALS_DIR, "gmail_credentials.json")
 GMAIL_TOKEN_PATH = os.path.join(CREDENTIALS_DIR, "gmail_token.pickle")
