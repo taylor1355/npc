@@ -15,10 +15,19 @@ This installs the CPU build of torch. Opt in to CUDA with
 
 ### Configuration
 
-Set your OpenRouter API key:
-```bash
-export OPENROUTER_API_KEY="your-api-key"
+The server reads its API keys from `api_keys.cfg` at import time and refuses to
+start without it. Create `credentials/api_keys.cfg` under the mind's base directory:
+
 ```
+OPENROUTER_API_KEY: 'your-openrouter-key'
+PERPLEXITY_API_KEY: 'your-perplexity-key'
+```
+
+The base directory is `$MIND_HOME` when set, otherwise the user config directory:
+`$XDG_CONFIG_HOME/npc-mind` (default `~/.config/npc-mind`) on Linux/WSL,
+`%APPDATA%\npc-mind` on Windows, `~/Library/Application Support/npc-mind` on macOS.
+Credentials and the cache (`cache/`) live there, never inside the checkout or the
+installed package, so they survive upgrades and work for a non-editable install.
 
 ### Run MCP Server
 

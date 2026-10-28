@@ -209,9 +209,9 @@ Godot (GDScript)
 # Start MCP server (default: localhost:3000)
 uv run python -m mind.interfaces.mcp.main
 
-# With environment variable for API key
-export OPENROUTER_API_KEY="your-key"
-uv run python -m mind.interfaces.mcp.main
+# Keys come from $MIND_HOME/credentials/api_keys.cfg (default: the user config
+# directory, e.g. ~/.config/npc-mind/credentials/api_keys.cfg); see README "Configuration"
+MIND_HOME=/path/to/home uv run python -m mind.interfaces.mcp.main
 ```
 
 ### Testing
