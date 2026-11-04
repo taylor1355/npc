@@ -173,9 +173,14 @@ records serialize into a **kind-keyed envelope**, so a second record kind adds a
 rather than a discriminator column on every row (`belief_store.gd::SAVE_KEY_PLACE`).
 A mind-authored tenant should match both.
 
-**No base class, no registry, no Python mirror — yet.** The simulation deliberately
-declined to build a record base class or kind registry until the second tenant's
-shape is known, and the same restraint applies here: a documented type is not a
+**No storage base class, no Python mirror — yet.** The simulation deliberately
+declines a record *storage* base class: each kind keeps its own record class and
+save rows. Reading across kinds goes through a read protocol that leaves storage
+alone. Each kind adapts its store into one typed view (holder, subject, acquisition,
+teller, acquisition time, and the record itself), and a registry lists the kinds
+(npc-simulation: `src/field/components/substrate/knowledge/held_records/`, symbols
+`HeldRecordKind`, `HeldRecordView`, `HeldRecordKindRegistry`). That registry is
+simulation-side, and the same restraint applies here: a documented type is not a
 mandate for a Python type. Do not read this document as authorizing code it
 deliberately does not order. A future mirror has **preconditions**, all of them
 currently unmet:
