@@ -721,7 +721,11 @@ class GoalStepFactors(BaseModel):
 
     ``hope`` is the pursuit-hope discount (``claim / urgency``): ``1.0`` at full
     hope, approaching ``0`` as the NPC gives up on the need. It defaults to
-    ``1.0`` so a sim that predates the field still validates."""
+    ``1.0`` so a sim that predates the field still validates.
+
+    ``time_discount`` (the wait to payoff) and ``sunk_progress`` (resumed work)
+    also default to the identity ``1.0``. Neither has an upper bound: the sim
+    owns their scale, and a refused value would drop the whole observation."""
 
     model_config = ConfigDict(extra="forbid")
 
