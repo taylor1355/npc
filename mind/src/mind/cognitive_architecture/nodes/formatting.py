@@ -215,13 +215,25 @@ def format_goal_options(goal: GoalObservation | None) -> str:
             for step in segment.steps:
                 params = ", ".join(f"{k}={v}" for k, v in step.action.parameters.items())
                 action_text = f"{step.action.name}({params})" if params else step.action.name
-                # Shown only when diminished, so full-hope prompts are unchanged.
-                hope_text = f"hope {step.factors.hope:.2f}, " if step.factors.hope < 1.0 else ""
+                if step.factors is None:
+                    # Projected: what the chain does after step 0, not priced separately.
+                    lines.append(f"  - then (projected): {action_text}")
+                    continue
+                # Each shown only when it moves the score, so identity-factor prompts are unchanged.
+                extras = "".join(
+                    f"{label} {value:.2f}, "
+                    for label, value in (
+                        ("hope", step.factors.hope),
+                        ("time discount", step.factors.time_discount),
+                        ("sunk progress", step.factors.sunk_progress),
+                    )
+                    if value != 1.0
+                )
                 lines.append(
                     f"  - serves '{segment.goal_label}': {action_text} "
                     f"[utility {step.factors.utility:.2f}, "
                     f"habituation {step.factors.responsiveness:.2f}, "
-                    f"{hope_text}"
+                    f"{extras}"
                     f"step score {step.step_score:.2f}]"
                 )
 
