@@ -708,6 +708,9 @@ class GoalStepTarget(BaseModel):
 
     interaction_name: str
     entity_id: str
+    #: Set only on a projected step, and only when the sim knows the provider's
+    #: type (the planner names a provider by type before it picks an instance).
+    provider_type: str | None = None
 
 
 class GoalStepFactors(BaseModel):
@@ -718,7 +721,11 @@ class GoalStepFactors(BaseModel):
 
     ``hope`` is the pursuit-hope discount (``claim / urgency``): ``1.0`` at full
     hope, approaching ``0`` as the NPC gives up on the need. It defaults to
-    ``1.0`` so a sim that predates the field still validates."""
+    ``1.0`` so a sim that predates the field still validates.
+
+    ``time_discount`` (the wait to payoff) and ``sunk_progress`` (resumed work)
+    also default to the identity ``1.0``. Neither has an upper bound: the sim
+    owns their scale, and a refused value would drop the whole observation."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -727,12 +734,20 @@ class GoalStepFactors(BaseModel):
     responsiveness: float
     policy_modifier: float
     hope: float = Field(default=1.0, gt=0.0, le=1.0)
+    time_discount: float = Field(default=1.0, ge=0.0)
+    sunk_progress: float = Field(default=1.0, ge=0.0)
 
 
 class GoalOptionStep(BaseModel):
     """One step of one plan segment. ``step_score`` equals the product of the
-    factors (urgency x utility x responsiveness x policy_modifier x hope), and
-    equals the option's ``score`` while options are single-step.
+    factors (urgency x utility x responsiveness x policy_modifier x hope x
+    time_discount x sunk_progress), and equals the option's ``score`` while
+    options are single-step.
+
+    A PROJECTED step (``projected`` true, chain index 1 and up) is what the plan
+    does after step 0: never executed this cycle, priced only through step 0's
+    factors, so it carries none and ``step_score`` is the plan's. Every other
+    step must carry ``factors``.
 
     The sim computes ``step_score``; this model documents the relation rather
     than validating it, so float drift across the wire never refuses an
@@ -742,8 +757,15 @@ class GoalOptionStep(BaseModel):
 
     action: GoalStepAction
     target: GoalStepTarget | None = None
-    factors: GoalStepFactors
+    factors: GoalStepFactors | None = None
     step_score: float
+    projected: bool = False
+
+    @model_validator(mode="after")
+    def _factors_required_unless_projected(self) -> "GoalOptionStep":
+        if self.factors is None and not self.projected:
+            raise ValueError("a non-projected goal step must carry factors")
+        return self
 
 
 class GoalOptionSegment(BaseModel):
