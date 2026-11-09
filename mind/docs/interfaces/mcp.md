@@ -96,6 +96,20 @@ An act parameter that names something by id (a message, a place) says so on its 
 
 A missing, unknown or disagreeing key fails `Action` validation with a message naming the problem and the valid keys for the declared kind, and the reflection node's existing retry budget re-asks the model. Each failed attempt's error text is recorded in `PipelineState.validation_failures`. With no catalogue the key stays optional. The check is a presence mirror of `ConversationInteraction._agreed_element`, which stays authoritative and drops a disagreeing element while keeping the words. The catalogue is rendered into the prompt's dynamic section ("Remarks You Can Name") only while such a turn is possible. The prompt's static section carries the authored paragraph on what conversations can accomplish, and the naming rule, so the provider cache is unaffected. Measuring how well a model meets the rule is the job of the on-demand experiment tier, described in [cognitive_architecture/mcp_experiment.md](../cognitive_architecture/mcp_experiment.md).
 
+#### `required` on act-parameter specs (optional)
+
+An act parameter every act must set says so on its own spec in `act_in_interaction_parameters`. Such a spec carries `"required": true` and **no** `default` key:
+
+```json
+{"type": "float", "description": "Required: how your words land on the listener, from -1.0 to 1.0. ...", "required": true}
+```
+
+- An optional parameter is filled with its default by the simulation, which is why `act_in_interaction` otherwise needs only *one* advertised parameter. A required one has no default, and the simulation refuses an act that omits it.
+- The mind reads the key with `StatusObservation.act_parameter_required()`. No parameter is named in `mind/src`. Only a JSON `true` counts. An absent key, `false`, or a non-boolean (logged) leaves the parameter optional, so an older simulation behaves exactly as before.
+- The prompt hint marks the parameter `required: every act must set it` in place of a default. What to choose is the simulation's own `description`.
+- `_validate_act_in_interaction` raises `MissingRequiredParameterError` naming the parameter when an act omits it. The reflection node's existing retry loop re-asks the model, and the failure is recorded in `PipelineState.validation_failures`. An unadvertised extra is still refused first.
+- The simulation uses it for `utterance_tone` on a conversation turn (NPC-2146): every line carries a tone in [-1, 1].
+
 ### decide_action
 
 Processes a structured observation and recent events through the cognitive pipeline and returns an action. Takes `mind_id`, `observation` dict containing entity status, needs, vision, and conversations, and optional `events` list of temporal occurrences since last decision.
