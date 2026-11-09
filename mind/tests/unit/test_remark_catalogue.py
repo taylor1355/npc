@@ -65,7 +65,7 @@ class TestCatalogueContractLiteral:
     def test_wire_remarks_sorted_by_key_and_unique(self):
         keys = [row["key"] for row in wire_catalogue()["remarks"]]
 
-        assert len(keys) == 29
+        assert len(keys) == 31
         assert keys == sorted(keys)
         assert len(set(keys)) == len(keys)
 

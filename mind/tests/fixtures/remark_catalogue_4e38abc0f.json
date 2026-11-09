@@ -189,6 +189,26 @@
       "fields": {}
     },
     {
+      "key": "instruct.clear",
+      "gloss": "Let me walk you through it, step by step.",
+      "declares": "instruct",
+      "declare_with": [
+        "instruct_skill"
+      ],
+      "slots": [],
+      "fields": {}
+    },
+    {
+      "key": "instruct.plain",
+      "gloss": "Here, let me show you how I do it, if you want to try.",
+      "declares": "instruct",
+      "declare_with": [
+        "instruct_skill"
+      ],
+      "slots": [],
+      "fields": {}
+    },
+    {
       "key": "react_acknowledge",
       "gloss": "I understand.",
       "declares": "react",
