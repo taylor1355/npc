@@ -51,7 +51,7 @@ def wire_remark_conversation_interaction() -> dict:
     ``conversation_interaction.gd::_init`` declares ``message``,
     ``utterance_element``, ``addressee_ids`` and the message-level ``in_reply_to``, then
     ``DeclarationRegistry.contribute_parameter_specs`` adds each kind's specs in
-    registry order (farewell, share_belief, ask_who_told, answer, react).
+    registry order (farewell, share_belief, ask_who_told, answer, react, instruct).
     """
     return wire_current_interaction(
         name="conversation",
@@ -109,6 +109,12 @@ def wire_remark_conversation_interaction() -> dict:
                 "message's speaker alone): one of acknowledge, agree, disagree, doubt, ask_more, "
                 "delight, surprise, sympathize, thank"
                 "; empty = not reacting",
+            ),
+            "instruct_skill": wire_property_spec(
+                "string",
+                "",
+                "Skill this message teaches its addressees (the key of one of your skills at "
+                "tier 1 or beyond, such as cook or conversation); empty = not teaching",
             ),
         },
         needs_filled=["social"],
