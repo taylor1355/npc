@@ -61,8 +61,9 @@ class TestMatrix:
     def test_the_matrix_covers_every_kind_and_the_phatic_roots(self):
         kinds = {case.apt_kind for case in CASES}
 
-        # Lesson remarks (``instruct``) postdate the experiment's matrix; no case drives them.
+        # No experiment case drives lesson remarks (``instruct``).
         uncovered = {"instruct"}
+        assert not (uncovered & kinds), f"drop {uncovered & kinds} from uncovered: a case covers it"
         assert kinds >= {""} | (set(catalogue().declaring_parameters()) - uncovered)
 
     @pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
