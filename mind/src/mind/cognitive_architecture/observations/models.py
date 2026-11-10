@@ -119,13 +119,10 @@ def shed_undeclared_keys(
 
 
 def _spec_is_required(spec: dict) -> bool:
-    """Whether one wire spec declares its parameter required.
+    """Whether one wire spec declares its parameter required (only a JSON ``true``).
 
-    Only a JSON ``true`` counts. Anything else -- absent, ``false``, or a value
-    of the wrong type -- is not required, which is what an older simulation
-    that never emits the key means. A wrong-typed value is logged by
-    ``StatusObservation.act_parameter_required`` rather than here, so the
-    per-cycle prompt path stays quiet.
+    Non-boolean handling is documented, and logged, at
+    ``StatusObservation.act_parameter_required``.
     """
     return spec.get(WIRE_KEY_PARAM_REQUIRED) is True
 
