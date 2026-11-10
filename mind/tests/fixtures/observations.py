@@ -34,19 +34,29 @@ from mind.interfaces.mcp.models import MindConfig
 
 
 def wire_property_spec(
-    type_name: str, default, description: str, refers_to: str | dict | None = None
+    type_name: str,
+    default,
+    description: str,
+    refers_to: str | dict | None = None,
+    required: bool = False,
 ) -> dict:
     """One entry of ``act_in_interaction_parameters``, verbatim from the wire.
 
     This IS the Godot ``PropertySpec.to_dict()`` shape — ``{"type", "default",
     "description"}`` plus the optional ``refers_to`` (NPC-2021), emitted only when
-    the spec declares what it refers to. Tests build parameter payloads through
+    the spec declares what it refers to, and ``required``, which replaces
+    ``default`` on a spec every act must set. Tests build parameter payloads through
     this helper so a simulation-side shape change breaks in one place rather
     than in every fixture that happened to guess right.
     """
     spec = {"type": type_name, "default": default, "description": description}
     if refers_to is not None:
         spec["refers_to"] = refers_to
+    if required:
+        # A required spec crosses the wire with no default: the simulation
+        # fills nothing in for it.
+        del spec["default"]
+        spec["required"] = True
     return spec
 
 

@@ -591,7 +591,10 @@ class Action(BaseModel):
         "At least one" rather than "all": the simulation's PropertySpec layer
         supplies defaults for anything omitted, so a partial act is legitimate,
         while a bare ``{}`` is the wasted turn worth converting into a visible,
-        retryable error.
+        retryable error. The exception is a parameter whose spec says
+        ``required``: the simulation fills in nothing for it and refuses an act
+        that omits it, so its absence is raised here, where the reflection
+        node's retry loop can re-ask the model, instead of costing the turn.
         """
         if not observation.is_interacting():
             raise ValueError("ACT_IN_INTERACTION requires an active interaction")
@@ -605,6 +608,10 @@ class Action(BaseModel):
             # A parameterless interaction accepts only the bare act. Extras were
             # rejected above against the same empty schema.
             return
+
+        for name in observation.status.act_parameter_required():
+            if name not in self.parameters:
+                raise MissingRequiredParameterError(name, self.action)
 
         if not any(name in self.parameters for name in advertised):
             raise NoAdvertisedParameterError(list(advertised), self.action)

@@ -329,6 +329,7 @@ ACTION_OFFERING_FUNCTIONS = (
     (observation_models, "interaction_display_name"),
     (observation_models, "act_parameter_hints"),
     (observation_models, "_format_parameter_hint"),
+    (observation_models, "act_parameter_required"),
     (observation_models, "get_available_actions"),
     (action_models, "_validate_act_in_interaction"),
     (action_models, "_validate_remark"),

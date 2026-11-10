@@ -31,10 +31,13 @@ WIRE_KEY_ACT_PARAMETERS = "act_in_interaction_parameters"
 
 # Sub-keys of one ``act_in_interaction_parameters`` entry. Each entry is a Godot
 # ``PropertySpec.to_dict()``: {"type": <string>, "default": <value>,
-# "description": <string>}.
+# "description": <string>}, plus two optional keys: ``refers_to`` (NPC-2021) and
+# ``required``. A required spec carries ``"required": true`` and no default --
+# the simulation fills nothing in for it, so an act that omits it is refused.
 WIRE_KEY_PARAM_TYPE = "type"
 WIRE_KEY_PARAM_DEFAULT = "default"
 WIRE_KEY_PARAM_DESCRIPTION = "description"
+WIRE_KEY_PARAM_REQUIRED = "required"
 
 # Rendered when the wire carries no usable interaction name. A generic English
 # noun, deliberately not any interaction's identifier — nothing in this package
@@ -115,6 +118,15 @@ def shed_undeclared_keys(
     return {key: value for key, value in data.items() if key not in undeclared}
 
 
+def _spec_is_required(spec: dict) -> bool:
+    """Whether one wire spec declares its parameter required (only a JSON ``true``).
+
+    Non-boolean handling is documented, and logged, at
+    ``StatusObservation.act_parameter_required``.
+    """
+    return spec.get(WIRE_KEY_PARAM_REQUIRED) is True
+
+
 def _format_parameter_hint(param_name: str, spec: dict) -> str:
     """Render one wire parameter spec as the prose hint the LLM reads.
 
@@ -130,8 +142,13 @@ def _format_parameter_hint(param_name: str, spec: dict) -> str:
     type_name = str(spec.get(WIRE_KEY_PARAM_TYPE) or "").strip()
     if type_name:
         qualifiers.append(f"type: {type_name}")
+    # A required parameter has no default to fall back on, so a default shown
+    # beside it would advertise an omission the simulation refuses. Same words
+    # the validator enforces (``_validate_act_in_interaction``).
+    if _spec_is_required(spec):
+        qualifiers.append("required: every act must set it")
     # Membership, not truthiness: ``false`` and ``0`` are legitimate defaults.
-    if WIRE_KEY_PARAM_DEFAULT in spec:
+    elif WIRE_KEY_PARAM_DEFAULT in spec:
         qualifiers.append(f"default: {spec[WIRE_KEY_PARAM_DEFAULT]!r}")
     # What the parameter refers to (NPC-2021), in the same words the validator
     # enforces: the model is told to give a handle because an id is never shown.
@@ -571,6 +588,40 @@ class StatusObservation(BaseModel):
             hints[str(param_name)] = _format_parameter_hint(str(param_name), spec)
 
         return hints
+
+    def act_parameter_required(self) -> list[str]:
+        """The advertised act parameters every act must set, sorted.
+
+        Read from each spec's optional ``required`` key, so a parameter the
+        simulation declares required is enforced with no Python change here;
+        nothing in this module may name a parameter. An older simulation never
+        emits the key, so nothing is required and the "at least one" rule in
+        ``_validate_act_in_interaction`` is the whole check, exactly as before.
+
+        Same degradation contract as ``act_parameter_hints``: never raises. A
+        ``required`` value that is not a boolean is treated as not required and
+        logged, because guessing the stricter reading would refuse every act of
+        that interaction over a malformed key.
+        """
+        raw: Any = self.current_interaction.get(WIRE_KEY_ACT_PARAMETERS)
+        if not self.current_interaction or not isinstance(raw, dict):
+            return []
+        required: list[str] = []
+        for param_name, spec in raw.items():
+            if not isinstance(spec, dict):
+                continue
+            flag = spec.get(WIRE_KEY_PARAM_REQUIRED)
+            if flag is not None and not isinstance(flag, bool):
+                logger.warning(
+                    "Act parameter '%s' has a non-boolean '%s' (%r); treating it as optional.",
+                    param_name,
+                    WIRE_KEY_PARAM_REQUIRED,
+                    flag,
+                )
+                continue
+            if flag is True:
+                required.append(str(param_name))
+        return sorted(required)
 
     def act_parameter_references(self) -> dict[str, ParameterReference]:
         """Which advertised act parameters name something by handle (NPC-2021).
