@@ -3,7 +3,9 @@
 import json
 import time
 from abc import ABC
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from json_repair import loads as json_repair_loads
 from langchain_core.language_models import BaseChatModel
@@ -18,6 +20,35 @@ from mind.cognitive_architecture.state import PipelineState, StepTokenUsage
 from mind.logging_config import get_logger
 
 logger = get_logger()
+
+
+# Write-ahead ledger of provider round-trips for the decision in flight.
+#
+# PipelineState.tokens_used cannot carry spend out of a failed decision: LangGraph
+# hands each node a validated COPY of the state, so a node that raises takes its
+# own tokens_used write with it, and the raise then bypasses every handler that
+# could still reach the state. A ContextVar lives outside graph state and is
+# shared by reference with the tasks LangGraph spawns (they copy the context, not
+# the dict), so a write made inside a node is visible to the opener after the
+# node raised or was cancelled. None means no decision has opened a ledger.
+_round_trips: ContextVar[dict[str, StepTokenUsage] | None] = ContextVar("round_trips", default=None)
+
+
+@contextmanager
+def recording_round_trips() -> Iterator[dict[str, StepTokenUsage]]:
+    """Open a per-decision ledger of provider round-trips, keyed by step name.
+
+    LLMNode._invoke records into it as each round-trip settles. Without an open
+    ledger recording is a no-op, so nodes used outside a decision (tests, the
+    measurement harness) are unaffected. Scopes are isolated: concurrent
+    decisions each see only their own.
+    """
+    ledger: dict[str, StepTokenUsage] = {}
+    token = _round_trips.set(ledger)
+    try:
+        yield ledger
+    finally:
+        _round_trips.reset(token)
 
 
 def entity_tag(state: PipelineState) -> str:
@@ -57,7 +88,10 @@ class LLMNode(Node):
     """Base for nodes that call LLMs with automatic token tracking and optional retry
 
     Features:
-    - Automatic token tracking via callbacks (provider-agnostic)
+    - Automatic token tracking (provider-agnostic). Two records of the same
+      spend: ``state.tokens_used`` (success path, travels with the state) and
+      the round-trip ledger (``recording_round_trips``), written as each
+      round-trip settles so it survives a raise or a cancel.
     - Optional retry with Pydantic validation context
     - Structured (Pydantic) or raw (str) output
     - Prompt template validation via LangChain PromptTemplate
@@ -220,9 +254,8 @@ class LLMNode(Node):
         # Raw string output (no retry needed)
         if self.output_model is None:
             start_time = time.time()
-            response = await self.llm.ainvoke([HumanMessage(content=content)])
+            response, usage = await self._invoke([HumanMessage(content=content)])
             elapsed_ms = int((time.time() - start_time) * 1000)
-            usage = self._extract_usage(response) or StepTokenUsage.unreported_call()
             # Recorded unconditionally: a step that legitimately cost zero tokens
             # must still get a key, or "ran and was free" is indistinguishable
             # from "never ran".
@@ -251,15 +284,13 @@ class LLMNode(Node):
         for attempt in range(max_attempts):
             try:
                 # Call LLM
-                response = await self.llm.ainvoke(messages)
+                response, step_usage = await self._invoke(messages)
                 last_content = response.content
 
                 # Track usage from this attempt. Every round-trip is counted,
                 # including the ones that failed validation -- retries are real
                 # spend with no extra cognitive product.
-                usage = usage.merged_with(
-                    self._extract_usage(response) or StepTokenUsage.unreported_call()
-                )
+                usage = usage.merged_with(step_usage)
 
                 # Parse JSON (json_repair handles common formatting issues)
                 data = json_repair_loads(response.content)
@@ -318,6 +349,31 @@ class LLMNode(Node):
             # whatever parts of the response were valid.
             return on_exhausted(last_content, last_error)
         raise last_error
+
+    async def _invoke(self, messages: list) -> tuple[AIMessage, StepTokenUsage]:
+        """One provider round-trip, recorded in the ledger as it settles.
+
+        The single choke point for ``llm.ainvoke``. A round-trip that raises or
+        is cancelled is recorded as an unreported call: the request left, so it
+        may have been billed, but nothing says what it cost. BaseException so a
+        CancelledError (the deadline, or the game abandoning the decision) is
+        counted too; it is always re-raised.
+        """
+        try:
+            response = await self.llm.ainvoke(messages)
+        except BaseException:
+            self._record(StepTokenUsage.unreported_call())
+            raise
+        usage = self._extract_usage(response) or StepTokenUsage.unreported_call()
+        self._record(usage)
+        return response, usage
+
+    def _record(self, usage: StepTokenUsage) -> None:
+        ledger = _round_trips.get()
+        if ledger is None:
+            return
+        prior = ledger.get(self.step_name)
+        ledger[self.step_name] = prior.merged_with(usage) if prior else usage
 
     def _extract_usage(self, response: AIMessage) -> StepTokenUsage | None:
         """Provider-reported usage for one call, or None if nothing was reported.

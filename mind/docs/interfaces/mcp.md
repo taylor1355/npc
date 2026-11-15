@@ -147,12 +147,31 @@ hits" from "the provider does not report them", `model_calls` (provider
 round-trips, retries included), `unreported_calls`, `model`, `server_ms`, and
 per-step breakdowns.
 
-An **error** response carries no `telemetry`, and a client must read that
-absence as *unknown cost*, never as zero — the two are different facts, and on
-the retry-exhaustion path the attempt genuinely spent tokens that no longer
-reach this boundary. `provenance: "unreported"` on a *success* response means
-the pipeline ran but no step reported usage, which distinguishes a silent
-provider from a cheap decision.
+An **error** response carries `telemetry` once the pipeline was entered, built
+from the round-trip ledger (see below): `model_calls` counts every provider
+round-trip attempted, a round-trip that raised or was cancelled counts under
+`unreported_calls`, `server_ms` is wall time, and `per_step_ms` is empty. An
+error response with **no** `telemetry` means the request was rejected before
+any model ran (unknown mind, malformed observation or events, entity mismatch);
+a client must read that absence as *unknown cost*, never as zero. `provenance:
+"unreported"` on a *success* response means the pipeline ran but no step reported
+usage, which distinguishes a silent provider from a cheap decision. The key is
+additive and optional, so `PROTOCOL_VERSION` is unchanged.
+
+#### Deadlines and cancellation
+
+- `LLM_REQUEST_TIMEOUT_SECONDS` (45 s) bounds one provider round-trip. A decision
+  makes several (two LLM nodes, up to 3 attempts each), so the decision as a whole
+  is bounded by `DECISION_DEADLINE_SECONDS` (50 s, below the game's 60 s). On
+  expiry the server returns an error naming the deadline, with telemetry stating
+  what the abandoned decision spent. The mind is not mutated by an abandoned decision.
+- The **round-trip ledger** (`nodes/base.py::recording_round_trips`) is a
+  `ContextVar` that `LLMNode._invoke` writes as each round-trip settles. It lives
+  outside `PipelineState` because LangGraph hands each node a copy of the state, so
+  a node that raises takes its `tokens_used` write with it.
+- When the client cancels the request (`notifications/cancelled`) the SDK cancels the
+  handler task. The server logs a WARNING under the entity tag with the elapsed
+  time and the spend so far, then re-raises; no response is sent for a cancelled request.
 
 **Event Types:** `INTERACTION_BID_REJECTED`, `INTERACTION_BID_RECEIVED`, `INTERACTION_STARTED`, `INTERACTION_FINISHED`, `INTERACTION_CANCELED`, `INTERACTION_OBSERVATION`, `ERROR`
 

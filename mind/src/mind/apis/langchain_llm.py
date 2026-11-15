@@ -20,8 +20,11 @@ class LangChainModel:
 
 # Per-call HTTP bound. Without it there is none: langchain-openai passes
 # request_timeout=None through, which httpx treats as unbounded (the SDK's
-# 600s default never applies). Kept below the game's 60s decide_action deadline
-# (npc-simulation DEADLINE_SECONDS_DECIDE_ACTION) so this side fails first.
+# 600s default never applies). This bounds ONE provider round-trip only; a
+# decision makes several (two nodes, up to 3 attempts each), so the decision as
+# a whole is bounded by server.DECISION_DEADLINE_SECONDS, which sits below the
+# game's 60s decide_action deadline (npc-simulation
+# DEADLINE_SECONDS_DECIDE_ACTION). This bound must not exceed that deadline.
 # tests/unit/test_server_bounds.py pins both properties.
 LLM_REQUEST_TIMEOUT_SECONDS = 45.0
 
