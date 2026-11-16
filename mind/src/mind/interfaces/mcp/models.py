@@ -116,12 +116,34 @@ class DecisionTelemetry(BaseModel):
     @classmethod
     def from_pipeline_state(cls, result: PipelineState, model: str) -> "DecisionTelemetry":
         """Fold a completed pipeline's per-step usage into one decision record."""
+        return cls.from_step_usage(
+            result.tokens_used,
+            per_step_ms=dict(result.time_ms),
+            server_ms=sum(result.time_ms.values()),
+            model=model,
+        )
+
+    @classmethod
+    def from_step_usage(
+        cls,
+        per_step: dict[str, StepTokenUsage],
+        *,
+        per_step_ms: dict[str, int],
+        server_ms: int,
+        model: str,
+    ) -> "DecisionTelemetry":
+        """Fold per-step usage into one decision record.
+
+        The one fold behind both the success path (usage from a completed
+        PipelineState) and the failure paths (usage from the round-trip ledger,
+        where per-step timings do not exist and ``server_ms`` is wall time).
+        """
         folded = StepTokenUsage()
-        for step_usage in result.tokens_used.values():
+        for step_usage in per_step.values():
             folded = folded.merged_with(step_usage)
 
         # Unreported iff calls were made and not one of them reported usage. An
-        # empty tokens_used (no LLM step ran at all, or the state never reached
+        # empty mapping (no LLM step ran at all, or the state never reached
         # one) is also unreported: we cannot claim a measurement we never took.
         metered = folded.model_calls > 0 and not folded.is_fully_unreported()
 
@@ -136,9 +158,9 @@ class DecisionTelemetry(BaseModel):
             model_calls=folded.model_calls,
             unreported_calls=folded.unreported_calls,
             model=model,
-            server_ms=sum(result.time_ms.values()),
-            per_step=dict(result.tokens_used),
-            per_step_ms=dict(result.time_ms),
+            server_ms=server_ms,
+            per_step=dict(per_step),
+            per_step_ms=per_step_ms,
         )
 
 

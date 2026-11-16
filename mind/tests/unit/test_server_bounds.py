@@ -17,6 +17,7 @@ from mind.apis.langchain_llm import (
     get_llm,
 )
 from mind.interfaces.mcp.main import LOG_HANDLER, create_starlette_app, main
+from mind.interfaces.mcp.server import DECISION_DEADLINE_SECONDS
 
 
 @contextmanager
@@ -86,10 +87,9 @@ class TestStarletteDebugIsOptIn:
 
 
 class TestProviderCallsAreBounded:
-    """A call with no timeout wedges the decision forever. The game side applies
-    no deadline of its own today, and [NPC-1682] — which adds a 60s per-attempt
-    client deadline — is in flight rather than merged, so this bound must hold
-    on its own AND stay inside that 60s once it lands."""
+    """A call with no timeout wedges the decision forever. The per-call bound
+    limits one round-trip; DECISION_DEADLINE_SECONDS (below) limits the whole
+    decision. Both must sit inside the game's 60s deadline ([NPC-1682])."""
 
     @pytest.fixture
     def llm(self):
@@ -134,3 +134,20 @@ class TestProviderCallsAreBounded:
         """
         client_deadline_seconds = 60.0
         assert LLM_REQUEST_TIMEOUT_SECONDS < client_deadline_seconds
+
+
+class TestDecisionDeadlineIsBounded:
+    """The whole decision is several round-trips (2 nodes x 3 attempts x 45 s =
+    270 s worst case); only a decision-level deadline bounds it."""
+
+    def test_the_deadline_is_a_real_number(self):
+        assert isinstance(DECISION_DEADLINE_SECONDS, int | float)
+        assert DECISION_DEADLINE_SECONDS > 0
+
+    def test_the_deadline_fires_before_the_clients(self):
+        """Duplicate of the game's DEADLINE_SECONDS_DECIDE_ACTION (60 s), as above.
+        If the game's fires first, no failure can come back carrying its cost."""
+        assert DECISION_DEADLINE_SECONDS < 60.0
+
+    def test_one_call_cannot_outlast_the_decision(self):
+        assert LLM_REQUEST_TIMEOUT_SECONDS <= DECISION_DEADLINE_SECONDS

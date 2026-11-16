@@ -1,7 +1,9 @@
 """MCP server for mind management"""
 
+import asyncio
 import json
 import os
+import time
 import uuid
 
 from fastmcp import Context, FastMCP
@@ -9,6 +11,7 @@ from pydantic import ValidationError
 
 from mind.cognitive_architecture.actions import ActionType
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
+from mind.cognitive_architecture.nodes.base import recording_round_trips
 from mind.cognitive_architecture.nodes.memory_consolidation.node import MemoryConsolidationNode
 from mind.cognitive_architecture.observations import (
     ConversationObservation,
@@ -41,14 +44,31 @@ logger = get_logger()
 ## into the same absent field.
 PROTOCOL_VERSION = 4
 
+# Whole-decision deadline. The per-call bound (LLM_REQUEST_TIMEOUT_SECONDS, 45 s)
+# limits ONE provider round-trip, not the decision: a decision is up to two LLM
+# nodes (memory_query, reflection), each retrying parse/validation failures up to
+# 3 attempts, so a stalled provider can legitimately hold a decision for
+# 2 nodes x 3 attempts x 45 s = 270 s. The game gives up on a decision at 60 s
+# (npc-simulation DEADLINE_SECONDS_DECIDE_ACTION), so without this the game's
+# deadline always fires first and the server keeps paying for work nobody will
+# read. Firing at 50 s makes THIS side the one that fails first, which is the only
+# way the failure can come back carrying its cost (error telemetry). Must stay
+# below the game's 60 s; tests/unit/test_server_bounds.py pins that.
+DECISION_DEADLINE_SECONDS = 50.0
 
-def _error_response(request_id: str, error_message: str, details: str = None) -> dict:
+
+def _error_response(
+    request_id: str,
+    error_message: str,
+    details: str = None,
+    telemetry: dict | None = None,
+) -> dict:
     """Helper to construct error response dict.
 
-    Carries no telemetry by design. An error means the cost of the attempt is
-    genuinely unrecoverable here (retry exhaustion raises past any handler that
-    can still reach PipelineState), and the client maps absent telemetry to
-    "unknown", never to zero.
+    ``telemetry`` is present only once the pipeline was entered, and is built
+    from the round-trip ledger: it states what the failed attempt cost. Its
+    ABSENCE means the request was rejected before any model ran. The client maps
+    absent telemetry to "unknown", never to zero.
     """
     response = {
         "status": "error",
@@ -59,6 +79,8 @@ def _error_response(request_id: str, error_message: str, details: str = None) ->
     }
     if details:
         response["details"] = details
+    if telemetry is not None:
+        response["telemetry"] = telemetry
     return response
 
 
@@ -412,6 +434,26 @@ class MCPServer:
             request_id = str(uuid.uuid4())[:8]
             logger.debug(f"[{request_id}] decide_action called for mind_id={mind_id}")
 
+            # Set once the pipeline is entered; None before, which is what keeps
+            # pre-pipeline rejections telemetry-free.
+            spend: dict | None = None
+            deadline = None
+            started = None
+            known_mind = self.minds.get(mind_id)
+            model_slug = known_mind.llm_model if known_mind is not None else ""
+            entity_for_logs = known_mind.entity_id if known_mind is not None else "unknown"
+
+            def _spent() -> dict | None:
+                """Telemetry for a failed attempt, from the round-trip ledger."""
+                if spend is None:
+                    return None
+                return DecisionTelemetry.from_step_usage(
+                    spend,
+                    per_step_ms={},
+                    server_ms=int((time.monotonic() - started) * 1000),
+                    model=model_slug,
+                ).model_dump()
+
             try:
                 if mind_id not in self.minds:
                     logger.warning(f"[{request_id}] Mind {mind_id} not found")
@@ -477,7 +519,11 @@ class MCPServer:
 
                 # Run cognitive pipeline
                 logger.debug(f"[{request_id}] Running cognitive pipeline for {mind_id}")
-                result = await mind.pipeline.process(state)
+                deadline = asyncio.timeout(DECISION_DEADLINE_SECONDS)
+                started = time.monotonic()
+                with recording_round_trips() as spend:
+                    async with deadline:
+                        result = await mind.pipeline.process(state)
 
                 mind.working_memory = result.working_memory
                 mind.daily_memories.extend(result.daily_memories)
@@ -490,19 +536,14 @@ class MCPServer:
                 )
 
                 if result.chosen_action is None:
-                    # The one error branch where the cost is NOT unrecoverable: `result`
-                    # is a completed PipelineState and `result.tokens_used` is populated,
-                    # so _error_response's "genuinely unknown" rationale does not hold
-                    # here. It is not plumbed through anyway, because the client maps
-                    # ANY error response to UNREPORTED -- attaching telemetry to this one
-                    # would need a matching client change or the counts would be read as
-                    # unknown regardless. Unreachable today: ReflectionNode salvages
-                    # retry exhaustion (falling back to a WAIT action at minimum), so
-                    # chosen_action is always set. If that salvage ever goes away, real
-                    # measured telemetry starts disappearing through here.
-                    # Tracked as [NPC-1195] with the retry-exhaustion loss -- same class.
                     logger.warning(f"[{request_id}] Pipeline returned no action for {mind_id}")
-                    return _error_response(request_id, "Pipeline did not select an action")
+                    return _error_response(
+                        request_id,
+                        "Pipeline did not select an action",
+                        telemetry=DecisionTelemetry.from_pipeline_state(
+                            result, mind.llm_model
+                        ).model_dump(),
+                    )
 
                 logger.info(
                     f"[{request_id}] Successfully processed decision for {mind_id}: {result.chosen_action.action}"
@@ -530,10 +571,46 @@ class MCPServer:
                 logger.warning(
                     f"[{request_id}] Validation failed in decide_action for {mind_id}: {str(e)}"
                 )
-                return _error_response(request_id, "Action validation failed", details=str(e))
+                return _error_response(
+                    request_id, "Action validation failed", details=str(e), telemetry=_spent()
+                )
+            except TimeoutError:
+                # asyncio.timeout converts only ITS OWN expiry; any other
+                # TimeoutError (a provider's, say) is an ordinary unexpected error.
+                if deadline is not None and deadline.expired():
+                    spent = _spent()
+                    logger.warning(
+                        f"[{request_id}] [{entity_for_logs}] Decision deadline of "
+                        f"{DECISION_DEADLINE_SECONDS:g} s exceeded for {mind_id}; abandoning "
+                        f"({spent['model_calls']} model calls, "
+                        f"{spent['unreported_calls']} unreported, {spent['total_tokens']} tokens)"
+                    )
+                    return _error_response(
+                        request_id,
+                        f"Decision deadline of {DECISION_DEADLINE_SECONDS:g} s exceeded",
+                        telemetry=spent,
+                    )
+                logger.exception(f"[{request_id}] Unexpected error in decide_action for {mind_id}")
+                return _error_response(request_id, "Unexpected server error", telemetry=_spent())
+            except asyncio.CancelledError:
+                # The game abandoned the decision (notifications/cancelled). Log
+                # what the cancelled thinking cost, then re-raise: swallowing a
+                # cancel would wedge the SDK's cancel scope. No await in here --
+                # a cancelled task must not suspend again. Nothing is applied to
+                # the mind after a cancel (the post-pipeline mutations never ran).
+                spent = _spent()
+                if spent is not None:
+                    elapsed_ms = spent["server_ms"]
+                    logger.warning(
+                        f"[{request_id}] [{entity_for_logs}] Decision cancelled by the client "
+                        f"after {elapsed_ms} ms for {mind_id} "
+                        f"({spent['model_calls']} model calls, "
+                        f"{spent['unreported_calls']} unreported, {spent['total_tokens']} tokens)"
+                    )
+                raise
             except Exception:
                 logger.exception(f"[{request_id}] Unexpected error in decide_action for {mind_id}")
-                return _error_response(request_id, "Unexpected server error")
+                return _error_response(request_id, "Unexpected server error", telemetry=_spent())
 
         @self.mcp.tool()
         async def consolidate_memories(

@@ -1,5 +1,6 @@
 """Unit tests for base node classes"""
 
+import asyncio
 import json
 import logging
 from unittest.mock import AsyncMock
@@ -9,7 +10,12 @@ from langchain_core.messages import AIMessage
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, ValidationError
 
-from mind.cognitive_architecture.nodes.base import LLMNode, Node, entity_tag
+from mind.cognitive_architecture.nodes.base import (
+    LLMNode,
+    Node,
+    entity_tag,
+    recording_round_trips,
+)
 from mind.cognitive_architecture.observations import Observation, StatusObservation
 from mind.cognitive_architecture.state import PipelineState
 
@@ -800,3 +806,158 @@ class TestEntityTagAttribution:
             assert "entity_attribution_test" in record.getMessage(), (
                 f"Unattributed log record: {record.getMessage()!r}"
             )
+
+
+class TestRoundTripLedger:
+    """The write-ahead ledger records each provider round-trip as it settles.
+
+    It exists because state.tokens_used cannot survive a raise (LangGraph hands each
+    node a copy of the state), so spend on a failed decision was unrecoverable.
+    """
+
+    @staticmethod
+    def _state():
+        return PipelineState(
+            observation=Observation(
+                entity_id="ledger_test",
+                current_simulation_time=0,
+                status=StatusObservation(position=(0, 0), movement_locked=False),
+            )
+        )
+
+    @staticmethod
+    def _usage_reply(content="x", total=100):
+        return AIMessage(
+            content=content,
+            usage_metadata={
+                "input_tokens": total - 10,
+                "output_tokens": 10,
+                "total_tokens": total,
+            },
+        )
+
+    @staticmethod
+    def _node(llm, output_model=None, max_retries=0, step="ledger_step"):
+        node = LLMNode(
+            llm=llm,
+            prompt=PromptTemplate.from_template("{input}"),
+            output_model=output_model,
+            max_retries=max_retries,
+        )
+        node.step_name = step
+        return node
+
+    async def test_raw_path_ledger_equals_tokens_used(self):
+        llm = AsyncMock()
+        llm.ainvoke.return_value = self._usage_reply(total=100)
+        node, state = self._node(llm), self._state()
+
+        with recording_round_trips() as ledger:
+            await node.call_llm(state, input="hi")
+
+        assert ledger == state.tokens_used
+
+    async def test_retry_path_ledger_equals_tokens_used(self):
+        class Out(BaseModel):
+            value: str
+
+        llm = AsyncMock()
+        llm.ainvoke.side_effect = [
+            self._usage_reply("not json {{", total=60),
+            self._usage_reply('{"value": "ok"}', total=70),
+        ]
+        node, state = self._node(llm, Out, max_retries=1), self._state()
+
+        with recording_round_trips() as ledger:
+            await node.call_llm(state, input="hi")
+
+        assert ledger == state.tokens_used
+        assert ledger["ledger_step"].model_calls == 2
+        assert ledger["ledger_step"].total_tokens == 130
+
+    async def test_salvage_path_ledger_equals_tokens_used(self):
+        class Out(BaseModel):
+            value: str
+
+        llm = AsyncMock()
+        llm.ainvoke.return_value = self._usage_reply("never valid {{", total=40)
+        node, state = self._node(llm, Out, max_retries=1), self._state()
+
+        with recording_round_trips() as ledger:
+            await node.call_llm(
+                state, input="hi", on_exhausted=lambda raw, err: Out.model_construct(value="")
+            )
+
+        assert ledger == state.tokens_used
+        assert ledger["ledger_step"].model_calls == 2
+
+    async def test_a_raising_round_trip_is_recorded_as_one_unreported_call(self):
+        llm = AsyncMock()
+        llm.ainvoke.side_effect = RuntimeError("provider 5xx")
+        node, state = self._node(llm), self._state()
+
+        with recording_round_trips() as ledger, pytest.raises(RuntimeError):
+            await node.call_llm(state, input="hi")
+
+        usage = ledger["ledger_step"]
+        assert (usage.model_calls, usage.unreported_calls, usage.total_tokens) == (1, 1, 0)
+        assert state.tokens_used == {}
+
+    async def test_a_cancelled_round_trip_is_recorded_and_the_cancel_propagates(self):
+        started = asyncio.Event()
+
+        class Hanging:
+            async def ainvoke(self, messages):
+                started.set()
+                await asyncio.Event().wait()
+
+        node, state = self._node(Hanging()), self._state()
+
+        with recording_round_trips() as ledger:
+            task = asyncio.ensure_future(node.call_llm(state, input="hi"))
+            await asyncio.wait_for(started.wait(), 5)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        assert ledger["ledger_step"].unreported_calls == 1
+
+    async def test_no_open_ledger_is_a_no_op(self):
+        llm = AsyncMock()
+        llm.ainvoke.return_value = self._usage_reply()
+        node, state = self._node(llm), self._state()
+
+        await node.call_llm(state, input="hi")  # must not raise
+
+        assert state.tokens_used["ledger_step"].model_calls == 1
+
+    async def test_concurrent_scopes_are_isolated(self):
+        async def one_decision(total: int) -> int:
+            llm = AsyncMock()
+            llm.ainvoke.return_value = self._usage_reply(total=total)
+            node, state = self._node(llm), self._state()
+            with recording_round_trips() as ledger:
+                await asyncio.sleep(0)  # interleave with the sibling decision
+                await node.call_llm(state, input="hi")
+                await asyncio.sleep(0)
+            return ledger["ledger_step"].total_tokens
+
+        assert await asyncio.gather(one_decision(11), one_decision(22)) == [11, 22]
+
+    async def test_a_second_node_raising_keeps_the_first_nodes_spend_in_the_ledger(self):
+        """The loss this ledger exists to close, without the server in the way."""
+        ok_llm, bad_llm = AsyncMock(), AsyncMock()
+        ok_llm.ainvoke.return_value = self._usage_reply(total=80)
+        bad_llm.ainvoke.side_effect = RuntimeError("boom")
+        first = self._node(ok_llm, step="first")
+        second = self._node(bad_llm, step="second")
+        state = self._state()
+
+        with recording_round_trips() as ledger:
+            await first.call_llm(state, input="hi")
+            with pytest.raises(RuntimeError):
+                await second.call_llm(state, input="hi")
+
+        assert set(ledger) == {"first", "second"}
+        assert ledger["first"].total_tokens == 80
+        assert ledger["second"].unreported_calls == 1
