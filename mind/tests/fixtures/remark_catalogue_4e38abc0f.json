@@ -334,6 +334,32 @@
       "fields": {}
     },
     {
+      "key": "share_belief.expertise",
+      "gloss": "You should see {person} at work, they really know what they're doing.",
+      "declares": "share_belief",
+      "declare_with": [
+        "share_belief_kind",
+        "share_belief_subject_id"
+      ],
+      "slots": [
+        "person"
+      ],
+      "fields": {}
+    },
+    {
+      "key": "share_belief.expertise_heard",
+      "gloss": "I hear {person} really knows what they're doing.",
+      "declares": "share_belief",
+      "declare_with": [
+        "share_belief_kind",
+        "share_belief_subject_id"
+      ],
+      "slots": [
+        "person"
+      ],
+      "fields": {}
+    },
+    {
       "key": "share_belief.place",
       "gloss": "There's food over at {zone}, if you're hungry.",
       "declares": "share_belief",

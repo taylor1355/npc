@@ -65,9 +65,17 @@ class TestCatalogueContractLiteral:
     def test_wire_remarks_sorted_by_key_and_unique(self):
         keys = [row["key"] for row in wire_catalogue()["remarks"]]
 
-        assert len(keys) == 31
+        assert len(keys) == 33
         assert keys == sorted(keys)
         assert len(set(keys)) == len(keys)
+
+    def test_expertise_remarks_take_the_person_slot_and_declare_a_belief(self):
+        by_key = {row["key"]: row for row in wire_catalogue()["remarks"]}
+
+        for key in ("share_belief.expertise", "share_belief.expertise_heard"):
+            assert by_key[key]["slots"] == ["person"], key
+            assert by_key[key]["declares"] == "share_belief", key
+            assert "{person}" in by_key[key]["gloss"], key
 
     def test_glosses_name_their_slots_as_placeholders(self):
         for row in wire_catalogue()["remarks"]:
