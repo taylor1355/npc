@@ -2,7 +2,7 @@
 
 ``remark_catalogue_4e38abc0f.json`` is the catalogue ``remark_catalogue.gd::build``
 is specified to emit (NPC-1916 plan section 2.1) over the shipped grammar at game
-commit ``4e38abc0f``: the 20 wire remarks of ``resources/grammar/grammar.tres``
+commit ``4e38abc0f``: the wire remarks of ``resources/grammar/grammar.tres``
 (provisional ``response.*`` children excluded), sorted by key, each gloss its
 primary gloss with ``{slot}`` placeholders, ``declare_with`` the declaring kind's
 ``parameter_specs()`` keys in declaration order. It was transcribed by hand from
