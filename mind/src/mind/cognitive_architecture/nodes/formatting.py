@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from mind.cognitive_architecture.dimension_catalogue import DimensionCatalogue
     from mind.cognitive_architecture.observations import (
         ConversationMessage,
         ConversationPartner,
@@ -78,6 +79,7 @@ def format_conversation_histories(
     entity_id: str,
     partners: dict[str, list[ConversationPartner]] | None = None,
     annotate_handles: bool = False,
+    dimensions: DimensionCatalogue | None = None,
 ) -> str:
     """Render every message in every active, simulation-bounded conversation.
 
@@ -97,6 +99,10 @@ def format_conversation_histories(
     ``references.message_handle_positions``, so the renderer holds no ordering rule
     of its own: the numbering is the handle function's. Off, the rows are
     unannotated.
+
+    ``dimensions`` (the mind's dimension catalogue) puts each heard line's band
+    name beside its stored value, ``[<kind>: <Band> <value>]``. Absent, graded
+    declarations render as their bare kind, as before.
     """
     if not histories:
         return "No active conversation."
@@ -122,7 +128,7 @@ def format_conversation_histories(
             timestamp = f"[t={message.timestamp}] " if message.timestamp is not None else ""
             handle = handle_at.get((interaction_id, index))
             timestamp = f"[{handle}] {timestamp}" if handle else timestamp
-            markers = message.render_markers()
+            markers = message.render_markers(dimensions)
             suffix = f" {markers}" if markers else ""
             lines.append(f"{timestamp}{speaker}: {message.message}{suffix}")
     return "\n".join(lines)

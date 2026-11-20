@@ -3,7 +3,7 @@
 import logging
 import math
 from enum import StrEnum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import (
     AliasChoices,
@@ -16,6 +16,9 @@ from pydantic import (
 
 from mind.cognitive_architecture.references import WIRE_KEY_REFERS_TO, ParameterReference
 from mind.logging_config import get_logger
+
+if TYPE_CHECKING:
+    from mind.cognitive_architecture.dimension_catalogue import DimensionCatalogue
 
 logger = get_logger()
 
@@ -2241,8 +2244,13 @@ class ConversationMessage(BaseModel):
     addressee_ids: list[str] = Field(default_factory=list)
     utterance_element: str = ""
 
-    def render_markers(self) -> str:
+    def render_markers(self, dimensions: "DimensionCatalogue | None" = None) -> str:
         """Trailing ``[system] <greeting> [farewell]``-style markers, or "" when none.
+
+        With a dimension catalogue, a declaration of a graded dimension renders as
+        ``[<kind>: <Band> <value>]`` instead of its bare kind, so the reader sees
+        where the speaker's words sat. Without one (an older simulation, or a
+        caller with no catalogue) every declaration renders as its kind alone.
 
         The remark key renders in angle brackets, distinct from the square
         brackets of declarations, on every row that carries one -- the mind's
@@ -2256,6 +2264,10 @@ class ConversationMessage(BaseModel):
             markers.append(f"<{element}>")
         for declaration in self.declarations:
             if not isinstance(declaration, dict):
+                continue
+            graded = dimensions.marker_for(declaration) if dimensions is not None else None
+            if graded:
+                markers.append(graded)
                 continue
             kind = declaration.get("kind")
             if isinstance(kind, str) and kind.strip():

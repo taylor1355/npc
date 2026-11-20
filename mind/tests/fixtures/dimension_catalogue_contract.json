@@ -1,0 +1,81 @@
+{
+  "contract_version": 1,
+  "dimensions": [
+    {
+      "key": "cordiality",
+      "parameter": "cordiality",
+      "declaration_kind": "cordiality",
+      "declaration_field": "cordiality",
+      "about": "how you treat the listener",
+      "contrast": "Cordiality is not tone. Tone is how your words sound overall, your own mood included; cordiality is how you treat the listener. A sad, kind line has a negative tone and a positive cordiality.",
+      "low": -1.0,
+      "high": 1.0,
+      "bands": [
+        {
+          "name": "Hostile",
+          "low": -1.0,
+          "high": -0.75,
+          "meaning": "You dismiss or reject them",
+          "effect": "A slight, worse than ignoring them",
+          "landmarks": [
+            "I'm done talking to you.",
+            "Stay away from me."
+          ]
+        },
+        {
+          "name": "Rude",
+          "low": -0.75,
+          "high": -0.4,
+          "meaning": "You make it plain they are not welcome",
+          "effect": "A slight, up to about the size of ignoring them",
+          "landmarks": [
+            "You again.",
+            "What do you want?"
+          ]
+        },
+        {
+          "name": "Curt",
+          "low": -0.4,
+          "high": -0.1,
+          "meaning": "The bare minimum, or said with reluctance",
+          "effect": "Nothing. The reply may be cooler",
+          "landmarks": [
+            "Hm. Hello.",
+            "Oh. So it's you."
+          ]
+        },
+        {
+          "name": "Plain",
+          "low": -0.1,
+          "high": 0.1,
+          "meaning": "Said and nothing more",
+          "effect": "Nothing",
+          "landmarks": [
+            "Hello."
+          ]
+        },
+        {
+          "name": "Friendly",
+          "low": 0.1,
+          "high": 0.4,
+          "meaning": "Said with some colour",
+          "effect": "Nothing. The reply may be warmer",
+          "landmarks": [
+            "Hello there!"
+          ]
+        },
+        {
+          "name": "Warm",
+          "low": 0.4,
+          "high": 1.0,
+          "meaning": "You add welcome or gladness",
+          "effect": "A small kindness",
+          "landmarks": [
+            "Good to see you!",
+            "So glad I found you!"
+          ]
+        }
+      ]
+    }
+  ]
+}

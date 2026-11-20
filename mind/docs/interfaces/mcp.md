@@ -73,6 +73,32 @@ Creates a new mind instance. Takes `mind_id` (PK), `entity_id` (FK), and `MindCo
 - An unknown `contract_version`, or an empty `remarks` list, **degrades** to no catalogue with a warning. Any other malformation refuses `create_mind`. Rows use `extra="ignore"`, so new columns such as FS10b's stance `fields` are additive.
 - The catalogue is kept in the recorded config (`_config_to_record`), so a relinked mind validates against the grammar it was created with.
 
+#### `dimensions` (optional)
+
+`MindConfig.dimensions` carries the simulation's graded dimensions (NPC-2312): for each axis a line's words can sit on, the band table that says what each part of the scale means. An MCP mind writes its own words, so it must be told what its numbers mean and must say where each line sits. It rides `create_mind` once because it is stable world vocabulary. The simulation builds it from its compiled band table and omits it when it has none, so an older simulation still works. The committed payload fixture the simulation's contract test pins against is `tests/fixtures/dimension_catalogue_contract.json`.
+
+```json
+{"contract_version": 1,
+ "dimensions": [{
+   "key": "<dimension>", "parameter": "<act parameter and structured-output field>",
+   "declaration_kind": "<kind key on a heard declaration>",
+   "declaration_field": "<key inside that declaration holding the number>",
+   "about": "<one line>", "contrast": "<how it differs from the neighbouring axis>",
+   "low": -1.0, "high": 1.0,
+   "bands": [{"name": "...", "low": -1.0, "high": -0.75, "meaning": "...",
+              "effect": "...", "landmarks": ["<example line>"]}]}]}
+```
+
+- **Bands tile the range.** The first band starts at `low`, the last ends at `high`, and each band's `low` is the previous band's `high`. A band owns `low <= value < high`; the last also owns `high`. A gap, an overlap, a repeated band name, a repeated `key` / `parameter` / `declaration_kind`, or a band that is not a stretch refuses `create_mind`.
+- An unknown `contract_version`, or an empty `dimensions` list, **degrades** to no catalogue with a warning. Rows use `extra="ignore"`, so new columns are additive.
+- The catalogue is kept in the recorded config, so a relinked mind keeps the same requirement.
+
+**What it changes.**
+
+- **The turn.** While a catalogue is present and the current interaction advertises a dimension's `parameter` in `act_in_interaction_parameters`, every `act_in_interaction` turn must set that parameter to a JSON number inside `[low, high]`. A missing or null value, a non-number (a numeric string, a boolean, NaN, infinity) and an out-of-range number each fail `Action` validation with a `DimensionValueError` naming the parameter and the range. Nothing is clamped, coerced or read as 0; a sent `0` is a real value. The reflection node's retry loop re-asks, and the error text is recorded in `PipelineState.validation_failures`. With no catalogue the server adds nothing to the simulation's own spec (a spec flagged `required` is still enforced, see `required` on act-parameter specs below).
+- **The prompt.** The calibration (range, meaning, how the axis differs from its neighbour, each band with its effect and landmark lines, and how to read a heard line) renders into the dynamic section under "How Your Words Are Weighed", only while a turn that owes the value is possible. The static prefix is unchanged, so the provider cache is unaffected.
+- **Heard lines.** A heard message whose serialized `declarations` hold an entry of `declaration_kind` shows `[<kind>: <Band> <value>]` in the conversation transcript, from the entry's `declaration_field`. A heard line with no such entry was said at 0, which the prompt states by band name. A stored value the catalogue cannot place falls back to the bare `[<kind>]` marker with a warning.
+
 #### `refers_to` on act-parameter specs (optional)
 
 An act parameter that names something by id (a message, a place) says so on its own spec in `act_in_interaction_parameters`, with an optional key beside `type` / `default` / `description` (NPC-2021):

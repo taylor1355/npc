@@ -292,7 +292,9 @@ class MCPServer:
         RETAINED for the same reason as traits: a relinked mind must name remarks
         against the grammar it was created with, or its conversational turns would
         silently stop being validated (NPC-1916). It is world-sized, not
-        client-prose-sized: one short row per wire remark.
+        client-prose-sized: one short row per wire remark. dimensions is RETAINED
+        for the same reason (NPC-2312): a relinked mind must keep refusing a turn that
+        omits its graded values, and keep showing band names on heard lines.
 
         initial_working_memory is different: Mind.reattach DOES read it (the
         `config.initial_working_memory or WorkingMemory()` line in mind.py), and there is

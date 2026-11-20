@@ -234,6 +234,7 @@ class Action(BaseModel):
         elif self.action == ActionType.ACT_IN_INTERACTION:
             self._validate_act_in_interaction(observation)
             self._validate_remark(state, observation, getattr(state, "remark_catalogue", None))
+            self._validate_dimensions(observation, getattr(state, "dimensions", None))
             self._validate_references(state)
         elif self.action == ActionType.MARK_ZONE:
             self._validate_mark_zone()
@@ -633,6 +634,22 @@ class Action(BaseModel):
             return
         catalogue.check_turn(self.parameters)
         self._check_reply_addressee(state, catalogue)
+
+    def _validate_dimensions(self, observation, dimensions):
+        """Require every graded dimension the interaction advertises (NPC-2312).
+
+        Applies only when the mind holds a dimension catalogue AND the current
+        interaction advertises a dimension's parameter, so whether an interaction
+        grades its lines is read off its own schema and none is named here.
+        Without a catalogue (an older simulation) nothing is added to what the
+        simulation's own spec enforces. A missing value is refused, never read
+        as 0; an out-of-range or non-numeric one is refused, never clamped. The
+        rule lives on the catalogue, which owns the vocabulary this module must
+        not name.
+        """
+        if dimensions is None:
+            return
+        dimensions.check_turn(self.parameters, observation.status.act_parameter_hints())
 
     def _check_reply_addressee(self, state, catalogue):
         """A reply remark must be addressed to the replied-to message's speaker, alone.
