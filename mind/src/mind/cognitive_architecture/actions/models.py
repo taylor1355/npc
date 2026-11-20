@@ -638,14 +638,7 @@ class Action(BaseModel):
     def _validate_dimensions(self, observation, dimensions):
         """Require every graded dimension the interaction advertises (NPC-2312).
 
-        Applies only when the mind holds a dimension catalogue AND the current
-        interaction advertises a dimension's parameter, so whether an interaction
-        grades its lines is read off its own schema and none is named here.
-        Without a catalogue (an older simulation) nothing is added to what the
-        simulation's own spec enforces. A missing value is refused, never read
-        as 0; an out-of-range or non-numeric one is refused, never clamped. The
-        rule lives on the catalogue, which owns the vocabulary this module must
-        not name.
+        The rule (refuse, never clamp or coerce) lives on the catalogue.
         """
         if dimensions is None:
             return

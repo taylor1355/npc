@@ -203,7 +203,10 @@ class Dimension(BaseModel):
             f"A heard line marked [{self.declaration_kind}: Band value] was said at that value."
         )
         if self.contains(0.0):
-            reading += f" A line with no such marker was said at 0 ({self.band_for(0.0).name})."
+            reading += (
+                f" A line with no such marker was said at 0 ({self.band_for(0.0).name});"
+                " a bare marker with no band means its value could not be read."
+            )
         lines.append(reading)
         return lines
 
