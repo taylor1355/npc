@@ -71,6 +71,23 @@ def _format_remark_catalogue(state: PipelineState) -> str:
     return "\n\n### Remarks You Can Name\n" + catalogue.prompt_block()
 
 
+def _format_dimension_calibration(state: PipelineState) -> str:
+    """The "How Your Words Are Weighed" block, or "" when no dimension applies.
+
+    Shown under the same condition Action validation REQUIRES the dimension
+    parameter -- a catalogue, a live interaction, and an interaction advertising
+    the parameter -- so the calibration is in front of the model exactly when a
+    value is owed (NPC-2312). The catalogue renders the text; it owns the
+    vocabulary.
+    """
+    dimensions = state.dimensions
+    observation = state.observation
+    if dimensions is None or observation is None or not observation.is_interacting():
+        return ""
+    block = dimensions.prompt_block(observation.status.act_parameter_hints())
+    return "\n\n### How Your Words Are Weighed\n" + block if block else ""
+
+
 class ReflectionNode(LLMNode):
     """Updates cognitive state and selects an action in a single call.
 
@@ -169,10 +186,12 @@ class ReflectionNode(LLMNode):
                     # The handles the validator and the wire translation resolve
                     # against, derived from the same snapshot (NPC-2021).
                     annotate_handles=True,
+                    dimensions=state.dimensions,
                 ),
                 terseness_instruction=terseness_text,
                 # Dynamic suffix only; "" outside a remark-speaking interaction.
                 remark_catalogue=_format_remark_catalogue(state),
+                dimension_calibration=_format_dimension_calibration(state),
                 substrate_goal=format_substrate_goal(goal_obs),
                 goal_options=format_goal_options(goal_obs),
                 retrieved_memories=memories_text,

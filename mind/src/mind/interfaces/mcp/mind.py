@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Self
 
 from mind.apis.langchain_llm import get_llm
+from mind.cognitive_architecture.dimension_catalogue import DimensionCatalogue
 from mind.cognitive_architecture.memory.vector_db_memory import VectorDBMemory
 from mind.cognitive_architecture.observations import (
     ConversationMessage,
@@ -45,6 +46,8 @@ class Mind:
     personality_dimensions: dict[str, float] = field(default_factory=dict)
     # From the creating config (NPC-1916); copied into every PipelineState.
     remark_catalogue: RemarkCatalogue | None = None
+    # From the creating config (NPC-2312); copied into every PipelineState.
+    dimensions: DimensionCatalogue | None = None
     # FormedMemory: each entry carries the place and cell it was formed at, so
     # consolidation never has to guess them from whatever observation it runs
     # under (NPC-1476).
@@ -123,6 +126,7 @@ class Mind:
             traits=config.traits,
             personality_dimensions=config.personality_dimensions,
             remark_catalogue=config.remark_catalogue,
+            dimensions=config.dimensions,
             pipeline=pipeline,
             memory_store=memory_store,
             working_memory=working_memory,
@@ -178,6 +182,7 @@ class Mind:
             traits=config.traits,
             personality_dimensions=config.personality_dimensions,
             remark_catalogue=config.remark_catalogue,
+            dimensions=config.dimensions,
             pipeline=pipeline,
             memory_store=memory_store,
             working_memory=working_memory,
@@ -338,6 +343,7 @@ class Mind:
             personality_traits=self.traits,
             personality_dimensions=self.personality_dimensions,
             remark_catalogue=self.remark_catalogue,
+            dimensions=self.dimensions,
             conversation_histories={
                 interaction_id: list(messages)
                 for interaction_id, messages in self.conversation_histories.items()

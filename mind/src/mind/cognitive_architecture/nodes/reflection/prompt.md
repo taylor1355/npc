@@ -125,7 +125,7 @@ Produce the fields in the order given: the working-memory update first, then new
 {interaction_status}
 
 ### Active Conversation Transcript
-{conversation_histories}{terseness_instruction}{remark_catalogue}
+{conversation_histories}{terseness_instruction}{remark_catalogue}{dimension_calibration}
 
 ### Subconscious Pull
 {substrate_goal}

@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from .actions import Action, AvailableAction
+from .dimension_catalogue import DimensionCatalogue
 from .memory import Memory
 from .observations import ConversationMessage, ConversationPartner, MindEvent, Observation
 from .place_query import PlaceQueryRequest
@@ -91,6 +92,12 @@ class PipelineState(BaseModel):
     # conversational act_in_interaction must name an agreeing remark (validated
     # in Action._validate_act_in_interaction). None: the key is optional.
     remark_catalogue: RemarkCatalogue | None = None
+    # The mind's dimension catalogue from create_mind (NPC-2312). Present: every
+    # conversational act_in_interaction must set each dimension parameter the
+    # interaction advertises, to a number inside its range (validated in
+    # Action._validate_dimensions), and heard lines show their band. None: the
+    # parameters stay as optional as the simulation declares them.
+    dimensions: DimensionCatalogue | None = None
 
     # Working state
     working_memory: WorkingMemory = Field(default_factory=WorkingMemory)
