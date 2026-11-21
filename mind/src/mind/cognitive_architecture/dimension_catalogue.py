@@ -23,9 +23,8 @@ Three jobs, each derived from the rows:
   to be a real number inside the range. A missing value is refused, never read as
   0, and an out-of-range value is refused, never clamped.
 
-An edge shared by two bands belongs to the band nearer zero (so -0.4 is the colder
-band's upper neighbour and +0.4 the warmer band's lower neighbour), and the range's
-own ends belong to the end bands, so every value falls in exactly one band.
+An edge shared by two bands belongs to the band nearer zero, and the range's own
+ends belong to the end bands, so every value falls in exactly one band.
 """
 
 from __future__ import annotations
