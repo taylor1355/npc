@@ -23,8 +23,9 @@ Three jobs, each derived from the rows:
   to be a real number inside the range. A missing value is refused, never read as
   0, and an out-of-range value is refused, never clamped.
 
-A band owns ``low <= value < high``; the last band also owns the top edge, so
-every value in the range falls in exactly one band.
+An edge shared by two bands belongs to the band nearer zero (so -0.4 is the colder
+band's upper neighbour and +0.4 the warmer band's lower neighbour), and the range's
+own ends belong to the end bands, so every value falls in exactly one band.
 """
 
 from __future__ import annotations
@@ -157,10 +158,14 @@ class Dimension(BaseModel):
         """The band owning ``value``. Raises ``ValueError`` outside the range."""
         if not self.contains(value):
             raise ValueError(f"{value} is outside {self.key}'s range")
+        # An edge shared by two bands belongs to the band nearer zero, matching the sim's
+        # consequence curves, which start strictly beyond an edge (NPC-2312).
         for band in self.bands:
-            if value < band.high:
+            if value < 0.0 and band.low <= value < band.high:
                 return band
-        return self.bands[-1]
+            if value >= 0.0 and band.low < value <= band.high:
+                return band
+        return self.bands[0] if value <= self.low else self.bands[-1]
 
     def range_text(self) -> str:
         return _range_text(self.low, self.high)

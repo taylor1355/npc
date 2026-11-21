@@ -176,18 +176,33 @@ class TestModel:
 
 
 class TestBandLookup:
-    def test_every_band_owns_its_lower_edge_and_the_last_owns_the_top(self):
-        dimension = _first()
-
-        for band in dimension.bands:
-            assert dimension.band_for(band.low) is band
-        assert dimension.band_for(dimension.high) is dimension.bands[-1]
-
-    def test_a_value_just_under_an_inner_edge_is_in_the_band_below(self):
+    def test_a_shared_edge_belongs_to_the_band_nearer_zero(self):
         dimension = _first()
 
         for below, above in zip(dimension.bands, dimension.bands[1:], strict=False):
-            assert dimension.band_for(above.low - 1e-6) is below
+            edge = above.low
+            nearer_zero = below if edge > 0 else above
+            assert dimension.band_for(edge) is nearer_zero
+
+    def test_the_range_ends_belong_to_the_end_bands(self):
+        dimension = _first()
+
+        assert dimension.band_for(dimension.low) is dimension.bands[0]
+        assert dimension.band_for(dimension.high) is dimension.bands[-1]
+
+    def test_a_value_strictly_inside_a_band_is_in_that_band(self):
+        dimension = _first()
+
+        for band in dimension.bands:
+            assert dimension.band_for((band.low + band.high) / 2) is band
+
+    def test_the_contract_edges_fall_as_the_sim_curves_expect(self):
+        dimension = _first()
+
+        assert dimension.band_for(-0.4).name == "Curt"
+        assert dimension.band_for(0.4).name == "Friendly"
+        assert dimension.band_for(-0.4001).name == "Rude"
+        assert dimension.band_for(0.4001).name == "Warm"
 
     def test_outside_the_range_raises(self):
         dimension = _first()

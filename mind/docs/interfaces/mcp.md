@@ -89,7 +89,7 @@ Creates a new mind instance. Takes `mind_id` (PK), `entity_id` (FK), and `MindCo
               "effect": "...", "landmarks": ["<example line>"]}]}]}
 ```
 
-- **Bands tile the range.** The first band starts at `low`, the last ends at `high`, and each band's `low` is the previous band's `high`. A band owns `low <= value < high`; the last also owns `high`. A gap, an overlap, a repeated band name, a repeated `key` / `parameter` / `declaration_kind`, or a band that is not a stretch refuses `create_mind`.
+- **Bands tile the range.** The first band starts at `low`, the last ends at `high`, and each band's `low` is the previous band's `high`. An edge shared by two bands belongs to the band nearer zero, and the range's own ends belong to the end bands. A gap, an overlap, a repeated band name, a repeated `key` / `parameter` / `declaration_kind`, or a band that is not a stretch refuses `create_mind`.
 - An unknown `contract_version`, or an empty `dimensions` list, **degrades** to no catalogue with a warning. Rows use `extra="ignore"`, so new columns are additive.
 - The catalogue is kept in the recorded config, so a relinked mind keeps the same requirement.
 
