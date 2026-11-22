@@ -199,3 +199,19 @@ class RemarkElementError(ActionValidationError):
         self.problem = problem
         self.valid_keys = valid_keys
         super().__init__(f"Remark mismatch: {problem}. {valid_keys}")
+
+
+class DimensionValueError(ActionValidationError):
+    """A conversational turn's graded dimension value is missing or unusable.
+
+    Raised only while a dimension catalogue is present and the interaction
+    advertises the dimension's parameter. The value is never clamped and never
+    read as 0: the message names the parameter and the range so the reflection
+    node's retry re-asks with the fix in hand.
+    """
+
+    def __init__(self, parameter: str, problem: str, guidance: str):
+        self.parameter = parameter
+        self.problem = problem
+        self.guidance = guidance
+        super().__init__(f"Dimension value: '{parameter}' {problem}. {guidance}")

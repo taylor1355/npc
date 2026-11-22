@@ -36,6 +36,7 @@ DYNAMIC_VARIABLES = {
     "conversation_histories",
     "terseness_instruction",
     "remark_catalogue",
+    "dimension_calibration",
     "observation_text",
     "available_actions",
 }

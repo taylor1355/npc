@@ -234,6 +234,7 @@ class Action(BaseModel):
         elif self.action == ActionType.ACT_IN_INTERACTION:
             self._validate_act_in_interaction(observation)
             self._validate_remark(state, observation, getattr(state, "remark_catalogue", None))
+            self._validate_dimensions(observation, getattr(state, "dimensions", None))
             self._validate_references(state)
         elif self.action == ActionType.MARK_ZONE:
             self._validate_mark_zone()
@@ -633,6 +634,15 @@ class Action(BaseModel):
             return
         catalogue.check_turn(self.parameters)
         self._check_reply_addressee(state, catalogue)
+
+    def _validate_dimensions(self, observation, dimensions):
+        """Require every graded dimension the interaction advertises (NPC-2312).
+
+        The rule (refuse, never clamp or coerce) lives on the catalogue.
+        """
+        if dimensions is None:
+            return
+        dimensions.check_turn(self.parameters, observation.status.act_parameter_hints())
 
     def _check_reply_addressee(self, state, catalogue):
         """A reply remark must be addressed to the replied-to message's speaker, alone.

@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field, field_validator
 
 from mind.apis.langchain_llm import LangChainModel
+from mind.cognitive_architecture.dimension_catalogue import DimensionCatalogue
 from mind.cognitive_architecture.memory.retrieval import RetrievalWeights
 from mind.cognitive_architecture.remark_catalogue import RemarkCatalogue
 from mind.cognitive_architecture.state import PipelineState, StepTokenUsage
@@ -68,6 +69,19 @@ class MindConfig(BaseModel):
     @classmethod
     def _degrade_unknown_catalogue(cls, value):
         return RemarkCatalogue.parse_or_degrade(value)
+
+    # The simulation's graded dimensions (NPC-2312): the band table of each, so
+    # a mind that writes its own words knows what its numbers mean. Stable world
+    # vocabulary, so it rides create_mind once. Absent for an older simulation;
+    # then the parameter is only as binding as the simulation's own spec says. An
+    # unknown contract_version degrades to None with a warning (see
+    # DimensionCatalogue.parse_or_degrade); a malformed table refuses create_mind.
+    dimensions: DimensionCatalogue | None = None
+
+    @field_validator("dimensions", mode="before")
+    @classmethod
+    def _degrade_unknown_dimensions(cls, value):
+        return DimensionCatalogue.parse_or_degrade(value)
 
 
 # === Protocol: Simulation → Mind ===
