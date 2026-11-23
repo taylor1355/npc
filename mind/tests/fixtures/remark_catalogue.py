@@ -4,8 +4,10 @@
 is specified to emit (NPC-1916 plan section 2.1) over the shipped grammar at game
 commit ``4e38abc0f``: the wire remarks of ``resources/grammar/grammar.tres``
 (provisional ``response.*`` children excluded), sorted by key, each gloss its
-primary gloss with ``{slot}`` placeholders, ``declare_with`` the declaring kind's
-``parameter_specs()`` keys in declaration order. It was transcribed by hand from
+primary gloss with ``{slot}`` placeholders, ``declare_with`` the parameters the
+declaring kind requires for that remark's fixed ``fields``
+(``declaration_kind.gd::wire_parameters_for``), so two remarks of one kind can
+differ: the place ``ask_who_told`` omits the facet a skill ask carries. It was transcribed by hand from
 that commit because the builder lands in the game repository after this one
 (Decision 6); re-derive it from the builder's output once it exists.
 
