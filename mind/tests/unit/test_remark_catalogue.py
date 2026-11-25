@@ -65,7 +65,7 @@ class TestCatalogueContractLiteral:
     def test_wire_remarks_sorted_by_key_and_unique(self):
         keys = [row["key"] for row in wire_catalogue()["remarks"]]
 
-        assert len(keys) == 33
+        assert len(keys) == 36
         assert keys == sorted(keys)
         assert len(set(keys)) == len(keys)
 
@@ -247,9 +247,13 @@ def _act(parameters: dict, state) -> Action:
 
 
 def _stance():
-    """A remark that fixes a field and names the message it replies to."""
+    """A remark that fixes a field and names the message it replies to.
+
+    Fixing a field does not make a remark a reply: ``ask_who_told`` fixes the told
+    kind it asks about and replies to nothing, so the pick requires a reply parameter.
+    """
     parsed = catalogue()
-    remark = next(r for r in parsed.remarks if r.fields)
+    remark = next(r for r in parsed.remarks if r.fields and parsed.reply_parameter(r))
     return remark, parsed.reply_parameter(remark)
 
 

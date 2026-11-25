@@ -46,6 +46,28 @@
       "fields": {}
     },
     {
+      "key": "answer_who_told.skill_no_record",
+      "gloss": "I don't know anything about their work.",
+      "declares": "answer",
+      "declare_with": [
+        "is_answer",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {}
+    },
+    {
+      "key": "answer_who_told.skill_own",
+      "gloss": "Nobody - I saw them at work myself.",
+      "declares": "answer",
+      "declare_with": [
+        "is_answer",
+        "in_reply_to"
+      ],
+      "slots": [],
+      "fields": {}
+    },
+    {
       "key": "answer_who_told.told",
       "gloss": "{teller} told me.",
       "declares": "answer",
@@ -134,7 +156,26 @@
       "slots": [
         "zone"
       ],
-      "fields": {}
+      "fields": {
+        "ask_who_told_kind": "place_knowledge"
+      }
+    },
+    {
+      "key": "ask_who_told.skill",
+      "gloss": "Who told you {person} was any good at {skill}?",
+      "declares": "ask_who_told",
+      "declare_with": [
+        "ask_who_told_kind",
+        "ask_who_told_subject_id",
+        "ask_who_told_facet"
+      ],
+      "slots": [
+        "person",
+        "skill"
+      ],
+      "fields": {
+        "ask_who_told_kind": "skill_heard"
+      }
     },
     {
       "key": "correction.firsthand",

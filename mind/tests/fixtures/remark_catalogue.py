@@ -1,13 +1,16 @@
 """The simulation's remark catalogue and a remark-speaking conversation, as data.
 
-``remark_catalogue_4e38abc0f.json`` is the catalogue ``remark_catalogue.gd::build``
-is specified to emit (NPC-1916 plan section 2.1) over the shipped grammar at game
-commit ``4e38abc0f``: the wire remarks of ``resources/grammar/grammar.tres``
-(provisional ``response.*`` children excluded), sorted by key, each gloss its
-primary gloss with ``{slot}`` placeholders, ``declare_with`` the declaring kind's
-``parameter_specs()`` keys in declaration order. It was transcribed by hand from
-that commit because the builder lands in the game repository after this one
-(Decision 6); re-derive it from the builder's output once it exists.
+``remark_catalogue_4e38abc0f.json`` is a copy of the game's
+``test/fixtures/remark_catalogue/mind_remark_catalogue_4e38abc0f.json``, which the
+game's contract test holds equal to ``remark_catalogue.gd::build`` over its shipped
+grammar. The file name keeps the game commit (``4e38abc0f``) it was first
+transcribed at; the rows follow the game's current builder. Each row is a wire
+remark of ``resources/grammar/grammar.tres`` (provisional ``response.*`` children
+excluded), sorted by key, with its primary gloss carrying ``{slot}`` placeholders.
+``declare_with`` holds the parameters the declaring kind requires for that remark's
+fixed ``fields`` (``declaration_kind.gd::wire_parameters_for``), so two remarks of
+one kind can differ: the place ``ask_who_told`` omits the facet a skill ask carries.
+When the game's copy changes, copy it here.
 
 Remark keys appear here and nowhere in ``src/`` -- this is data, the role the
 simulation plays in production.
